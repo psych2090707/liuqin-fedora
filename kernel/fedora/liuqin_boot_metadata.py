@@ -275,7 +275,7 @@ def _canonical_v2(raw: dict) -> dict:
             "schema v2 alias mismatch: bootimg_sha256 != artifact_sha256")
     if raw["contract_pins_kernel_identity"] is not False:
         raise MetadataError(
-            "contract_pins_kernel_identity must be false (P0-1: the root admission "
+            "contract_pins_kernel_identity must be false (kernel-identity invariant: the root admission "
             "contract must not pin the kernel identity)")
     payload = raw["payload"]
     if not isinstance(payload, dict):

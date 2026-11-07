@@ -125,7 +125,7 @@ check('LID_ACTION=suspend keeps its suspend/wake behaviour',
       policy.lid_changed(True, T) == ['suspend']
       and policy.lid_changed(False, T + 1) == ['ensure-on'])
 
-# Phase 2: LID_RESUSPEND must also work for LID_ACTION=suspend, and a resume
+# bring-up: LID_RESUSPEND must also work for LID_ACTION=suspend, and a resume
 # with the lid closed must protect the display even when the action is suspend.
 policy = Policy(T, 'suspend', True)
 policy.initial(False, True, T)

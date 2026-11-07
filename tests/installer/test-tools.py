@@ -5,7 +5,7 @@
 Covers build-runtime.py --verify, assemble-installer.py (contract v2 embedding
 and validation), the shell syntax of every shipped script and the fake-fastboot
 simulator itself.  The two duplicate v1 entry points (installer/make-bundle.py,
-installer/make-root-contract.py) were removed under ADR-0004 D1: bundle.json is
+installer/make-root-contract.py) were removed under single-producer rule: bundle.json is
 produced only by scripts/build-image.sh and the admission contract only by
 tools/build-root-contract.py, both exercised against real products by
 tests/installer/install-simulation.sh.

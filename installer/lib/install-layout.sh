@@ -161,7 +161,7 @@ geometry)
 backup-gpt)
 	# Both GPT copies of the disk: the protective MBR, primary header and
 	# primary entry array at the head, the entry array and backup header at
-	# the tail.  Six sectors each, as dumped by the P0 inventory.  The copy is
+	# the tail.  Six sectors each, as dumped by the partition inventory.  The copy is
 	# read into a file and its length checked before it is encoded, so a short
 	# read cannot become a backup that only looks complete.
 	[ "$#" = 2 ] || die 'usage: backup-gpt PARTNAME head|tail'

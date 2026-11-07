@@ -538,7 +538,7 @@ def _check_write_permission() -> None:
     if os.environ.get("LIUQIN_EXPERIMENTAL_DEVICE_WRITE") != "1":
         raise Refused(
             "restore is gated: arm with LIUQIN_EXPERIMENTAL_DEVICE_WRITE=1 after "
-            "Phase 6 device authorization")
+            "explicit device authorization")
 
 
 def cmd_restore(args) -> int:

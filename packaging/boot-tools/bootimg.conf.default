@@ -10,7 +10,7 @@
 # The chain NEVER writes the boot partition and NEVER calls qbootctl/fastboot.
 # Applying a staged image is explicit:
 #   liuqin-apply-boot --image /boot/liuqin/boot-<kver>.img          # dry-run
-#   liuqin-apply-boot --image ... --yes-write                      # Phase 6 gate
+#   liuqin-apply-boot --image ... --yes-write                      # attended device write gate
 #
 # If any asset below is missing, the kernel-install hook fails closed (exit 1,
 # old /boot/liuqin image kept) and prints the missing path. Re-run asset staging
@@ -24,7 +24,7 @@ LIUQIN_BOOT_ASSETS_DIR=/usr/libexec/liuqin/boot-assets
 LIUQIN_BOOTIMG_REFRESH=/usr/libexec/liuqin/liuqin-bootimg-refresh
 
 # --- inputs for the root admission contract --------------------------------
-# rootfs builder must install this hash manifest (task-14 interface).
+# rootfs builder must install this hash manifest (the image assembly interface).
 LIUQIN_ROOTFS_MANIFEST=/usr/share/liuqin/rootfs.files.sha256
 # Desktop topology used when the contract is regenerated from that manifest.
 # The image is GNOME-only after the KDE removal; `kde` would fail admission.

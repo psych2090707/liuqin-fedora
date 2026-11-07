@@ -890,12 +890,19 @@ class StaticIntegrationTests(unittest.TestCase):
             self.assertIn(packaged, script)
 
     def test_docs_state_the_rollback_boundary(self):
-        doc_path = PROJECT / "docs/maintenance/boot-update.md"
-        if not doc_path.is_file():
-            self.skipTest("maintainer documentation is not present in this source tree")
-        doc = doc_path.read_text()
-        self.assertIn("boot.img 恢复 ≠ 完整系统回滚", doc)
-        self.assertIn("schema v2", doc)
+        # The public install guide must always carry the recovery boundary.
+        template = PROJECT / "packaging/release/public/INSTALL.md.in"
+        self.assertTrue(template.is_file(), "release INSTALL template is required")
+        self.assertIn("不等于完整系统回滚", template.read_text())
+        rendered = PROJECT / "INSTALL.md"
+        if rendered.is_file():
+            self.assertIn("不等于完整系统回滚", rendered.read_text())
+        # The full development tree keeps the detailed schema contract too.
+        private = PROJECT / "docs/maintenance/boot-update.md"
+        if private.is_file():
+            doc = private.read_text()
+            self.assertIn("boot.img 恢复 ≠ 完整系统回滚", doc)
+            self.assertIn("schema v2", doc)
 
 
 if __name__ == "__main__":

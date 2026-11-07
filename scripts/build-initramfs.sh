@@ -295,13 +295,13 @@ if [ -n "$installer_overlay" ]; then
 		die_usage "installer overlay has no installer-image.json: $installer_overlay (run installer/assemble-installer.py)"
 	[ -z "$rootfs_manifest" ] ||
 		die_usage "--installer-overlay takes --contract FILE, not --rootfs-manifest"
-	# ADR-0004 D4: the RAM installer must carry the Fedora admission contract v2
+	# flat install contract: the RAM installer must carry the Fedora admission contract v2
 	# so it can validate the extracted root with the same topology predicate the
 	# boot path uses.  Refusing without one is the fail-closed default.
 	[ -n "$contract" ] ||
-		die_usage "installer.img must embed the Fedora admission contract: pass --contract (ADR-0004 D4)"
+		die_usage "installer.img must embed the Fedora admission contract: pass --contract (flat install contract)"
 	[ -n "$privileges" ] ||
-		die_usage "installer.img must embed the rootfs-derived privileged-file expectations: pass --privileges (ADR-0004 D3/D4)"
+		die_usage "installer.img must embed the rootfs-derived privileged-file expectations: pass --privileges (privileged-file and flat install contracts)"
 elif [ -n "$privileges" ]; then
 	die_usage "--privileges is only embedded in --installer-overlay mode"
 fi
@@ -374,7 +374,7 @@ else
 fi
 
 # Contract v2 preparation: one generated/validated contract for BOTH the
-# persistent boot image and the RAM installer (ADR-0004 D1/D4).  It is a
+# persistent boot image and the RAM installer (single-producer and flat install rules).  It is a
 # topology contract -- no content pins of dnf-owned or user-editable files.
 if [ -n "$rootfs_manifest" ] && [ -n "$contract" ]; then
 	die "use --rootfs-manifest OR --contract, not both"
@@ -385,7 +385,7 @@ if [ -n "$rootfs_manifest" ]; then
 	set -- python3 "$project_root/tools/build-root-contract.py" \
 		--manifest "$rootfs_manifest" --desktop "$desktop" --output "$contract_out"
 	[ -z "$extra_pins_file" ] ||
-		die_usage "--extra-pins-file is a v1 concept; contract v2 has no content pins (ADR-0004 D2)"
+		die_usage "--extra-pins-file is a v1 concept; contract v2 has no content pins (topology contract)"
 	[ "$allow_missing_pins" = 0 ] || set -- "$@" --allow-missing-pins
 	"$@" || die "contract generation failed"
 	contract_source=$rootfs_manifest
@@ -514,10 +514,10 @@ if [ -n "$installer_overlay" ]; then
 		usr/lib/liuqin/install-privileges.sh usr/lib/liuqin/provision.sh; do
 		[ -e "$staging/$required" ] || die "installer overlay lacks $required"
 	done
-	# ADR-0004 D4: installer.img carries contract v2 so install-root.sh can run
+	# flat install contract: installer.img carries contract v2 so install-root.sh can run
 	# the same topology admission the boot path runs, before and after writing.
 	install -m 0644 "$contract_out" "$staging/etc/liuqin-fedora-root.contract"
-	# ADR-0004 D3/D4 (P0 fix): the rootfs-derived privileged-file expectations,
+	# privileged-file and flat install contracts : the rootfs-derived privileged-file expectations,
 	# so install-root.sh proves tar preserved real setuid/setgid modes and
 	# security.capability xattrs instead of guessing (no hardcoded ping cap).
 	install -m 0644 "$privileges" "$staging/etc/liuqin-installer-privileges"
@@ -828,14 +828,14 @@ if [ -n "$installer_overlay" ]; then
 	[ "$(cat "$verify_dir/etc/liuqin-storage-mode")" = readonly ] || die "unpacked installer storage-mode is not readonly"
 	[ "$(cat "$verify_dir/etc/liuqin-installer")" = liuqin ] || die "unpacked installer marker is wrong"
 	[ -f "$verify_dir/etc/liuqin-fedora-root.contract" ] ||
-		die "installer ramdisk does not carry the Fedora admission contract (ADR-0004 D4)"
+		die "installer ramdisk does not carry the Fedora admission contract (flat install contract)"
 	[ "$(head -n 1 "$verify_dir/etc/liuqin-fedora-root.contract")" = \
 		LIUQIN_FEDORA_ROOT_CONTRACT_V2 ] ||
 		die "installer ramdisk contract header is not LIUQIN_FEDORA_ROOT_CONTRACT_V2"
 	cmp -s "$verify_dir/etc/liuqin-fedora-root.contract" "$contract_out" ||
 		die "installer ramdisk contract differs from the generated contract"
 	[ -f "$verify_dir/etc/liuqin-installer-privileges" ] ||
-		die "installer ramdisk does not carry the privileged-file expectations (ADR-0004 D3/D4)"
+		die "installer ramdisk does not carry the privileged-file expectations (privileged-file and flat install contracts)"
 	cmp -s "$verify_dir/etc/liuqin-installer-privileges" "$privileges" ||
 		die "installer ramdisk privileged-file expectations differ from the generated list"
 	[ -f "$verify_dir/usr/lib/liuqin/install-privileges.sh" ] ||

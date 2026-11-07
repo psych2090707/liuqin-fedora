@@ -19,7 +19,7 @@
 +# Summary:
 +#   * new root profile "fedora" (marker /etc/liuqin-fedora-root, contract
 +#     /etc/liuqin-fedora-root.contract, header LIUQIN_FEDORA_ROOT_CONTRACT_V2,
-+#     ADR-0004 D2).  The contract is a *topology* list, not a content-hash pin
++#     topology contract).  The contract is a *topology* list, not a content-hash pin
 +#     list: device/partition identity stays here in the reboot-safe gate, while
 +#     dnf-owned and user-editable files are never hashed at boot (a normal
 +#     `dnf upgrade` or hostname change must not force the rescue shell).  The
@@ -35,7 +35,7 @@
 +#     compared with /proc/sys/kernel/osrelease and a mismatch only logs, because
 +#     a dnf kernel update legitimately installs the new identity before the new
 +#     boot.img is applied; the strict check belongs to the update/apply tools
-+#     (ADR-0004 D5);
++#     (metadata contract);
 +#   * pre-switch_root daemon cleanup no longer requires a BusyBox inside the
 +#     real root (Fedora does not ship one at /usr/local/bin/busybox).
 +# The gnome/native/legacy profiles are left as upstream so the fork does not
@@ -44,7 +44,28 @@
  
  # All storage admission decisions are made through this pinned, statically
  # linked BusyBox.  Do not rely on PATH here: the persistent root is mutable
-@@ -71,11 +110,15 @@
+@@ -25,8 +64,18 @@
+ 		echo "liuqin-initramfs: $*" >>"$LIUQIN_INIT_TEST_LOG" 2>/dev/null || true
+ 		return 0
+ 	fi
+-	echo "liuqin-initramfs: $*" >/dev/console 2>/dev/null || true
+-	echo "liuqin-initramfs: $*" >/dev/kmsg 2>/dev/null || true
++	# FEDORA: graphical daily boot keeps the same messages in kmsg/journal,
++	# without feeding the VT's text buffer underneath Plymouth.
++	if [ "${fedora_quiet_boot:-false}" != true ]; then
++		echo "liuqin-initramfs: $*" >/dev/console 2>/dev/null || true
++	fi
++	if [ -e /dev/kmsg ]; then
++		echo "liuqin-initramfs: $*" >/dev/kmsg 2>/dev/null || true
++	elif [ -n "${storage_newroot:-}" ] && [ -e "$storage_newroot/dev/kmsg" ]; then
++		# /dev moves before the final storage gate and splash handoff. Keep
++		# their failure/identity messages observable until PID 1 switches root.
++		echo "liuqin-initramfs: $*" >"$storage_newroot/dev/kmsg" 2>/dev/null || true
++	fi
+ }
+ 
+ # The normal development image remains fail-closed and RAM-only.  A separately
+@@ -71,11 +120,15 @@
  		case $("$BB" sha256sum "$storage_profile_file" | "$BB" cut -d' ' -f1) in
  		497a8b108a3eefc839c3738a5c452ee3d6a437eb1ebaf0ea43bd635a8a227978) storage_profile=gnome ;;
  		c54b6fd77bc699a17876ed9b46dcf770b66d0bd01380e25cd620ec82adf9c736) storage_profile=native ;;
@@ -61,7 +82,7 @@
  	*)
  		log "warning: invalid root profile; forcing legacy"
  		storage_profile=legacy
-@@ -129,6 +172,8 @@
+@@ -129,6 +182,8 @@
  storage_init=/sbin/init
  storage_gnome_contract=/etc/liuqin-gnome-root.contract
  storage_native_contract=/etc/liuqin-native-root.contract
@@ -70,7 +91,7 @@
  if [ "$storage_profile" = gnome ]; then
  	storage_marker=etc/liuqin-gnome-root
  	storage_marker_sha256=bd86a359f5b6bf05f09abf544967489e924c251ab7c07684df62b0dbda4c3fca
-@@ -141,10 +186,22 @@
+@@ -141,10 +196,22 @@
  	storage_root_subdir=native-root
  	storage_init=/usr/lib/systemd/systemd
  fi
@@ -93,7 +114,7 @@
  fi
  storage_rcs_expected_sha256=
  storage_inittab_expected_sha256=
-@@ -598,6 +655,263 @@
+@@ -598,6 +665,263 @@
  	return 0
  }
  
@@ -102,7 +123,7 @@
 +	return 1
 +}
 +
-+# FEDORA (ADR-0004 D2): contract v2 is a topology contract.
++# FEDORA (topology contract): contract v2 is a topology contract.
 +#
 +# v1 hash-pinned project-owned files, including user-editable configuration
 +# (/etc/hostname, locale, vconsole, fstab, selinux config, environment.d,
@@ -180,7 +201,7 @@
 +# The login manager may be enabled through the systemd display-manager alias
 +# (Fedora KDE 44: /etc/systemd/system/display-manager.service -> plasmalogin) or
 +# through a graphical/multi-user .wants symlink.  Both forms are accepted, but
-+# either way the unit must resolve to an existing regular file (ADR-0004 D2-B).
++# either way the unit must resolve to an existing regular file (topology contract).
 +storage_fedora_login_manager_ok() {
 +	sfdm_unit=$1
 +	for sfdm_candidate in \
@@ -242,7 +263,7 @@
 +# Fedora profile (project fork, see the FEDORA FORK NOTICE at the top):
 +# the persistent root is a Fedora KDE ARM64 filesystem living directly on
 +# LIUQIN_ROOT.  The contract is topology-only (v2); hash pinning of RPM-owned
-+# or user-editable files was removed on purpose (ADR-0004 D2).
++# or user-editable files was removed on purpose (topology contract).
 +storage_fedora_root_ok() {
 +	storage_checked_root=$1
 +	storage_fedora_select_contract || return 1
@@ -336,7 +357,7 @@
 +	[ "$storage_fedora_entries" -ge 8 ] || return 1
 +	# Kernel identity interface (warn-only, see the fork notice): the modules
 +	# tree for the identity the rootfs reports should exist, but being one
-+	# update behind must not send the tablet to recovery (ADR-0004 D2-B/D5).
++	# update behind must not send the tablet to recovery (topology and metadata contracts).
 +	storage_fedora_root_release=$("$BB" cat \
 +		"$storage_checked_root$storage_fedora_kernel_release" 2>/dev/null || true)
 +	storage_fedora_running_release=$("$BB" cat /proc/sys/kernel/osrelease 2>/dev/null || true)
@@ -357,7 +378,7 @@
  storage_root_ok() {
  	storage_checked_root=$1
  	if [ "$storage_profile" = native ]; then
-@@ -608,6 +922,11 @@
+@@ -608,6 +932,11 @@
  		storage_gnome_root_ok "$storage_checked_root"
  		return $?
  	fi
@@ -369,7 +390,43 @@
  	storage_checked_marker=$storage_checked_root/$storage_marker
  	[ -f "$storage_checked_marker" ] || return 1
  	[ ! -L "$storage_checked_marker" ] || return 1
-@@ -893,7 +1212,7 @@
+@@ -667,6 +996,35 @@
+ 	printf '%s\n' "$storage_collected_nodes"
+ }
+ 
++# FEDORA: only an early-exit readiness hint, never a storage admission gate.
++# liuqin exposes six UFS LUNs. Wait for all of them and the essential partition
++# names, then require a stable canonical node inventory on consecutive scans.
++# Unexpected layouts retain the original ten-second polling path. All RO,
++# identity, root contract and pre/post-RW snapshot checks below remain intact.
++storage_boot_nodes_ready() {
++	for storage_ready_lun in sda sdb sdc sdd sde sdf; do
++		storage_path_is_block "$storage_dev_root/$storage_ready_lun" || return 1
++	done
++	storage_ready_names=
++	for storage_ready_event in "$storage_sys_block"/sd*/uevent; do
++		storage_ready_name=$(storage_uevent_value PARTNAME "$storage_ready_event" 2>/dev/null || true)
++		case $storage_ready_name in
++		boot_a|boot_b|persist|linux_root|userdata)
++			storage_ready_names="$storage_ready_names $storage_ready_name" ;;
++		esac
++	done
++	for storage_ready_required in boot_a boot_b persist; do
++		case " $storage_ready_names " in
++		*" $storage_ready_required "*) ;;
++		*) return 1 ;;
++		esac
++	done
++	case " $storage_ready_names " in
++	*' linux_root '*|*' userdata '*) return 0 ;;
++	esac
++	return 1
++}
++
+ storage_snapshot_sd_nodes() {
+ 	storage_sd_nodes_snapshot=$(storage_collect_sd_nodes) || return 1
+ 	storage_snapshot_has_parent=false
+@@ -893,7 +1251,7 @@
  		fi
  		storage_probe_mounted=true
  		if ! "$BB" mount --bind "$storage_probe_root/$storage_root_subdir" "$storage_newroot"; then
@@ -378,7 +435,79 @@
  			storage_abort
  			return 1
  		fi
-@@ -962,13 +1281,30 @@
+@@ -930,6 +1288,23 @@
+ # the BLKROSET flag: storage_prepare_persistent_root clears it alongside the
+ # root's, because systemd cannot mount a write-protected block device
+ # read-write however correct the fstab entry is.
++# A reachable plymouthd is not proof that it has a renderer: the earlier
++# failure was a running daemon that never opened a DRM card. Only keep the
++# stage-1 splash across switch_root when its fd table still holds
++# /dev/dri/card*; otherwise let systemd start its own daemon as before.
++early_plymouth_drawing() {
++	[ -f /run/plymouth/pid ] || return 1
++	early_draw_pid=$(cat /run/plymouth/pid 2>/dev/null || true)
++	case $early_draw_pid in ''|*[!0-9]*) return 1 ;; esac
++	[ -d "/proc/$early_draw_pid/fd" ] || return 1
++	for early_draw_fd in "/proc/$early_draw_pid"/fd/*; do
++		case $(readlink "$early_draw_fd" 2>/dev/null || true) in
++		/dev/dri/card*) return 0 ;;
++		esac
++	done
++	return 1
++}
++
+ storage_switch_persistent_root() {
+ 	if ! storage_snapshot_persistent_ok "$storage_dev_root"; then
+ 		log "persistent root UFS state changed before switch_root"
+@@ -942,7 +1317,46 @@
+ 
+ 	storage_moved=
+ 	storage_move_failed=false
+-	for storage_mountpoint in /proc /sys /dev; do
++	# Stop the stage-1 DHCP daemon before /run moves into the new root, so its
++	# pid file is still readable from here.
++	if [ -f /run/udhcpd.pid ]; then
++		kill "$(cat /run/udhcpd.pid)" 2>/dev/null || true
++	fi
++	# Keep the early-Plymouth debug log where the booted system can read it:
++	# /run is moved below and its initramfs copy is otherwise unreachable.
++	if [ -f /run/plymouth/early.log ] && [ -d "$storage_newroot/var/log" ]; then
++		cp /run/plymouth/early.log \
++			"$storage_newroot/var/log/liuqin-early-plymouth.log" 2>/dev/null || true
++	fi
++	# Decide the stage-1 splash handoff while /run and /proc are still here;
++	# both are moved below. Fedora's design keeps one plymouthd across
++	# switch_root: /run carries its socket and pid file, and the second
++	# plymouthd that systemd starts exits on the already-running path. Keep it
++	# only when it provably owns a DRM card; a daemon without a renderer would
++	# suppress systemd's own attempt.
++	early_plymouth_keep=false
++	if early_plymouth_drawing; then
++		early_plymouth_keep=true
++		echo early >/run/plymouth/stage1-keep
++		log "early plymouth: keeping the stage-1 splash across switch_root"
++	fi
++	# The stage-1 udev daemon must not survive: /run moves into the new root and
++	# the real root's systemd starts its own udevd on /run/udev/control. Stop it
++	# before the move, while its control socket is still reachable here.
++	if [ -f /etc/liuqin-early-udev ] && [ -S /run/udev/control ] &&
++		[ -x /usr/bin/udevadm ]; then
++		/usr/bin/udevadm settle --timeout=3 2>/dev/null || true
++		/usr/bin/udevadm control --exit 2>/dev/null || true
++		rm -f /run/udev/control
++	fi
++	if [ "$early_plymouth_keep" != true ] && [ -x /usr/bin/plymouth ] &&
++		[ -e /run/plymouth/pid ]; then
++		/usr/bin/plymouth quit 2>/dev/null || true
++	fi
++	# /run must cross the switch as well: Fedora's initramfs hands its /run to
++	# systemd, and the running plymouthd is controlled through
++	# /run/plymouth/pid by plymouth-quit/deactivate later.
++	for storage_mountpoint in /run /proc /sys /dev; do
+ 		if mount -o move "$storage_mountpoint" \
+ 			"$storage_newroot$storage_mountpoint"; then
+ 			storage_moved="$storage_mountpoint $storage_moved"
+@@ -962,13 +1376,30 @@
  	fi
  
  	# The stage-1 DHCP daemon has the deleted initramfs as its root after
@@ -413,7 +542,34 @@
  	if ! storage_snapshot_persistent_ok "$storage_newroot/dev"; then
  		log "persistent root UFS state changed immediately before switch_root"
  		# /dev has moved, so restore it before the normal abort path tries to
-@@ -987,6 +1323,26 @@
+@@ -976,9 +1407,26 @@
+ 		mount -o move "$storage_newroot/dev" /dev 2>/dev/null || true
+ 		mount -o move "$storage_newroot/sys" /sys 2>/dev/null || true
+ 		mount -o move "$storage_newroot/proc" /proc 2>/dev/null || true
++		mount -o move "$storage_newroot/run" /run 2>/dev/null || true
+ 		storage_abort || ufs_safe=false
+ 		return 1
+ 	fi
++	# PID 1's switch_root does not change the root of a surviving plymouthd.
++	# Move the API filesystems first, then use the real root's client/socket
++	# to ask the old daemon to chroot into the still-visible newroot path.
++	# No filesystem move or storage admission remains after this notification.
++	if [ "$early_plymouth_keep" = true ]; then
++		early_handoff_pid=$(cat "$storage_newroot/run/plymouth/pid" 2>/dev/null || true)
++		log "early plymouth: root before=$(readlink "$storage_newroot/proc/$early_handoff_pid/root" 2>/dev/null || true)"
++		if chroot "$storage_newroot" /usr/bin/plymouth update-root-fs \
++			--new-root-dir="$storage_newroot" </dev/null >/dev/null 2>&1; then
++			log "early plymouth: root after=$(readlink "$storage_newroot/proc/$early_handoff_pid/root" 2>/dev/null || true)"
++		else
++			log "early plymouth: new-root notification failed; returning splash to systemd"
++			chroot "$storage_newroot" /usr/bin/plymouth quit \
++				</dev/null >/dev/null 2>&1 || true
++		fi
++	fi
+ 	# switch_root must itself be PID 1.  Execute the pinned initramfs BusyBox in
+ 	# place: if its final handoff fails or returns, PID 1 dies and the kernel
+ 	# panics rather than allowing this writable half-handoff to resume any RAM
+@@ -987,6 +1435,26 @@
  	exec "$BB" switch_root "$storage_newroot" "$storage_init"
  }
  
@@ -440,7 +596,28 @@
  # The mutation test enters only the storage gate.  It uses an isolated fake
  # /dev, sysfs and command PATH, and never reaches the real init sequence.
  if [ "${LIUQIN_INIT_STORAGE_TEST_ONLY:-0}" = 1 ]; then
-@@ -1017,37 +1373,6 @@
+@@ -1013,40 +1481,189 @@
+ mount -t configfs configfs /sys/kernel/config
+ mount -t pstore pstore /sys/fs/pstore 2>/dev/null || true
+ 
++# FEDORA: ABL appends loglevel=6 after the project cmdline. Suppress the console
++# before the native DRM driver is ready; keep a working tty0 for rescue and
++# keep every diagnostic in kmsg. No earlycon/drm_log is used by daily bootargs.
++fedora_quiet_boot=false
++fedora_full_storage_wait=false
++case " $(cat /proc/cmdline 2>/dev/null) " in
++*' quiet '*)
++	if [ "$storage_profile" = fedora ]; then
++		fedora_quiet_boot=true
++		dmesg -n 0
++		exec >/dev/kmsg 2>&1
++	fi ;;
++esac
++case " $(cat /proc/cmdline 2>/dev/null) " in
++*' liuqin.storage_wait=full '*) fedora_full_storage_wait=true ;;
++esac
++
+ hostname liuqin-firstboot
  [ ! -w /proc/sys/kernel/hotplug ] || echo /sbin/mdev >/proc/sys/kernel/hotplug
  mdev -s
  
@@ -453,11 +630,63 @@
 -		found_block=true
 -		if ! blockdev --setro "$blockdev_path"; then
 -			log "warning: failed to mark read-only: $blockdev_path"
--		fi
++# FEDORA: optional early udev and stage-1 splash. Plymouth only takes
++# the udev discovery path it is built for when a real systemd-udevd is running;
++# with mdev alone it never opens a DRM card and there is no splash.
++# /etc/liuqin-early-udev and /etc/liuqin-early-plymouth exist only in images
++# built with the early overlay, so ordinary images keep the mdev-only
++# behaviour. This runs AFTER the USB gadget is set up: a renderer problem must
++# never take the diagnostics link down with it. The daemon is stopped before
++# switch_root (see storage_switch_persistent_root) because the real root's
++# systemd starts its own udevd on /run/udev/control and two owners of that
++# socket cannot coexist. The two cmdline switches exist for diagnosis: they let
++# one image test the udev path and the splash path separately.
++start_early_native_display() {
++	# Board-specific, opt-in native KMS path. Built-in fsa4480 probed too early
++	# on this device; load the exact matching module only after USB is usable
++	# and the measured six-second readiness point. No simpledrm/fbdev modeset.
++	[ -f /etc/liuqin-early-native-display ] || return 0
++	[ -f /usr/lib/liuqin-native-display/fsa4480.ko ] || return 0
++	[ -x /usr/bin/modetest ] || return 0
++	early_native_loaded=false
++	early_native_wait=0
++	while [ "$early_native_wait" -lt 12 ]; do
++		read -r early_native_uptime early_native_idle </proc/uptime
++		[ "${early_native_uptime%%.*}" -ge 6 ] && break
++		sleep 0.5
++		early_native_wait=$((early_native_wait + 1))
++	done
++	if [ ! -e /sys/bus/i2c/devices/3-0042/driver ] && [ ! -d /sys/module/fsa4480 ]; then
++		if "$BB" insmod /usr/lib/liuqin-native-display/fsa4480.ko; then
++			early_native_loaded=true
+ 		fi
 -	done
 -	sleep 1
 -done
--
++	fi
++	if [ ! -e /sys/bus/i2c/devices/3-0042/driver ]; then
++		# Do not leave a failed early registration blocking normal root udev.
++		if [ "$early_native_loaded" = true ]; then
++			"$BB" rmmod fsa4480 2>/dev/null || true
++		fi
++		log "early native display: switch not bound; falling back to normal boot"
++		return 0
++	fi
++	early_native_wait=0
++	while [ "$early_native_wait" -lt 20 ] &&
++		[ ! -d /sys/class/drm/card0-DSI-1 ]; do
++		sleep 0.1
++		early_native_wait=$((early_native_wait + 1))
++	done
++	if [ -d /sys/class/drm/card0-DSI-1 ]; then
++		# GETCONNECTOR(current) in Plymouth cannot discover an unprobed mode.
++		# libdrm's read-only enumeration populates it without lighting a CRTC.
++		"$BB" timeout 3 /usr/bin/modetest -M msm -c \
++			>/run/liuqin-native-mode-probe.log 2>&1 || true
++		log "early native display: modes=$(cat /sys/class/drm/card0-DSI-1/modes 2>/dev/null | tr '\n' ' ')"
++	fi
++}
+ 
 -ufs_safe=false
 -if [ "$found_block" != true ]; then
 -	log "critical: no SCSI/UFS block devices detected; UFS is not fail-closed"
@@ -469,16 +698,120 @@
 -	done
 -else
 -	log "critical: could not prove every SCSI/UFS block device read-only"
--fi
--
++start_early_splash() {
++start_early_native_display
++early_udev_enabled=true
++early_plymouth_enabled=true
++case " $(cat /proc/cmdline 2>/dev/null) " in
++*' liuqin.early_udev=off '*) early_udev_enabled=false ;;
++esac
++case " $(cat /proc/cmdline 2>/dev/null) " in
++*' liuqin.early_plymouth=off '*) early_plymouth_enabled=false ;;
++esac
++early_udev=false
++if [ "$early_udev_enabled" = true ] && [ -f /etc/liuqin-early-udev ] &&
++	[ -x /usr/bin/udevadm ] && [ -x /usr/lib/systemd/systemd-udevd ]; then
++	log "early udev: preparing /run/udev"
++	mkdir -p /run/udev
++	log "early udev: starting daemon (detached)"
++	# PID 1 has no controlling terminal and carries the kernel console fds.
++	# The same daemon started from a login shell inherits a session and pty;
++	# detaching explicitly matches that working environment and keeps daemon
++	# logging away from /dev/console and /dev/kmsg.
++	if setsid /usr/lib/systemd/systemd-udevd --daemon --resolve-names=never \
++		</dev/null >/dev/null 2>&1; then
++		: >/run/udev/stage1.started
++	else
++		log "warning: early udevd exited non-zero"
++	fi
++	early_udev_ready=false
++	for early_try in 1 2 3 4 5 6 7 8 9 10; do
++		[ -S /run/udev/control ] && { early_udev_ready=true; break; }
++		sleep 0.1 2>/dev/null || sleep 1
++	done
++	if [ "$early_udev_ready" = true ]; then
++		early_udev=true
++		# Coldplug only what the splash needs. A full trigger would run the
++		# whole rule set and load modules, which is stage 2's job.
++		log "early udev: control socket ready, triggering drm/graphics"
++		/usr/bin/udevadm trigger --action=add --type=devices \
++			--subsystem-match=drm --subsystem-match=graphics \
++			</dev/null >/dev/null 2>&1 || true
++		log "early udev: waiting for the event queue"
++		/usr/bin/udevadm settle --timeout=5 </dev/null >/dev/null 2>&1 || true
++		log "early udev: drm=$(ls /dev/dri 2>/dev/null | tr '\n' ' ') database=$(ls /run/udev/data 2>/dev/null | wc -l) entries"
++	else
++		log "warning: early udev control socket did not appear; the splash will not get a renderer"
++	fi
+ fi
+ 
 -if [ "$ufs_safe" != true ]; then
 -	log "critical: remote shell will remain disabled because UFS is not fail-closed"
--fi
--
++# FEDORA: optional graphical splash from the stage-1 image itself, matching
++# Fedora's "Plymouth runs in the initramfs" design. Starting it here matters on
++# this board: simpledrm already owns the bootloader framebuffer, while msm does
++# not bind until much later, and msm has no usable CRTC before userspace sets a
++# mode. /etc/liuqin-early-plymouth is only present in images built with
++# --extra-overlay, so ordinary images keep the previous behaviour. The client
++# command is non-fatal: a missing renderer must never block storage admission.
++if [ "$early_plymouth_enabled" = true ] &&
++	[ -f /etc/liuqin-early-plymouth ] && [ -x /usr/bin/plymouthd ] &&
++	[ -x /usr/bin/plymouth ]; then
++	mkdir -p /run/plymouth
++	# No --debug here: the daemon inherits PID 1's /dev/kmsg streams in a quiet
++	# boot, and the trace stream plus udev debug logging hung this board before
++	# the USB link came up. plymouth.debug=stream:... on the cmdline can still
++	# enable tracing for a single experiment.
++	log "early plymouth: starting daemon"
++	# plymouthd daemonizes itself; do not put it in a separate session here.
++	# The manual handoff that survived switch_root was started this way, while
++	# the setsid variant hung at switch_root.
++	/usr/bin/plymouthd --mode=boot --attach-to-session \
++		--graphical-boot --tty=/dev/tty1 --pid-file=/run/plymouth/pid \
++		--no-boot-log </dev/null >/dev/null 2>&1 ||
++		log "warning: early plymouthd did not start"
++	# The client must never be able to stop the boot before the USB gadget is
++	# up, so run it in the background. Its result is visible through the
++	# daemon's fd table and the kmsg trace, not through this exit status.
++	/usr/bin/plymouth show-splash >/dev/null 2>&1 &
++	early_show_pid=$!
++	# Temporary diagnosis: what the daemon can see and whether it answers.
++	log "early plymouth: udev=$early_udev drm=$(ls /dev/dri 2>/dev/null | tr '\n' ' ')"
++	early_ping=no
++	for early_try in 1 2 3; do
++		if /usr/bin/plymouth --ping 2>/dev/null; then
++			early_ping=yes
++			break
++		fi
++		sleep 0.2 2>/dev/null || sleep 1
++	done
++	log "early plymouth: daemon reachable=$early_ping"
++	# Temporary: sample the daemon once while it is supposed to be drawing.
++	if [ -f /run/plymouth/pid ]; then
++		early_pid=$(cat /run/plymouth/pid 2>/dev/null || true)
++		case $early_pid in
++		''|*[!0-9]*) ;;
++		*)
++			sleep 1
++			log "early plymouth: pid=$early_pid state=$(awk '/^State:/{print $2, $3}' "/proc/$early_pid/status" 2>/dev/null) wchan=$(cat "/proc/$early_pid/wchan" 2>/dev/null)"
++			early_fds=
++			for early_fd in "/proc/$early_pid"/fd/*; do
++				early_link=$(readlink "$early_fd" 2>/dev/null || true)
++				[ -n "$early_link" ] && early_fds="$early_fds $early_link"
++			done
++			log "early plymouth: fds=$early_fds"
++			;;
++		esac
++	fi
++	if kill -0 "$early_show_pid" 2>/dev/null; then
++		log "early plymouth: show-splash client still running (pid $early_show_pid)"
++	fi
+ fi
++}
+ 
  # ABL uses androidboot.mode=charger when external power wakes a deeply
  # discharged tablet.  A normal desktop boot in that state consumes more than
- # an SDP input can supply and creates a boot/drain/reboot loop.  Product GNOME
-@@ -1059,7 +1384,9 @@
+@@ -1059,7 +1676,9 @@
  case " $(cat /proc/cmdline 2>/dev/null) " in
  *' androidboot.mode=charger '*) charger_boot=true ;;
  esac
@@ -489,7 +822,7 @@
  	charger_marker=/etc/liuqin-charger-mode
  	charger_marker_ok=false
  	charger_marker_hash=$(sha256sum "$charger_marker" 2>/dev/null | cut -d' ' -f1)
-@@ -1082,7 +1409,6 @@
+@@ -1082,7 +1701,6 @@
  	# through to gadget setup, persistent-root preparation, or GNOME.
  	while :; do sleep 60; done
  fi
@@ -497,7 +830,7 @@
  gadget=/sys/kernel/config/usb_gadget/liuqin
  mkdir -p "$gadget"
  echo 0x1d6b >"$gadget/idVendor"
-@@ -1153,6 +1479,7 @@
+@@ -1153,6 +1771,7 @@
  storage_installer_optional='userdata linux_root linux_home'
  
  start_stage1_telnet() {
@@ -505,7 +838,7 @@
  	if [ "$ufs_safe" = true ]; then
  		if [ -f "$storage_installer_marker" ]; then
  			mkdir -p "$storage_dev_root/disk/by-partlabel" || return 1
-@@ -1183,7 +1510,8 @@
+@@ -1183,7 +1802,8 @@
  			log "installer data partitions linked:${storage_installer_linked:- none}"
  		fi
  		log "development-only unauthenticated shell: telnet 192.168.7.2 2323"
@@ -515,7 +848,7 @@
  	else
  		log "remote shell withheld; inspect the local console for UFS failures"
  	fi
-@@ -1219,19 +1547,55 @@
+@@ -1219,11 +1839,6 @@
  			log "warning: udhcpd did not start; the host must configure 192.168.7.1/24 itself"
  		fi
  
@@ -527,11 +860,44 @@
  	else
  		log "warning: UDC bound but usb0 did not appear"
  	fi
- else
+@@ -1231,7 +1846,96 @@
  	log "warning: no UDC found; USB networking unavailable"
  fi
+ 
++# Test-only stage-1 shell: liuqin.early_shell=on. It starts after the USB link
++# and before the early splash, so a renderer or udev hang is still inspectable
++# with `telnet 192.168.7.2 2323`. It never judges or writes storage; the normal
++# boot never sets this argument.
++early_shell_mode=
++case " $(cat /proc/cmdline 2>/dev/null) " in
++*' liuqin.early_shell=on '*) early_shell_mode=on ;;
++*' liuqin.early_shell=wait '*) early_shell_mode=wait ;;
++esac
++if [ -n "$early_shell_mode" ] && [ -e /sys/class/net/usb0 ]; then
++	telnetd -b 192.168.7.2:2323 -l /bin/sh || true
++	: >/run/liuqin-early-shell.started
++	log "early diagnostic shell: telnet 192.168.7.2 2323"
++	if [ "$early_shell_mode" = wait ]; then
++		# Hold the boot before udev/splash so the USB shell can run the
++		# sequence by hand and report which step is fatal. The cap keeps a
++		# forgotten session from blocking the boot forever.
++		log "early diagnostic shell: waiting for /run/liuqin-early-shell.done"
++		early_shell_wait=0
++		while [ "$early_shell_wait" -lt 180 ]; do
++			[ -e /run/liuqin-early-shell.done ] && break
++			sleep 1
++			early_shell_wait=$((early_shell_wait + 1))
++		done
++		log "early diagnostic shell: released after ${early_shell_wait}s"
++	fi
++fi
++
++# The splash comes after the USB gadget so a display/udev problem cannot make
++# the boot unreachable. It still starts before the storage wait and switch_root.
++start_early_splash
 +log "waiting for SCSI/UFS block devices and marking them read-only"
 +found_block=false
++storage_previous_ready_nodes=
 +for attempt in 1 2 3 4 5 6 7 8 9 10; do
 +	mdev -s
 +	for blockdev_path in /dev/sd*; do
@@ -541,6 +907,21 @@
 +			log "warning: failed to mark read-only: $blockdev_path"
 +		fi
 +	done
++	# FEDORA: fast daily boot, without reducing the maximum readiness window.
++	# The one-second gap is intentional: a single first device is not evidence
++	# that the asynchronous SCSI/partition scan has finished.
++	if [ "$storage_profile" = fedora ] && [ "$storage_mode" = persistent ] &&
++		[ "$fedora_full_storage_wait" != true ] &&
++		storage_boot_nodes_ready &&
++		storage_ready_nodes=$(storage_collect_sd_nodes); then
++		if [ "$storage_ready_nodes" = "$storage_previous_ready_nodes" ]; then
++			log "UFS readiness: all six LUNs and required partitions stable at scan $attempt"
++			break
++		fi
++		storage_previous_ready_nodes=$storage_ready_nodes
++	else
++		storage_previous_ready_nodes=
++	fi
 +	sleep 1
 +done
 +
@@ -567,7 +948,7 @@
 +if [ "$storage_mode" != persistent ] && [ -e /sys/class/net/usb0 ]; then
 +	start_stage1_telnet
 +fi
- 
++
  if [ "$storage_mode" = persistent ] && [ "$ufs_safe" = true ]; then
 +	if [ -f /etc/liuqin-dev-rescue ] && [ -e /sys/class/net/usb0 ]; then
 +		log "development rescue: stage-1 shell available before the root probe"

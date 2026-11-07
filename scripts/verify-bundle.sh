@@ -28,7 +28,7 @@
 #   bundle        bundle.json <-> SHA256SUMS <-> files consistency (upstream
 #                 reference cache and future own bundles), kernel_commit vs lock.
 #   repo          NOTICE/LICENSE, firmware-clause present, upstream pins,
-#                 kernel/source.json, ADR-0002 target-release consistency.
+#                 kernel/source.json, build pipeline target-release consistency.
 #
 # Output: human-readable PASS/FAIL/WARN/SKIP summary + one machine-readable JSON
 # report (default: out/ci/verify-bundle-<UTC>.json).
@@ -1409,7 +1409,15 @@ def load_repo():
             "upstream-tracking.md pins device/kernel/pipa commits" if not missing
             else "pins missing for: " + ", ".join(missing), path=tracking)
     else:
-        add("repo.upstream_pins", "repo", "FAIL", "docs/maintenance/upstream-tracking.md missing")
+        # Public source export: fall back to the pins carried by the scripts
+        # and the exported patch manifest.  The pipa pin is maintainer-only.
+        sources_ = [PROJECT / "scripts/fetch-upstream.sh",
+                    PROJECT / "kernel/patches/manifest.json"]
+        blob = "".join(_read_text(p) for p in sources_ if p.is_file())
+        missing = [k for k, v in pins.items() if k != "pipa" and v not in blob]
+        add("repo.upstream_pins", "repo", "PASS" if not missing else "WARN",
+            "device/kernel pins found in scripts and patch manifest" if not missing
+            else "pins missing for: " + ", ".join(missing))
     lock = PROJECT / "kernel/source.json"
     if lock.is_file():
         try:
@@ -1428,7 +1436,7 @@ def load_repo():
             target = m.group(1)
         add("repo.adr_release", "repo",
             "PASS" if target == EXPECTED_RELEASE else "WARN",
-            f"ADR-0002 targets Fedora {target}; verifier expected {EXPECTED_RELEASE}"
+            f"build pipeline targets Fedora {target}; verifier expected {EXPECTED_RELEASE}"
             + ("" if target == EXPECTED_RELEASE else " — update ADR/docs before switching release"))
 
 
@@ -1469,7 +1477,7 @@ def _sha_file(path):
 def _staged_rootfs():
     """Return (path, layout) of the newest assembled rootfs staging tree.
 
-    ADR-0004 D4: the delivery layout is FLAT (partition root == rootfs root).
+    flat install contract: the delivery layout is FLAT (partition root == rootfs root).
     A historical out/image-build/*/rootfs/native-root tree is still discovered so
     an old bundle can be audited, but it is reported as the obsolete layout and
     the release gate rejects it.
@@ -1542,7 +1550,7 @@ def _ext4_label_and_magic(path):
 
 
 def load_docs_sha():
-    """Docs<->artifact sha256 consistency (docs/maintenance/kernel-build.md etc.)."""
+    """Docs<->artifact sha256 consistency (maintainer documentation)."""
     allowed = set()
     docs = [
         PROJECT / "docs/maintenance/kernel-build.md",
@@ -1550,6 +1558,10 @@ def load_docs_sha():
         PROJECT / "docs/maintenance/kernel-rpm.md",
         PROJECT / "docs/build/image-build.md",
     ]
+    if not any(d.is_file() for d in docs):
+        docs_add("docs.sha", True,
+                 "maintainer-only artifact documentation not present; skipped")
+        return
     # every current artifact file digest is allowed to be quoted in docs
     artifact_globs = [
         "out/boot/*", "out/boot/initramfs/*", "out/boot/toolchain/*",
@@ -1731,7 +1743,7 @@ def load_release_gate():
                  f"sha256={str(ctr.get('sha256'))[:16]}…")
         gate_add("gate.bundle.contract_no_content_pins",
                  int(ctr.get("content_pins") or 0) == 0,
-                 "bundle contract has no v1 sha256 content pins (ADR-0004 D2)")
+                 "bundle contract has no v1 sha256 content pins (topology contract)")
         manifest_contract = None
         if ctr.get("source"):
             manifest_contract = BUNDLE / str(ctr["source"])
@@ -2003,7 +2015,7 @@ def load_release_gate():
     gate_add("gate.rootfs.staged", staged is not None,
              f"staged rootfs: {staged} (layout={layout})" if staged else
              "no assembled rootfs staging tree (out/image-build/*/rootfs/root, flat layout); run build-image.sh")
-    # Prefer the contract that is actually delivered in the bundle (ADR-0004
+    # Prefer the contract that is actually delivered in the bundle (delivery contract
     # D1: the bundle is self-describing); fall back to the initramfs build dir
     # only when no bundle contract is available.
     contract = None
@@ -2049,14 +2061,14 @@ def load_release_gate():
     gate_add("gate.contract.no_content_pins", not v1_content_pins,
              "contract has no v1 sha256 content pins (dnf upgrades and config edits stay bootable)"
              if not v1_content_pins else
-             "P0 OPEN: the delivered contract still contains v1 sha256 content pins; ordinary package "
-             "upgrades/config edits would be rejected at boot (ADR-0004 D2)")
+             "the delivered contract still contains v1 sha256 content pins; ordinary package "
+             "upgrades/config edits would be rejected at boot (topology contract)")
     # Kernel identity must be present as a topology 'file' entry, never as a
     # content pin: the release check is documented as warn-only at boot.
     kernel_entries = [l for l in contract_lines if l.endswith("/usr/share/liuqin/kernel.release")]
     gate_add("gate.contract.kernel_identity_topology_only",
              kernel_entries == ["file /usr/share/liuqin/kernel.release"],
-             "kernel.release is a topology entry only (no content hash, ADR-0004 D2-C)"
+             "kernel.release is a topology entry only (no content hash, topology contract-C)"
              if kernel_entries == ["file /usr/share/liuqin/kernel.release"] else
              f"kernel.release entries are {kernel_entries!r}; expected exactly the topology 'file' entry")
     gate_add("gate.contract.no_kernel_identity_pins", not kernel_entries or all(
@@ -2115,7 +2127,7 @@ def load_release_gate():
                 sel_value = line.split("=", 1)[1].strip()
     gate_add("gate.selinux.userland", sel_value in ("permissive", "enforcing"),
              f"/etc/selinux/config SELINUX={sel_value!r} (must be permissive/enforcing when kernel SELinux=y)")
-    # FLAT layout (ADR-0004 D4) + root.img label
+    # FLAT layout (flat install contract) + root.img label
     gate_add("gate.rootfs.flat_layout", layout == "flat" if layout else False,
              f"root layout={layout!r} (release root must BE the partition root: flat install)")
     dbg_native = ROOTFS is not None and (ROOTFS / "native-root").is_dir()
@@ -2206,7 +2218,7 @@ def load_release_gate():
         gate_add("gate.rpm.selinux_config", sel_ok,
                  "RPM-embedded kernel-config has SELinux=y" if sel_ok else
                  "RPM-embedded kernel-config lacks SELinux=y (RPM built from non-Fedora-config kernel)")
-    # --- on-device update prerequisites (P0 refresh pipeline) -------------
+    # --- on-device update prerequisites (required refresh pipeline) -------------
     if staged is not None:
         rfm = staged / "usr/share/liuqin/rootfs.files.sha256"
         gate_add("gate.update.rootfs_manifest", rfm.is_file(),
@@ -2227,7 +2239,7 @@ def load_release_gate():
                  "refresh pipeline rebuilds the same topology v2 contract (no content pins to go stale)"
                  if not v1_content_pins else
                  "the shipped contract still carries content pins; a kernel/package upgrade makes the "
-                 "rebuilt contract disagree with the tree and admission fails (ADR-0004 D2)")
+                 "rebuilt contract disagree with the tree and admission fails (topology contract)")
     # --- update-path tooling safety ---------------------------------------
     hook = PROJECT / "kernel/fedora/99-liuqin-android-boot.install"
     if hook.is_file():

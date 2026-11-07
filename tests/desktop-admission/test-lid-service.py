@@ -235,7 +235,7 @@ def main():
             lines = calls.read_text().splitlines()
             assert lines == ["ensure-off"], lines
 
-            # Phase 1: the helper-facing state file exists, is private, and
+            # Step 1: the helper-facing state file exists, is private, and
             # reflects the actual lid state.
             state_file = Path(runtime) / "liuqin-power-keyd" / "power-state.json"
             assert state_file.is_file(), state_file

@@ -2,6 +2,7 @@
 
 | 修改对象 | 检查入口 | 证明范围 |
 |---|---|---|
+| 文档相对链接 | `scripts/check-docs.sh --quiet` | 公开 Markdown 中的相对链接可解析；不判断自然语言矛盾 |
 | GNOME 按键/合盖/输入 | [desktop-admission](desktop-admission/README.md) | 合成输入、状态机、私有测试总线；不操作桌面或真实设备 |
 | boot 更新元数据/回退逻辑 | `tests/boot-update/` | 合成镜像和文件；不能当真实内核更新验收 |
 | 固件/设备验证/构建适配 | `tests/integration/test-firmware-pool.py`、`tests/device-validation/` 等 | 先看具体脚本是否依赖产物或写 rootfs，不默认全跑 |

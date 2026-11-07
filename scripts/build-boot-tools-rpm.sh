@@ -495,7 +495,7 @@ info = {
         "kernel_rpm": kernel_rpm_dir,
         "stock_rom_dir": stock_rom_dir or None,
         "note": "offline tests intentionally use the Fedora-fragment kernel from kernel-liuqin RPM, not the "
-                "task-5 baseline out/kernel, so release/config stay consistent.",
+                "the kernel build baseline out/kernel, so release/config stay consistent.",
     },
     "verification": {
         "offline_validation": validation,
@@ -517,9 +517,9 @@ info = {
     "notes": [
         "No vendor firmware is redistributed; `liuqin-boot-tools stage` copies it from the device's own "
         "liuqin-firmware/liuqin-audio packages and the user's stock ROM tree.",
-        "The contract generator copy currently follows the P0-1 policy landed by boot-builder (kernel identity "
+        "The contract generator copy currently follows the kernel-identity invariant policy landed by boot-builder (kernel identity "
         "not pinned; init warns on running-vs-rootfs release mismatch).",
-        "kernel-liuqin spec already requires python3 (apply-boot is Python); recorded in task-11 RESULT.",
+        "kernel-liuqin spec already requires python3 (apply-boot is Python); recorded in the boot tool notes.",
     ],
     "safety": {"boot_partition_written": False, "qbootctl_used": False, "gpt_attributes_modified": False},
 }

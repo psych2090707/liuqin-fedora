@@ -16,7 +16,7 @@
 # Summary:
 #   * new root profile "fedora" (marker /etc/liuqin-fedora-root, contract
 #     /etc/liuqin-fedora-root.contract, header LIUQIN_FEDORA_ROOT_CONTRACT_V2,
-#     ADR-0004 D2).  The contract is a *topology* list, not a content-hash pin
+#     topology contract).  The contract is a *topology* list, not a content-hash pin
 #     list: device/partition identity stays here in the reboot-safe gate, while
 #     dnf-owned and user-editable files are never hashed at boot (a normal
 #     `dnf upgrade` or hostname change must not force the rescue shell).  The
@@ -32,7 +32,7 @@
 #     compared with /proc/sys/kernel/osrelease and a mismatch only logs, because
 #     a dnf kernel update legitimately installs the new identity before the new
 #     boot.img is applied; the strict check belongs to the update/apply tools
-#     (ADR-0004 D5);
+#     (metadata contract);
 #   * pre-switch_root daemon cleanup no longer requires a BusyBox inside the
 #     real root (Fedora does not ship one at /usr/local/bin/busybox).
 # The gnome/native/legacy profiles are left as upstream so the fork does not
@@ -670,7 +670,7 @@ storage_fedora_reject() {
 	return 1
 }
 
-# FEDORA (ADR-0004 D2): contract v2 is a topology contract.
+# FEDORA (topology contract): contract v2 is a topology contract.
 #
 # v1 hash-pinned project-owned files, including user-editable configuration
 # (/etc/hostname, locale, vconsole, fstab, selinux config, environment.d,
@@ -748,7 +748,7 @@ storage_fedora_executable() { # <in-root path> -> 0 when regular+root-owned+exec
 # The login manager may be enabled through the systemd display-manager alias
 # (Fedora KDE 44: /etc/systemd/system/display-manager.service -> plasmalogin) or
 # through a graphical/multi-user .wants symlink.  Both forms are accepted, but
-# either way the unit must resolve to an existing regular file (ADR-0004 D2-B).
+# either way the unit must resolve to an existing regular file (topology contract).
 storage_fedora_login_manager_ok() {
 	sfdm_unit=$1
 	for sfdm_candidate in \
@@ -810,7 +810,7 @@ storage_fedora_select_contract() {
 # Fedora profile (project fork, see the FEDORA FORK NOTICE at the top):
 # the persistent root is a Fedora KDE ARM64 filesystem living directly on
 # LIUQIN_ROOT.  The contract is topology-only (v2); hash pinning of RPM-owned
-# or user-editable files was removed on purpose (ADR-0004 D2).
+# or user-editable files was removed on purpose (topology contract).
 storage_fedora_root_ok() {
 	storage_checked_root=$1
 	storage_fedora_select_contract || return 1
@@ -904,7 +904,7 @@ storage_fedora_root_ok() {
 	[ "$storage_fedora_entries" -ge 8 ] || return 1
 	# Kernel identity interface (warn-only, see the fork notice): the modules
 	# tree for the identity the rootfs reports should exist, but being one
-	# update behind must not send the tablet to recovery (ADR-0004 D2-B/D5).
+	# update behind must not send the tablet to recovery (topology and metadata contracts).
 	storage_fedora_root_release=$("$BB" cat \
 		"$storage_checked_root$storage_fedora_kernel_release" 2>/dev/null || true)
 	storage_fedora_running_release=$("$BB" cat /proc/sys/kernel/osrelease 2>/dev/null || true)

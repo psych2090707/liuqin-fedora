@@ -2,6 +2,7 @@
 
 | 目标 | 入口 |
 |---|---|
+| 文档相对链接 | `check-docs.sh --quiet` |
 | GNOME 配置支持包 | `build-gnome-rpm.sh`，载荷来自 `overlays/gnome/` |
 | 指纹/设备/时间支持包 | `build-mobile-rpms.sh`、`build-device-rpms.sh`、`build-clock-rpm.sh` |
 | 内核与启动输入 | `build-kernel.sh`、`build-kernel-rpm.sh`、`build-initramfs.sh`、`build-bootimg.sh`、`build-boot-tools-rpm.sh` |

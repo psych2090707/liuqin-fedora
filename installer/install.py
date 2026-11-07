@@ -273,7 +273,7 @@ def parse_arguments(argv=None):
                              '(sgdisk -p output) and, if present, DIR/info.txt (sgdisk -i output of '
                              'userdata); no device partition table is read')
     parser.add_argument('--yes-write-device', action='store_true',
-                        help='REAL DEVICE WRITES. Only for Phase 6, with the tablet physically '
+                        help='REAL DEVICE WRITES. Only for an attended device write, with the tablet physically '
                              'present and the operator attending. Without this flag the installer '
                              'never runs a mutating Fastboot command or RAM installer write')
     return parser, parser.parse_args(argv)
@@ -755,7 +755,7 @@ def main(argv=None):
             print('No --layout given: pass --layout linux-only|dual to preview the partition plan.')
         if not args.check:
             print('Default mode: local checks only. Rehearse the device flow with --dry-run;')
-            print('real writes require --yes-write-device (Phase 6, attended tablet only).')
+            print('real writes require --yes-write-device (attended device write only).')
         return
     validate_arguments(parser, args)
     if manifest['status'] != 'DEVICE_TESTED' and not args.allow_unverified:
@@ -768,7 +768,7 @@ def main(argv=None):
         return
     if not args.yes_write_device:
         parser.error('refusing to write a device: pass --yes-write-device'
-                     ' (Phase 6, attended tablet only) —— 本阶段禁止实机写入')
+                     ' (attended device write only) —— 本阶段禁止实机写入')
     restore = args.restore_partition_table
     if restore is None and not all((args.serial, args.backup or args.no_backup, args.erase_userdata)):
         parser.error('--serial, --backup (or --no-backup), --erase-userdata and --layout are required')
@@ -795,7 +795,7 @@ def main(argv=None):
         socket.inet_pton(socket.AF_INET, args.host_address)
     socket.inet_pton(socket.AF_INET, args.device_address)
     print('REAL DEVICE WRITES ENABLED: --yes-write-device given.'
-          ' Phase 6 only, attended tablet only.', flush=True)
+          ' attended device write only.', flush=True)
 
     fastboot = make_fastboot(args, writes=True)
     device_identity(parser, fastboot)

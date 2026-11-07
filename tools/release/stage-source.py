@@ -18,7 +18,7 @@ PROJECT = Path(__file__).resolve().parents[2]
 ROOTS = ('kernel', 'initramfs', 'installer', 'mkosi', 'overlays', 'packaging',
          'rust', 'scripts', 'tools', 'tests')
 EXTRA = ('docs/research/liuqin-assets.json',)
-OMIT = ('tools/afk/keys/id_', 'tests/docs/', 'scripts/check-docs.sh',
+OMIT = ('tools/afk/keys/id_', 'tests/docs/',
         'tools/resume-install-root.py', 'packaging/device/SPEC-DELTA.md',
         'packaging/mobile/fingerprint/README-libfprint-tod-BLOCKED.md')
 GITIGNORE = '''upstream/

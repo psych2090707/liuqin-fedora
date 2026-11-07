@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# Self-tests for the task-22 release tooling (synthetic fixtures only).
+# Self-tests for the release tooling (synthetic fixtures only).
 set -eu
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$project_root"

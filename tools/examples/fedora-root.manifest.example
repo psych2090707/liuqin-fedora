@@ -4,7 +4,7 @@
 # the initramfs contract embedding can be exercised before rootfs-builder
 # produces out/rootfs/rootfs.files.sha256. Never ship this contract to a device.
 # Regenerate with: tools/build-root-contract.py --manifest <real manifest> ...
-# contract v2 (ADR-0004 D2) topology paths below are synthetic too: the
+# contract v2 (topology contract) topology paths below are synthetic too: the
 # contract generator refuses to emit a contract for a manifest that lacks
 # the declared PID1/login/Plasma/kernel-identity interface.  With these
 # entries the synthetic manifest yields the same topology-only v2 contract

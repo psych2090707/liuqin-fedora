@@ -95,7 +95,7 @@ count_dirs() { ls -1d "$(rd "$1")"/*/ 2>/dev/null | wc -l; }
 count_files() { ls -1 "$(rd "$1")"/* 2>/dev/null | wc -l; }
 
 device_skip() { # id group title detail evidence
-	skip "$1" "$2" "$3" device "$4" "$5" "run on the tablet (Phase 6)"
+	skip "$1" "$2" "$3" device "$4" "$5" "run on the tablet (attended device write)"
 }
 file_or_device() { # id group title rel evidence remediation
 	# file presence check; in device mode a missing path is a real FAIL
@@ -632,10 +632,10 @@ selinux=$(read_first /etc/selinux/config disabled)
 if grep -qi '^SELINUX=enforcing' "$(rd /etc/selinux/config)" 2>/dev/null; then
 	pass security.selinux security "SELinux enforcing" file "getenforce"
 elif grep -qi '^SELINUX=permissive' "$(rd /etc/selinux/config)" 2>/dev/null; then
-	pass security.selinux security "SELinux permissive (first-release decision, ADR-0002)" file "getenforce"
+	pass security.selinux security "SELinux permissive (first-release decision, build pipeline)" file "getenforce"
 elif grep -qi '^SELINUX=disabled' "$(rd /etc/selinux/config)" 2>/dev/null; then
 	skip security.selinux security \
-		"SELinux still disabled: rebuild pending (decision: permissive, ADR-0002 addendum)" known-gap \
+		"SELinux still disabled: rebuild pending (decision: permissive, build pipeline addendum)" known-gap \
 		"etc/selinux/config: SELINUX=disabled" \
 		"rebuild the rootfs/image with SELINUX=permissive"
 else

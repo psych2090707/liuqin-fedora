@@ -324,7 +324,7 @@ rpm -qp --conflicts "$rpm" >/rpmbuild/logs/rpm-conflicts.txt
 rpm -qpi "$rpm" >/rpmbuild/logs/rpm-info.txt
 rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' "$rpm" >/rpmbuild/logs/rpm-nevra.txt
 
-# Install into a throwaway root (no scriptlets; rootfs assembly is Phase 3).
+# Install into a throwaway root (no scriptlets; rootfs assembly is image assembly).
 root=/rpmbuild/verify-rootfs
 rm -rf "$root"; mkdir -p "$root"
 rpm --root "$root" --initdb
@@ -395,8 +395,8 @@ RPM_FILE=$(find "$WORK_ROOT/RPMS" -name 'kernel-liuqin-*.rpm' | head -n 1)
 RPM_BASENAME=$(basename "$RPM_FILE")
 log "built: $RPM_BASENAME ($(du -h "$RPM_FILE" | cut -f1))"
 
-# Contract-level tests for the P0 refresh tool: kernel identity must be filtered
-# out of the regenerated root contract (task-15 P0-1) and the invariant enforced.
+# Contract-level tests for the required refresh tool: kernel identity must be filtered
+# out of the regenerated root contract (the boot refresh invariant) and the invariant enforced.
 
 # ---------------------------------------------------------------- schema v2 fixtures
 # The refresh tool and the kernel-install hook stage all boot metadata
@@ -736,7 +736,7 @@ PYCHECK
 		'--kver "${kver:-@KVER@}" --pins-kernel'
 	chmod +x "$assets/bin/build-initramfs.sh"
 	run_refresh
-	[ "$rc" -ne 0 ] && echo "PASS refresh fail-closed: rebuilt contract still pins kernel identity (P0-1 violation)" ||
+	[ "$rc" -ne 0 ] && echo "PASS refresh fail-closed: rebuilt contract still pins kernel identity (kernel-identity invariant violation)" ||
 		echo "FAIL refresh accepted contract with kernel identity pins"
 	rm -rf "$tmp"
 }
@@ -854,7 +854,7 @@ data = json.load(open(sys.argv[1].replace("-bad", "")))
 data["artifacts"]["dist/Image"]["sha256"] = "0" * 64
 json.dump(data, open(sys.argv[1], "w"), indent=2)
 PYBAD
-	# Fake refresh tools (P0 pipeline stand-in).  They run the REAL schema v2
+	# Fake refresh tools (refresh pipeline stand-in).  They run the REAL schema v2
 	# producer on a minimal real boot.img v2: the fixture never hand-writes the
 	# metadata fields the consumer expects.  refresh-notready / refresh-nofields
 	# mutate the real producer output for exactly one property so the staging
@@ -907,13 +907,13 @@ PYBAD
 	rc=$?
 	[ "$rc" -eq 0 ] && [ ! -e "$stg/boot-$KVER.img" ] && echo "PASS disabled-mode (no conf): rc=0, no staging" || echo "FAIL disabled-mode rc=$rc"
 
-	# 2) P0: refresh tool missing -> fail-closed
+	# 2) required: refresh tool missing -> fail-closed
 	run_hook "$tmp/conf-missing-refresh.conf"
-	[ "$rc" -ne 0 ] && [ ! -e "$stg/boot-$KVER.img" ] && echo "PASS fail-closed (P0 missing refresh tool): rc=$rc" || echo "FAIL missing-refresh rc=$rc"
+	[ "$rc" -ne 0 ] && [ ! -e "$stg/boot-$KVER.img" ] && echo "PASS fail-closed (required missing refresh tool): rc=$rc" || echo "FAIL missing-refresh rc=$rc"
 
-	# 3) P0: rootfs manifest missing -> fail-closed
+	# 3) required: rootfs manifest missing -> fail-closed
 	run_hook "$tmp/conf-missing-rootfs.conf"
-	[ "$rc" -ne 0 ] && [ ! -e "$stg/boot-$KVER.img" ] && echo "PASS fail-closed (P0 missing rootfs manifest): rc=$rc" || echo "FAIL missing-rootfs rc=$rc"
+	[ "$rc" -ne 0 ] && [ ! -e "$stg/boot-$KVER.img" ] && echo "PASS fail-closed (required missing rootfs manifest): rc=$rc" || echo "FAIL missing-rootfs rc=$rc"
 
 	# 4) release-gate mismatch -> fail-closed
 	run_hook "$tmp/conf-badgate.conf"
@@ -927,7 +927,7 @@ PYBAD
 	run_hook "$tmp/conf-nofields.conf"
 	[ "$rc" -ne 0 ] && [ ! -e "$stg/boot-$KVER.img" ] && echo "PASS fail-closed (missing contract/ramdisk fields): rc=$rc" || echo "FAIL nofields rc=$rc"
 
-	# 7) full simulated success -> staged with P0 manifest fields
+	# 7) full simulated success -> staged with required manifest fields
 	run_hook "$tmp/conf-ok.conf"
 	if [ "$rc" -eq 0 ] && [ -f "$stg/boot-$KVER.img" ] && [ -f "$stg/boot-$KVER.SHA256SUMS" ] \
 		&& [ -f "$stg/boot-$KVER.manifest" ] && [ -f "$stg/boot-$KVER.build-info.json" ] \
@@ -937,7 +937,7 @@ PYBAD
 		&& grep -q 'schema_version' "$stg/boot-$KVER.build-info.json" \
 		&& grep -q '^release_gate=passed' "$stg/boot-$KVER.manifest" \
 		&& grep -q 'staged only' "$stg/boot-$KVER.manifest"; then
-		echo "PASS P0 staged: boot-$KVER.img + schema v2 manifest/build-info + SHA256SUMS"
+		echo "PASS staged: boot-$KVER.img + schema v2 manifest/build-info + SHA256SUMS"
 	else
 		echo "FAIL simulated-success rc=$rc"
 	fi
@@ -1081,7 +1081,7 @@ info_rpm = {
         "dnf_resolution_note": ("local-repo-only --installroot has no Fedora base/updates repos, so "
                                 "declared runtime deps (/bin/sh, python3) cannot be resolved; the "
                                 "authoritative release check is the rpm --root install tree above, "
-                                "which passes. Full dnf resolution belongs to image assembly (Phase 3) "
+                                "which passes. Full dnf resolution belongs to image assembly (image assembly) "
                                 "with the normal Fedora repos enabled."),
         "files": {
             "install_root_check": "verification/install-root-check.txt",
@@ -1102,7 +1102,7 @@ info_rpm = {
         "kernel_release kept at 6.17.0-rc1-gfe81794b5e1b to stay comparable with upstream; RPM release carries the .liuqin tag.",
         "RPM was not signed (device uses unlocked bootloader; signing is a future decision).",
         "Actual boot partition write is intentionally not implemented as an automated step; liuqin-apply-boot is dry-run by default and Phase-6 gated.",
-        "P0 (task-15): kernel-install hook rebuilds root contract + initramfs + boot.img and never reuses a stale ramdisk; kernel identity is excluded from the regenerated contract pins and the refresh tool fails closed if a contract still pins it.",
+        "required (the boot refresh work): kernel-install hook rebuilds root contract + initramfs + boot.img and never reuses a stale ramdisk; kernel identity is excluded from the regenerated contract pins and the refresh tool fails closed if a contract still pins it.",
         "Pre-apply stale-boot window still needs the initramfs-side dynamic kernel-release warning (boot-builder scope).",
     ],
 }

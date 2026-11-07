@@ -10,7 +10,7 @@
 # ============================ SAFETY MODEL ================================
 # * NEVER writes the boot partition, NEVER calls qbootctl / fastboot, NEVER
 #   touches GPT slot attributes. Writing boot_a/boot_b is exclusively the job
-#   of the explicit `liuqin-apply-boot --yes-write-device` tool (Phase 6).
+#   of the explicit `liuqin-apply-boot --yes-write-device` tool (attended device write).
 # * old staged images are kept on failure (fail-closed: on any error this hook
 #   exits non-zero and leaves the previous /boot/liuqin/boot-<kver>.img intact;
 #   the new image is written to a temp file and atomically renamed only on
@@ -18,7 +18,7 @@
 # * generation is opt-in: it requires an operator-provided
 #   /etc/liuqin/bootimg.conf plus a working on-device boot tool stack.
 #
-# ======================= P0: no stale ramdisk/contract =====================
+# ======================= required: no stale ramdisk/contract =====================
 # The root admission contract pins rootfs file hashes; the kernel identity files
 # (/usr/share/liuqin/kernel.release + kernel-modules.manifest) change the moment
 # the new kernel RPM is installed, while the boot.img in the boot partition is
@@ -36,7 +36,7 @@
 # firmware pool, WLAN tuple, audio topology, stock ROM DTB inputs), the hook
 # fails closed with a precise message instead of staging a half-consistent boot
 # image. The pre-apply window ("stale boot image vs new rootfs") is covered by
-# the initramfs policy change requested in task-15 P0-1: kernel identity is
+# the initramfs policy change requested in the boot refresh invariant: kernel identity is
 # advisory (warn), not a fail-closed pin.
 #
 # Environment contract (values from /etc/liuqin/bootimg.conf override defaults):
@@ -223,16 +223,16 @@ else
 fi
 log "release gate OK: installed Image/DTB/config match the recorded Fedora release build"
 
-# --- P0: on-device tool stack + all rebuild inputs must be present ----------
-[ -x "$REFRESH" ] || die "P0: on-device boot rebuild tool is missing: $REFRESH (install liuqin-boot-tools/boot-assets; a stale prebuilt ramdisk must NOT be reused)"
-[ -f "$ROOTFS_MANIFEST" ] || die "P0: rootfs hash manifest missing: $ROOTFS_MANIFEST (needed to regenerate the root admission contract for $KVER; ship it from the rootfs build)"
-[ -d "$FIRMWARE_POOL" ] || die "P0: firmware pool missing: $FIRMWARE_POOL (initramfs rebuild needs touch/BT/WLAN/regulatory/GPU/DSP firmware)"
-[ -d "$WLAN_TUPLE" ] || die "P0: WLAN HSP2 tuple missing: $WLAN_TUPLE"
-[ -f "$AUDIO_TOPOLOGY" ] || die "P0: AudioReach topology missing: $AUDIO_TOPOLOGY"
+# --- required: on-device tool stack + all rebuild inputs must be present ----------
+[ -x "$REFRESH" ] || die "required: on-device boot rebuild tool is missing: $REFRESH (install liuqin-boot-tools/boot-assets; a stale prebuilt ramdisk must NOT be reused)"
+[ -f "$ROOTFS_MANIFEST" ] || die "required: rootfs hash manifest missing: $ROOTFS_MANIFEST (needed to regenerate the root admission contract for $KVER; ship it from the rootfs build)"
+[ -d "$FIRMWARE_POOL" ] || die "required: firmware pool missing: $FIRMWARE_POOL (initramfs rebuild needs touch/BT/WLAN/regulatory/GPU/DSP firmware)"
+[ -d "$WLAN_TUPLE" ] || die "required: WLAN HSP2 tuple missing: $WLAN_TUPLE"
+[ -f "$AUDIO_TOPOLOGY" ] || die "required: AudioReach topology missing: $AUDIO_TOPOLOGY"
 if [ "$DTB_SOURCE" = "auto" ] && [ ! -d "$STOCK_DIR" ]; then
-	die "P0: canonical DTB path selected but stock ROM tree is missing: $STOCK_DIR"
+	die "required: canonical DTB path selected but stock ROM tree is missing: $STOCK_DIR"
 fi
-log "P0 toolstack inputs: assets=$ASSETS refresh=$REFRESH rootfs_manifest=$ROOTFS_MANIFEST firmware_pool=$FIRMWARE_POOL"
+log "required toolstack inputs: assets=$ASSETS refresh=$REFRESH rootfs_manifest=$ROOTFS_MANIFEST firmware_pool=$FIRMWARE_POOL"
 
 [ -d "$STAGING_DIR" ] || mkdir -p "$STAGING_DIR" || die "cannot create staging root: $STAGING_DIR"
 
@@ -287,7 +287,7 @@ set +e
 rc=$?
 set -e
 if [ "$rc" -ne 0 ]; then
-	die "P0: initramfs/contract/boot.img rebuild failed with exit code $rc (see $LOG_FILE and $LOG_DIR/)"
+	die "required: initramfs/contract/boot.img rebuild failed with exit code $rc (see $LOG_FILE and $LOG_DIR/)"
 fi
 
 BUILT=$OUT/boot-liuqin-dev.img

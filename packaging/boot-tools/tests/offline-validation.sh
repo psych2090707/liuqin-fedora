@@ -9,8 +9,8 @@
 # What is validated (no device, no network):
 #   1. installed asset tree integrity (assets.manifest, BusyBox sha, helpers);
 #   2. initramfs rebuild from the packaged scripts/tools/BusyBox (no firmware:
-#      --allow-missing-firmware) + the generated contract v2 (ADR-0004 D2)
-#      must NOT content-pin kernel identity (P0-1): an existence-only `file`
+#      --allow-missing-firmware) + the generated contract v2 (topology contract)
+#      must NOT content-pin kernel identity (kernel-identity invariant): an existence-only `file`
 #      entry is the reviewed v2 interface, a sha256 `marker` pin is not;
 #   3. boot.img assembly (header v2) using the packaged mkbootimg scripts, the
 #      packaged build-bootimg.sh and the real Fedora-fragment kernel Image; the
@@ -128,16 +128,16 @@ else
 fi
 if [ -s "$CONTRACT" ]; then
 	ok "root contract generated ($(wc -l <"$CONTRACT") lines)"
-	# P0-1 / ADR-0004 D2/D5: contract v2 keeps kernel identity as an
+	# kernel-identity invariant / topology and metadata contracts: contract v2 keeps kernel identity as an
 	# existence-only interface (`file ...`).  The v1 defect was a content
 	# hash (marker) pin of it, which turned a dnf kernel upgrade into a
 	# rescue boot; that is the only form the test must reject.
 	if grep -qE '^marker +/usr/(share/liuqin/(kernel\.release|kernel-modules\.manifest)|lib/modules/)' "$CONTRACT"; then
-		no "P0-1 violation: contract content-pins kernel identity"
+		no "kernel-identity invariant violation: contract content-pins kernel identity"
 	elif ! grep -qE '^file +/usr/share/liuqin/(kernel\.release|kernel-modules\.manifest)$' "$CONTRACT"; then
 		no "contract v2 is missing the kernel identity existence interface"
 	else
-		ok "P0-1: kernel identity is existence-only in contract v2 (no content pin)"
+		ok "kernel-identity invariant: kernel identity is existence-only in contract v2 (no content pin)"
 	fi
 else
 	no "no contract generated"

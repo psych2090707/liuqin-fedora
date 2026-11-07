@@ -1,4 +1,4 @@
-# liuqin bring-up image: SELinux permissive (Lead decision, 2026-10-20).
+# liuqin bring-up image: SELinux permissive (first release).
 #
 # Rationale: the liuqin kernel has SELinux support enabled and the next rootfs
 # rebuild includes selinux-policy-targeted + policycoreutils; PERMISSIVE lets the first device boots collect AVC

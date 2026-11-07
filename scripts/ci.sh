@@ -10,7 +10,7 @@
 #   kernel-rpm  kernel-liuqin RPM packaging                 (scripts/build-kernel-rpm.sh)
 #   device-rpms device/mobile layer RPMs                    (scripts/build-device-rpms.sh,
 #                                                            scripts/build-mobile-rpms.sh)
-#   rootfs      mkosi cross-arch Fedora KDE rootfs          (scripts/build-rootfs.sh, needs root)
+#   rootfs      mkosi cross-arch Fedora rootfs (GNOME default) (scripts/build-rootfs.sh, needs root)
 #   assembly    installer runtime + initramfs + boot.img
 #               (scripts/build-installer.sh, build-initramfs.sh, build-bootimg.sh;
 #                root.img is produced by the image stage)
@@ -29,8 +29,7 @@
 #     documented CLI.
 #   * NOTHING in this script writes a device, boots the tablet, calls fastboot or
 #     touches real device partitions. VM simulation was retired.
-#   * Fedora release stays at 44. Other release parameters remain available;
-#     changing the target requires a separate user request (ADR-0005).
+#   * The current target is Fedora 45; other release parameters remain available.
 #   * --skip-build runs env/validate/docs only (fast, safe during parallel work);
 #     --advisory reports failures without failing the run (used while artifacts
 #     are known-incomplete).
@@ -39,8 +38,8 @@
 #   --list                list stages, their scripts and pending interfaces
 #   --only LIST           run only these stages (comma/space separated; aliases allowed)
 #   --skip-build          skip build stages (env + validate + docs only)
-#   --release N           Fedora release (default 44; 45 supported after GA)
-#   --profile P           mkosi rootfs profile (default plasma; tty for minimal)
+#   --release N           Fedora release (default 45; 44 kept for historical checks)
+#   --profile P           mkosi rootfs profile (default gnome; plasma/tty available)
 #   --jobs N              parallelism for build stages (default: min(nproc,8))
 #   --out DIR             run directory (default: out/ci/<UTC-timestamp>)
 #   --fix-env             allow env-check --fix (default: check only, never modify host)
@@ -61,8 +60,8 @@ set -uo pipefail
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 cd "$PROJECT_ROOT" || exit 2
 
-RELEASE=44
-PROFILE=plasma
+RELEASE=45
+PROFILE=gnome
 JOBS=$(( $(nproc 2>/dev/null || echo 4) ))
 [ "$JOBS" -gt 8 ] && JOBS=8
 SKIP_BUILD=0
@@ -102,7 +101,7 @@ declare -A STAGE_SCRIPTS=(
     [docs]="scripts/ci.sh"
 )
 
-usage() { sed -n '2,66p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { awk 'NR > 1 && /^set / { exit } NR > 1' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 die() { printf 'ci: error: %s\n' "$*" >&2; exit 2; }
 color() { # color STATUS
     [ "$COLOR" -eq 0 ] && return 0
@@ -124,7 +123,7 @@ while [ $# -gt 0 ]; do
         --profile) PROFILE=${2:?--profile needs a value}; shift 2 ;;
         --jobs) JOBS=${2:?--jobs needs a value}; shift 2 ;;
         --out) RUN_DIR=${2:?--out needs a directory}; shift 2 ;;
-        --with-qemu) die "QEMU simulation was retired (ADR-0005); remove --with-qemu" ;;
+        --with-qemu) die "QEMU simulation was retired; remove --with-qemu" ;;
         --fix-env) FIX_ENV=1; shift ;;
         --advisory) ADVISORY=1; shift ;;
         --keep-going) KEEP_GOING=1; shift ;;
@@ -138,7 +137,7 @@ while [ $# -gt 0 ]; do
 done
 
 case "$RELEASE" in 44|45) ;; *) die "--release must be 44 or 45 (parameterised)" ;; esac
-case "$PROFILE" in plasma|tty) ;; *) die "--profile must be plasma or tty" ;; esac
+case "$PROFILE" in gnome|plasma|tty) ;; *) die "--profile must be gnome, plasma or tty" ;; esac
 case "$JOBS" in ''|*[!0-9]*) die "--jobs must be a positive integer" ;; esac
 
 resolve_stage() {
@@ -186,7 +185,7 @@ if [ "$LIST" -eq 1 ]; then
         done
         printf '%-12s %-10s %s\n' "$s" "${state% }" "${DESC[$s]}"
     done
-    printf '\nFedora release: %s (default 44; --release 45 after GA)\n' "$RELEASE"
+    printf '\nFedora release: %s (default 45)\n' "$RELEASE"
     printf 'Scripts present: '; for s in "${ALL_STAGES[@]}"; do for f in ${STAGE_SCRIPTS[$s]}; do
         [ -e "$PROJECT_ROOT/$f" ] && printf '%s ' "$f"; done; done; printf '\n'
     printf 'Missing/pending: '; for s in "${ALL_STAGES[@]}"; do for f in ${STAGE_SCRIPTS[$s]}; do
@@ -202,6 +201,7 @@ else
     RUN_ID=$(basename -- "$RUN_DIR")
 fi
 mkdir -p "$RUN_DIR" || die "cannot create run directory: $RUN_DIR"
+mkdir -p "$PROJECT_ROOT/out/ci" || die "cannot create out/ci"
 printf '%s\n' "$RUN_DIR" > "$PROJECT_ROOT/out/ci/latest"
 RUN_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 export FEDORA_RELEASE="$RELEASE"
@@ -364,6 +364,7 @@ EOF
         printf '| %s | %s | %ss |\n' "$s" "$st" "$dur" >> "$RUN_DIR/summary.md"
     done
     printf '\nLogs: `%s`\n' "$RUN_DIR" >> "$RUN_DIR/summary.md"
+    mkdir -p "$PROJECT_ROOT/out/ci"
     printf '%s\n' "$RUN_DIR" > "$PROJECT_ROOT/out/ci/latest"
     if [ "$FAILED" -eq 1 ] && [ "$ADVISORY" -eq 0 ]; then
         printf '\n%s run %s FAILED — see %s/summary.md and stage logs; repro: bash scripts/ci.sh --release %s%s\n' \
@@ -611,10 +612,23 @@ run_docs() {
     stage_begin docs
     local status=PASS
     local missing=()
-    for f in README.md AGENTS.md NOTICE LICENSE docs/STATUS.md docs/maintenance/upstream-tracking.md \
-             docs/maintenance/build-pipeline.md docs/maintenance/build-environment.md docs/maintenance/kernel-build.md \
-             docs/adr/0002-build-pipeline.md docs/maintenance/ci.md; do
+    local required=(README.md AGENTS.md NOTICE LICENSE \
+                    kernel/README.md installer/README.md mkosi/README.md tools/README.md)
+    local optional=(docs/STATUS.md docs/maintenance/upstream-tracking.md docs/adr/0002-build-pipeline.md)
+    for f in "${required[@]}"; do
         [ -e "$PROJECT_ROOT/$f" ] || missing+=("$f")
+    done
+    # Public trees carry the user-facing docs at the root; the full development
+    # tree keeps some of them under docs/.
+    local entry alt found
+    for entry in "INSTALL.md|docs/INSTALL.md" "HARDWARE.md|docs/hardware-support.md" \
+                 "BUILD.md|docs/build/README.md" "SOURCES.md|NOTICE"; do
+        found=0
+        IFS='|' read -r -a alts <<< "$entry"
+        for alt in "${alts[@]}"; do
+            [ -e "$PROJECT_ROOT/$alt" ] && { found=1; break; }
+        done
+        [ "$found" -eq 1 ] || missing+=("${alts[0]}")
     done
     if [ "${#missing[@]}" -eq 0 ]; then
         show_step PASS docs.required "all required documents present" "stage-docs.log"
@@ -624,23 +638,48 @@ run_docs() {
         STEPS_JSON+=("{\"name\": \"docs.required\", \"status\": \"FAIL\", \"missing\": \"$(json_escape "${missing[*]}")\"}")
         status=FAIL
     fi
+    if [ -x scripts/check-docs.sh ]; then
+        local link_rc=0
+        bash scripts/check-docs.sh --quiet >> "$RUN_DIR/stage-docs.log" 2>&1 || link_rc=$?
+        if [ "$link_rc" -eq 0 ]; then
+            show_step PASS docs.links "relative Markdown links resolve" "stage-docs.log"
+            STEPS_JSON+=("{\"name\": \"docs.links\", \"status\": \"PASS\"}")
+        else
+            show_step FAIL docs.links "broken relative Markdown link(s)" "stage-docs.log"
+            STEPS_JSON+=("{\"name\": \"docs.links\", \"status\": \"FAIL\"}")
+            status=FAIL
+        fi
+    else
+        skip_step docs docs.links "scripts/check-docs.sh not present" "stage-docs.log"
+    fi
+
     {
         printf '===== docs / required =====\n'
         printf 'missing: %s\n' "${missing[*]:-none}"
+        printf 'optional maintainer docs absent: %s\n' \
+            "$(for f in "${optional[@]}"; do [ -e "$PROJECT_ROOT/$f" ] || printf '%s ' "$f"; done)"
     } >> "$RUN_DIR/stage-docs.log"
+    local absent_optional=()
+    for f in "${optional[@]}"; do [ -e "$PROJECT_ROOT/$f" ] || absent_optional+=("$f"); done
+    if [ "${#absent_optional[@]}" -gt 0 ]; then
+        show_step SKIP docs.internal \
+            "maintainer-only documents not present (public source tree)" "stage-docs.log"
+        STEPS_JSON+=("{\"name\": \"docs.internal\", \"status\": \"SKIP\"}")
+    fi
 
     # upstream version pins must be consistent across the three places that carry them
     local pin_ok=1 pin_detail=""
-    if [ -f docs/maintenance/upstream-tracking.md ]; then
-        grep -q 'f5a535f5c1c980f042b58cb77467ff8f02a5518e' docs/maintenance/upstream-tracking.md || { pin_ok=0; pin_detail+="device commit missing in docs/maintenance/upstream-tracking.md; "; }
-        grep -q 'fe81794b5e1b8a3f11a165f3acbfdb8fa671dbb3' docs/maintenance/upstream-tracking.md || { pin_ok=0; pin_detail+="kernel commit missing in docs/maintenance/upstream-tracking.md; "; }
-        grep -q '1c9cbd3983210a2c585311ee86b46ef8cb2c3c32' docs/maintenance/upstream-tracking.md || { pin_ok=0; pin_detail+="pipa commit missing in docs/maintenance/upstream-tracking.md (TODO left upstream); "; }
-    else
-        pin_ok=0; pin_detail+="docs/maintenance/upstream-tracking.md missing; "
-    fi
     if [ -f scripts/fetch-upstream.sh ]; then
         grep -q 'f5a535f5c1c980f042b58cb77467ff8f02a5518e' scripts/fetch-upstream.sh || { pin_ok=0; pin_detail+="fetch-upstream.sh device pin differs; "; }
         grep -q 'fe81794b5e1b8a3f11a165f3acbfdb8fa671dbb3' scripts/fetch-upstream.sh || { pin_ok=0; pin_detail+="fetch-upstream.sh kernel pin differs; "; }
+    else
+        pin_ok=0; pin_detail+="scripts/fetch-upstream.sh missing; "
+    fi
+    if [ -f kernel/patches/manifest.json ]; then
+        grep -q 'fe81794b5e1b8a3f11a165f3acbfdb8fa671dbb3' kernel/patches/manifest.json || { pin_ok=0; pin_detail+="kernel/patches/manifest.json kernel pin differs; "; }
+    fi
+    if [ -f docs/maintenance/upstream-tracking.md ]; then
+        grep -q '1c9cbd3983210a2c585311ee86b46ef8cb2c3c32' docs/maintenance/upstream-tracking.md || { pin_ok=0; pin_detail+="pipa commit missing in docs/maintenance/upstream-tracking.md; "; }
     fi
     if [ "$pin_ok" -eq 1 ]; then
         show_step PASS docs.upstream-pins "upstream pins consistent"
@@ -653,14 +692,19 @@ run_docs() {
     fi
 
     # target Fedora release consistency
-    if [ -f docs/adr/0002-build-pipeline.md ]; then
-        if grep -qE "目标 Fedora 版本[^0-9]*Fedora $RELEASE" docs/adr/0002-build-pipeline.md; then
-            show_step PASS docs.release "ADR-0002 mentions Fedora $RELEASE" "stage-docs.log"
-            STEPS_JSON+=("{\"name\": \"docs.release\", \"status\": \"PASS\"}")
-        else
-            show_step WARN docs.release "ADR-0002 does not mention Fedora $RELEASE; update ADR/STATUS before switching release" "stage-docs.log"
-            STEPS_JSON+=("{\"name\": \"docs.release\", \"status\": \"WARN\"}")
-        fi
+    local release_detail=""
+    if [ -f mkosi/mkosi.conf ]; then
+        grep -qE "^Release=$RELEASE$" mkosi/mkosi.conf || release_detail+="mkosi.conf Release differs; "
+    fi
+    if [ -f packaging/release/public/README.md.in ]; then
+        grep -q "Fedora $RELEASE" packaging/release/public/README.md.in || release_detail+="release README does not mention Fedora $RELEASE; "
+    fi
+    if [ -z "$release_detail" ]; then
+        show_step PASS docs.release "mkosi and release docs target Fedora $RELEASE" "stage-docs.log"
+        STEPS_JSON+=("{\"name\": \"docs.release\", \"status\": \"PASS\"}")
+    else
+        show_step WARN docs.release "$release_detail" "stage-docs.log"
+        STEPS_JSON+=("{\"name\": \"docs.release\", \"status\": \"WARN\", \"detail\": \"$(json_escape "$release_detail")\"}")
     fi
 
     # git dirty state
@@ -683,8 +727,9 @@ run_docs() {
         fi
         printf 'git status (%s entries):\n%s\n' "$dirty" "$dirty_list" >> "$RUN_DIR/stage-docs.log"
     fi
-    # docs <-> artifact sha256 consistency (release gate: FAIL; dev: WARN)
-    if have scripts/verify-bundle.sh; then
+    # docs <-> artifact sha256 consistency (release gate: FAIL; dev: WARN).
+    # The quoted hashes live in maintainer-only docs, so skip in a public export.
+    if have scripts/verify-bundle.sh && [ -f docs/maintenance/kernel-build.md ]; then
         local docs_rc=0
         local docs_args=(--docs-sha --no-color --json "$RUN_DIR/docs-sha.json")
         [ "$RELEASE_GATE" -eq 1 ] && docs_args+=(--release-gate)
@@ -707,6 +752,10 @@ run_docs() {
                 "stage-docs.log"
         fi
         printf 'docs-sha exit=%s result=%s\n' "$docs_rc" "$docs_result" >> "$RUN_DIR/stage-docs.log"
+    elif have scripts/verify-bundle.sh; then
+        show_step SKIP docs.sha-consistency \
+            "maintainer-only docs not present (public source tree)" "stage-docs.log"
+        STEPS_JSON+=("{\"name\": \"docs.sha-consistency\", \"status\": \"SKIP\"}")
     fi
     stage_end docs "$status"
 }

@@ -13,7 +13,7 @@
 #        │                   regenerate rootfs.manifest / rootfs.files.sha256
 #        │
 #        ├─ stage-root-img   mkfs.ext4 (label LIUQIN_ROOT, 4K blocks) with the tree
-#        │                   at the image root (FLAT layout, ADR-0004 D4), then
+#        │                   at the image root (FLAT layout, flat install contract), then
 #        │                   rootfs.tar.gz for the RAM installer (same flat root)
 #        │
 #        ├─ stage-boot-img   rebuild boot.img from the kernel payload + Fedora
@@ -34,7 +34,7 @@
 # device_ready=false until the canonical stock-ROM boot.img inputs and the
 # firmware set exist (documented in bundle.json).
 #
-# DTB modes (task-15 review P1a):
+# DTB modes :
 #   --build-mode dev (default)     offline structure bundle.  --dtb-source auto
 #                                  resolves to upstream-artifact unless a usable
 #                                  --stock-rom-dir is given; device_ready=false.
@@ -206,7 +206,7 @@ Stages
                           content pins, so there is nothing to leave partial)
   --allow-missing-pins    deprecated v1 flag (no-op: contract v2 is topology-only)
   --allow-unmet-rpm-deps  install RPMs with --nodeps when --test fails
-  --no-qemu              compatibility no-op; VM simulation was retired (ADR-0005)
+  --no-qemu              compatibility no-op; VM simulation was retired (retired VM plan)
   --keep-work             compatibility flag (work is currently always retained)
   -h, --help              this help
 
@@ -259,7 +259,7 @@ while [ $# -gt 0 ]; do
 	--partial) allow_missing_pins=1; allow_unmet_rpm_deps=1 ;;
 	--allow-missing-pins) allow_missing_pins=1 ;;
 	--allow-unmet-rpm-deps) allow_unmet_rpm_deps=1 ;;
-	--qemu|--qemu-timeout|--qemu-runs) die_usage "QEMU simulation was retired (ADR-0005); remove VM options" ;;
+	--qemu|--qemu-timeout|--qemu-runs) die_usage "QEMU simulation was retired (retired VM plan); remove VM options" ;;
 	--no-qemu) : ;; # Old task recipes remain usable without invoking a VM.
 	--keep-work) : ;; # Compatibility: no automatic work cleanup is implemented.
 	-h | --help) usage; exit 0 ;;
@@ -721,7 +721,7 @@ stage_rootfs_tree() {
 	selinux_mode=$(sudo sed -n 's/^SELINUX=//p' "$rootfs_stage/etc/selinux/config" 2>/dev/null | head -1)
 	printf '%s\n' "${selinux_mode:-unknown}" >"$work/selinux-mode.txt"
 
-	# P2-B7: qbootctl must not ship (ADR-0002: no qbootctl slot switching on
+	# P2-B7: qbootctl must not ship (build pipeline: no qbootctl slot switching on
 	# liuqin).  Remove it if the profile pulled it in; record the removal.
 	qbootctl_nevra=$(rpm_container "rpm --root /rootfs -q qbootctl 2>/dev/null || true" \
 		-v "$rootfs_stage:/rootfs:z" 2>/dev/null | tail -1)
@@ -753,7 +753,7 @@ stage_rootfs_tree() {
 	# ---- image-owned configuration ------------------------------------------
 	# Overlay rsync can copy the checkout uid onto the staging root directory
 	# itself (rsync -a updates existing destination dirs); the delivery tree's
-	# root must be root:root before tar/root.img are produced (ADR-0004 D3).
+	# root must be root:root before tar/root.img are produced (privileged-file contract).
 	sudo chown 0:0 "$rootfs_stage"
 	write_rootfs_identity
 	write_fstab
@@ -900,7 +900,7 @@ apply_static_overlay() {
 	sudo rsync -aHAX --numeric-ids --chown=0:0 "$src/" "$rootfs_stage/" ||
 		die "static overlay copy failed: $src"
 	# The overlay lives in the git checkout, which is owned by the build user;
-	# every overlay path is system content and must be owned by root (ADR-0004
+	# every overlay path is system content and must be owned by root (delivery contract
 	# D3).  rsync -a also copied the checkout uid onto destination directories
 	# it updated (e.g. /etc, /usr themselves), so restore 0:0 on each copied
 	# path, not only on the files.
@@ -1151,7 +1151,7 @@ write_rootfs_identity() {
 }
 
 write_fstab() {
-	# Flat layout (ADR-0004 D4): /home is a directory inside the root
+	# Flat layout (flat install contract): /home is a directory inside the root
 	# partition, not a separate mount.  A LABEL=LIUQIN_HOME entry here would
 	# make systemd wait for a partition that does not exist and can fail the
 	# first login session.  The root entry also gives systemd the growfs hook
@@ -1320,7 +1320,7 @@ PY
 }
 
 ensure_contract() {
-	# ADR-0004 D1/D2/D4: tools/build-root-contract.py is the ONLY contract
+	# single-producer rule: tools/build-root-contract.py is the ONLY contract
 	# producer.  The generated contract goes to boot.img AND installer.img, and
 	# is validated against the staged tree here (fail-closed at build time: a
 	# rootfs that would be rejected at boot never becomes an image).
@@ -1334,7 +1334,7 @@ ensure_contract() {
 			--manifest "$work/rootfs.files.sha256" \
 			--rootfs "$rootfs_stage" --desktop "$desktop" \
 			--output "$contract_file" ||
-			die "root admission contract generation failed: the staged rootfs does not pass its own boot admission topology (ADR-0004 D2)"
+			die "root admission contract generation failed: the staged rootfs does not pass its own boot admission topology (topology contract)"
 	else
 		python3 "$project_root/tools/build-root-contract.py" \
 			--manifest "$work/rootfs.files.sha256" --desktop "$desktop" \
@@ -1348,7 +1348,7 @@ ensure_contract() {
 }
 
 ensure_privileges() {
-	# ADR-0004 D3/D4 (P0 fix): derive the installer's privileged-file
+	# privileged-file and flat install contracts : derive the installer's privileged-file
 	# expectations from the REAL assembled rootfs instead of hardcoding
 	# distribution guesses.  Includes every setuid/setgid regular file and every
 	# file carrying a security.capability xattr; installer.img embeds this list
@@ -1406,7 +1406,7 @@ for dirpath, dirnames, filenames in os.walk(root):
 lines.sort(key=lambda line: line.rsplit(' ', 1)[-1])
 with open(out, 'w', encoding='utf-8', errors='surrogateescape') as stream:
     stream.write('# Privileged-file expectations generated by scripts/build-image.sh\n')
-    stream.write('# from the assembled rootfs (ADR-0004 D3/D4).  Format:\n')
+    stream.write('# from the assembled rootfs (privileged-file and flat install contracts).  Format:\n')
     stream.write('#   setuid|setgid <octal-mode> <absolute in-root path>\n')
     stream.write('#   cap <getcap-caps> <absolute in-root path>\n')
     if lines:
@@ -1535,7 +1535,7 @@ stage_root_img() {
 	root_uuid=$(uuidgen)
 	sudo rm -f "$root_img"
 	sudo truncate -s "$root_size" "$root_img"
-	# FLAT layout (ADR-0004 D4): the ext4 image root IS the rootfs root (/etc,
+	# FLAT layout (flat install contract): the ext4 image root IS the rootfs root (/etc,
 	# /usr, /bin ... at /).  $rootfs_stage is .../rootfs/root (only the name of
 	# the staging directory; no extra directory is created in the image).
 	# This is what makes root.img directly flashable as the linux_root
@@ -1550,14 +1550,14 @@ stage_root_img() {
 	say "root.img: $root_img ($(stat -c '%s' "$root_img") bytes, label=$label, uuid=$root_uuid)"
 
 	# rootfs.tar.gz: the RAM installer extracts this with tar -xzf directly onto
-	# the target partition root (flat install, ADR-0004 D4), so the archive root
+	# the target partition root (flat install, flat install contract), so the archive root
 	# must be the filesystem root (no prefix inside the tar).
 	# The real numeric owner/mode/ACL/xattr of every file is preserved: NO
-	# --owner=0/--group=0 (ADR-0004 D3); /home/<user> must stay 1000:1000 0700.
+	# --owner=0/--group=0 (privileged-file contract); /home/<user> must stay 1000:1000 0700.
 	stage_header "stage-root-img: rootfs.tar.gz"
 	rootfs_tar=$work/rootfs.tar.gz
 	sudo rm -f "$rootfs_tar"
-	# ADR-0004 D3: preserve the REAL numeric owner/mode/ACL/xattr of the tree.
+	# privileged-file contract: preserve the REAL numeric owner/mode/ACL/xattr of the tree.
 	# --owner=0/--group=0 was removed on purpose: it turned /home/<user> into
 	# root:root and (together with the old chmod -R a-w freeze) broke logging in
 	# and writing user files.
@@ -1658,7 +1658,7 @@ stage_installer_img() {
 		add_skip "installer-img: no root admission contract or privileged-file expectations (staged rootfs missing)"
 		return 1
 	fi
-	# ADR-0004 D1/D4: re-assemble the RAM-installer overlay from its runtime with
+	# single-producer and flat install rules: re-assemble the RAM-installer overlay from its runtime with
 	# the SAME generated contract, so installer-image.json and the embedded
 	# contract can never describe different policies (no contract: null drift).
 	overlay_runtime=$(dirname -- "$installer_overlay")/runtime
@@ -1747,7 +1747,7 @@ stage_bundle() {
 	if [ -f "${installer_img:-}" ]; then cp -f "$installer_img" "$bundle_dir/installer.img"; fi
 	if [ -f "${root_img:-}" ]; then cp -f "$root_img" "$bundle_dir/root.img"; fi
 	if [ -f "${rootfs_tar:-}" ]; then cp -f "$rootfs_tar" "$bundle_dir/rootfs.tar.gz"; fi
-	# ADR-0004 D1/D2: the delivered admission contract is the single generator
+	# single-producer rule: the delivered admission contract is the single generator
 	# output; bundle.json describes it and verify-bundle.sh audits it.  A resumed
 	# bundle-only run has not called ensure_contract yet, so regenerate/verify it
 	# from the staged manifest+tree here instead of silently shipping no contract.
@@ -1946,7 +1946,7 @@ if contract_path.is_file():
         'content_pins': 0,
         'embedded_in': ['boot.img', 'installer.img'],
         'semantics': 'device/partition identity stays in initramfs/init; this file is the '
-                     'Fedora desktop topology (ADR-0004 D2).  No sha256 pins of dnf-owned or '
+                     'Fedora desktop topology (topology contract).  No sha256 pins of dnf-owned or '
                      'user-editable files: ordinary RPM upgrades and config edits cannot '
                      'make the next boot fail-closed.',
     }
@@ -1965,7 +1965,7 @@ if privileges_path.is_file():
         'capabilities': sum(1 for line in privilege_lines
                             if line.split(' ', 1)[0] == 'cap'),
         'derived_from': 'the assembled rootfs: every setuid/setgid file and every '
-                        'security.capability xattr (ADR-0004 D3/D4); no hardcoded '
+                        'security.capability xattr (privileged-file and flat install contracts); no hardcoded '
                         'distribution assumptions such as a ping capability',
     }
 # Describe the firmware pool the ramdisk was staged from (absent for a
@@ -2054,7 +2054,7 @@ manifest = {
     },
     'contract': contract,
     'apply_boot_contract': {
-        # Machine-readable gate for the future liuqin-apply-boot (task-17):
+        # Machine-readable gate for the future liuqin-apply-boot:
         # it must refuse to write a boot partition unless every field is
         # understood, device_ready is true and the image has been re-verified.
         'requires_explicit_device_write_flag': True,
@@ -2088,7 +2088,7 @@ manifest = {
         'requires': ['pinned static aarch64 BusyBox', 'aarch64 cross gcc for the helpers'],
     },
     'skips': skip_list,
-    'qemu_validation': None,  # Legacy metadata key; VM work retired (ADR-0005).
+    'qemu_validation': None,  # Legacy metadata key; VM work retired (retired VM plan).
     'canonical': dtb_source == 'stock-rom',
     'dtb_source': dtb_source,
     'dtb_source_origin': ('stock ROM canonical rebuild (44 DTBO + 14 base DTBs)'
@@ -2099,7 +2099,7 @@ manifest = {
     'notes': [
         'Offline bundle: root.img/rootfs.tar.gz/boot.img/installer.img assembled without any device access.',
         'boot.img header cmdline is empty; the kernel cmdline comes from the DTB /chosen node.',
-        'Flat delivery baseline (ADR-0004 D4): root.img is the rootfs at the filesystem root, and rootfs.tar.gz extracts directly onto the partition root; there is no native-root/ level anywhere.',
+        'Flat delivery baseline (flat install contract): root.img is the rootfs at the filesystem root, and rootfs.tar.gz extracts directly onto the partition root; there is no native-root/ level anywhere.',
         'The RAM installer (installer.img) is required for the tar-based install path; root.img can be flashed directly to linux_root in a future attended phase.',
         'boot.img and installer.img carry the same contract v2 file generated by tools/build-root-contract.py; it is topology-only (no content pins of dnf-owned/user-editable files).',
     ],
@@ -2241,12 +2241,12 @@ verify_root_img() {
 		fi
 		sudo test -f "$root/usr/share/liuqin/rootfs.files.sha256" ||
 			die "root.img lacks /usr/share/liuqin/rootfs.files.sha256 (on-device contract refresh input)"
-		# ADR-0004 D3 acceptance on the delivered root.img: mkfs.ext4 -d must
+		# privileged-file contract acceptance on the delivered root.img: mkfs.ext4 -d must
 		# preserve the real numeric owner/mode of the delivery tree.
 		assert_metadata() { # <path> <mode> <uid> <gid>
 			am_got=$(sudo stat -c '%a %u %g' "$root$1" 2>/dev/null || true)
 			[ "$am_got" = "$2 $3 $4" ] ||
-				die "root.img metadata mismatch: $1 is '$am_got', expected '$2 $3 $4' (ADR-0004 D3)"
+				die "root.img metadata mismatch: $1 is '$am_got', expected '$2 $3 $4' (privileged-file contract)"
 		}
 		assert_metadata "/home/$image_user" 700 1000 1000
 		assert_metadata "/usr/bin/$desktop_bin" 755 0 0
@@ -2264,7 +2264,7 @@ verify_root_img() {
 		assert_metadata /var/tmp 1777 0 0
 		sudo test -u "$root/usr/bin/mount" || die "root.img /usr/bin/mount lost its setuid bit"
 		sudo test -g "$root/usr/bin/mount" || say "warning: /usr/bin/mount is not setgid (Fedora default differs by release)"
-		say "root.img metadata (ADR-0004 D3): /home/$image_user=1000:1000 0700, $desktop_bin=0755, mount=04755 setuid, sudo=04111"
+		say "root.img metadata (privileged-file contract): /home/$image_user=1000:1000 0700, $desktop_bin=0755, mount=04755 setuid, sudo=04111"
 		# pam_systemd is required for session/logind integration (plasmalogin,
 		# kscreenlocker); Fedora splits it into systemd-pam, which the mkosi
 		# package set missed.  --extra-packages installs it, and this gate proves
@@ -2392,7 +2392,7 @@ PY2
 			die "root.img missing default.target"
 		debugfs_exists /run && debugfs_exists /tmp && debugfs_exists /var/tmp ||
 			die "root.img is missing /run, /tmp or /var/tmp"
-		# ADR-0004 D3 metadata assertions without a mount: debugfs `stat` prints
+		# privileged-file contract metadata assertions without a mount: debugfs `stat` prints
 		# the inode mode (octal, including type) and the owner/group ids.
 		debugfs_meta() { # <path> <mode-octal> <uid> <gid>
 			dm_line=$(sudo debugfs -R "stat $1" "$verify_img" 2>/dev/null | tr '\n' ' ')
@@ -2402,7 +2402,7 @@ PY2
 			dm_mode=$((0$dm_mode))
 			dm_mode=$((dm_mode & 07777))
 			[ "$(printf '%o' "$dm_mode")" = "$2" ] && [ "$dm_uid" = "$3" ] && [ "$dm_gid" = "$4" ] ||
-				die "root.img metadata mismatch (debugfs): $1 mode=${dm_mode}o uid=$dm_uid gid=$dm_gid, expected $2 $3 $4 (ADR-0004 D3)"
+				die "root.img metadata mismatch (debugfs): $1 mode=${dm_mode}o uid=$dm_uid gid=$dm_gid, expected $2 $3 $4 (privileged-file contract)"
 		}
 		debugfs_meta "/home/$image_user" 700 1000 1000
 		debugfs_meta "/usr/bin/$desktop_bin" 755 0 0
@@ -2451,7 +2451,7 @@ verify_boot_img() {
 		die "boot.img DTB cmdline still uses console=drm_log (verified A-slot cmdline uses console=tty0)"
 	fi
 	# Real-product cross-check: the contract embedded in the delivered boot.img
-	# is byte-identical to the single generator output (ADR-0004 D1/D4).
+	# is byte-identical to the single generator output (single-producer and flat install rules).
 	if [ -n "${contract_file:-}" ] && [ -f "$contract_file" ]; then
 		dir=$work/verify-boot-ramdisk
 		rm -rf "$dir"
@@ -2482,10 +2482,10 @@ verify_installer_img() {
 		die "installer.img ramdisk could not be extracted"
 	[ "$(cat "$dir/etc/liuqin-installer" 2>/dev/null)" = liuqin ] || die "installer ramdisk marker missing"
 	[ -e "$dir/usr/sbin/mkfs.ext4" ] || die "installer ramdisk lacks mkfs.ext4"
-	# ADR-0004 D4: installer.img MUST embed the same contract v2 that boot.img
+	# flat install contract: installer.img MUST embed the same contract v2 that boot.img
 	# carries, so the installer validates the extracted root exactly like boot.
 	[ -f "$dir/etc/liuqin-fedora-root.contract" ] ||
-		die "installer.img ramdisk carries no Fedora admission contract (ADR-0004 D4)"
+		die "installer.img ramdisk carries no Fedora admission contract (flat install contract)"
 	[ "$(head -n 1 "$dir/etc/liuqin-fedora-root.contract")" = LIUQIN_FEDORA_ROOT_CONTRACT_V2 ] ||
 		die "installer.img embedded contract header is not LIUQIN_FEDORA_ROOT_CONTRACT_V2"
 	if [ -n "${contract_file:-}" ] && [ -f "$contract_file" ]; then
@@ -2513,7 +2513,7 @@ verify_rootfs_tar() {
 			die "rootfs.tar.gz lacks $required"
 	done
 	if printf '%s\n' "$listing" 2>/dev/null | grep -q '^\./native-root'; then
-		die "rootfs.tar.gz uses the obsolete nested native-root layout (ADR-0004 D4: flat install)"
+		die "rootfs.tar.gz uses the obsolete nested native-root layout (flat install contract: flat install)"
 	fi
 	tar -xOzf "$tarfile" ./etc/fstab 2>/dev/null | grep -q 'LABEL=LIUQIN_ROOT' ||
 		die "rootfs.tar.gz /etc/fstab lacks the root entry"
@@ -2522,9 +2522,9 @@ verify_rootfs_tar() {
 	if tar -xOzf "$tarfile" ./etc/fstab 2>/dev/null | grep -q 'LABEL=LIUQIN_HOME'; then
 		die "rootfs.tar.gz /etc/fstab still mounts LABEL=LIUQIN_HOME"
 	fi
-	# ADR-0004 D3 acceptance: the archive must preserve the REAL numeric
+	# privileged-file contract acceptance: the archive must preserve the REAL numeric
 	# owner/mode of the delivery tree (no --owner=0/--group=0, no frozen modes).
-	python3 - "$tarfile" "$desktop_bin" "$login_manager" "$image_user" "$public_image" <<'PY2' || die "rootfs.tar.gz metadata does not satisfy ADR-0004 D3"
+	python3 - "$tarfile" "$desktop_bin" "$login_manager" "$image_user" "$public_image" <<'PY2' || die "rootfs.tar.gz metadata does not satisfy privileged-file contract"
 import sys
 import tarfile
 
@@ -2620,13 +2620,13 @@ PY
 }
 
 verify_contract_gate() {
-	# ADR-0004 D2: the delivered contract must be the v2 topology contract, not
+	# topology contract: the delivered contract must be the v2 topology contract, not
 	# the v1 content-hash pin list.  The boot.img/installer.img embedded copies
 	# are compared with the generator output in the two verify_*_img functions.
 	ensure_contract || { add_skip "contract-gate: no generated contract found to audit"; return 0; }
 	contract=$contract_file
 	if grep -qE '^[0-9a-f]{64}  /' "$contract"; then
-		die "the delivered contract still contains v1 content-hash pins; ordinary config edits / RPM upgrades would be rejected at boot (ADR-0004 D2)"
+		die "the delivered contract still contains v1 content-hash pins; ordinary config edits / RPM upgrades would be rejected at boot (topology contract)"
 	fi
 	entries=$(awk 'NR == 1 { next } /^#/ { next } /^$/ { next } { n++ } END { print n + 0 }' "$contract")
 	printf '%s\n' "$entries" >"$work/contract-entries.txt"

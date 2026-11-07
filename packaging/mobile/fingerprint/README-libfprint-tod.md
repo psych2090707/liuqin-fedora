@@ -123,7 +123,7 @@ scripts/build-mobile-rpms.sh fingerprint-tod
 - 以上全部是 `verified-offline`。`/dev/fpc1020` 是**离线假节点**，不是真实设备；
 - 指纹解锁需要：真实 FPC1264 模块（`fpc1264_spi_diag.ko`，需匹配内核）、
   TA 固件从用户自有 `modem_a` 提取、Gatekeeper/RPMB 认证、实机录入验收；
-- SELinux：首版镜像 permissive（ADR-0002），enforcing 下私有路径 + `LD_LIBRARY_PATH`
+- SELinux：首版镜像 permissive（build pipeline），enforcing 下私有路径 + `LD_LIBRARY_PATH`
   的 domain 策略尚未验证（`pending-device`）；
 - udev/polkit：`liuqin-fingerprint-support` 已有 polkit 动作/规则与 PAM；
   适配器不新增 udev 规则（虚拟设备由 `/dev/fpc1020` 存在性 + `FP_LIUQIN_FPC1264_OEM_ENABLE` 门控）；

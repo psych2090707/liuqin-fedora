@@ -19,7 +19,7 @@ can be verified without device access:
       usr/lib/liuqin/provision.sh           persist provisioning
       etc/liuqin-installer                  'liuqin' marker the RAM shell checks
       etc/liuqin-storage-mode               'readonly'
-      etc/liuqin-fedora-root.contract       root admission contract v2 (ADR-0004 D4)
+      etc/liuqin-fedora-root.contract       root admission contract v2 (flat install contract)
       installer-image.json                  manifest + boot-builder interface
 
 It does not build a boot image and cannot make one bootable: the kernel, the

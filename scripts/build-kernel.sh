@@ -53,7 +53,7 @@ KEEP_LOGS=1
 
 usage() {
 	cat <<'EOF'
-liuqin kernel cross-build (Fedora ARM64 port, Phase 2)
+liuqin kernel cross-build (Fedora ARM64 port, bring-up)
 
 Usage: scripts/build-kernel.sh [options]
 

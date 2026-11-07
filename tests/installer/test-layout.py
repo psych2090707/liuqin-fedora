@@ -174,7 +174,7 @@ with tempfile.TemporaryDirectory(prefix='liuqin-layout-test-') as directory:
         saved['head'] = stream.read(GPT_COPY_BYTES)
         stream.seek(total - GPT_COPY_BYTES)
         saved['tail'] = stream.read(GPT_COPY_BYTES)
-    check('a saved GPT copy is the size the P0 inventory recorded',
+    check('a saved GPT copy is the size the partition inventory recorded',
           len(saved['head']) == 24576 and len(saved['tail']) == 24576)
 
     # Rebuild the factory table, save it, change it, then put it back.

@@ -5,7 +5,7 @@
 # version: root admission contract -> stage-1 initramfs -> Android boot.img.
 # Invoked by /usr/lib/kernel/install.d/99-liuqin-android-boot.install (add).
 #
-# This closes task-15 P0-1: the hook must never reuse the previous ramdisk or
+# This closes the boot refresh invariant: the hook must never reuse the previous ramdisk or
 # the previous bootstrap contract after a kernel update. Everything is rebuilt
 # from the installed kernel + current rootfs hash manifest + on-device assets.
 #
@@ -112,7 +112,7 @@ done
 [ -n "$KVER" ] || die_input "--kver is required"
 [ -n "$KERNEL_OUT" ] || die_input "--kernel-out is required"
 [ -n "$OUT" ] || die_input "--out is required"
-[ -n "$ROOTFS_MANIFEST" ] || die_input "--rootfs-manifest is required (P0: contract must be regenerated)"
+[ -n "$ROOTFS_MANIFEST" ] || die_input "--rootfs-manifest is required (required: contract must be regenerated)"
 [ -n "$FIRMWARE_POOL" ] || die_input "--firmware-pool is required"
 [ -n "$WLAN_TUPLE" ] || die_input "--wlan-hsp2-tuple is required"
 [ -n "$AUDIO_TOPOLOGY" ] || die_input "--audio-topology is required"
@@ -147,7 +147,7 @@ trap 'rm -rf "$WORK"' EXIT
 echo "liuqin-bootimg-refresh: kver=$KVER" >&2
 echo "liuqin-bootimg-refresh: rebuilding root contract + initramfs from $ROOTFS_MANIFEST" >&2
 
-# task-15 P0-1: the root admission contract must NOT fail-closed pin the kernel
+# the boot refresh invariant: the root admission contract must NOT fail-closed pin the kernel
 # identity files. The rootfs hash manifest was produced at image build time, so
 # after a kernel update its kernel.release/kernel-modules.manifest (and
 # /usr/lib/modules/*) hashes are stale; rebuilding a contract from them would
@@ -188,13 +188,13 @@ PYFILTER
 	--busybox "$BUSYBOX" ||
 	die "initramfs/contract rebuild failed (exit $?)" 1
 
-# Enforce the P0-1 contract invariant: no fail-closed kernel identity pins may
+# Enforce the kernel-identity invariant: no fail-closed kernel identity pins may
 # survive into the rebuilt contract (the boot-tools contract generator must be
 # kernel-identity-policy=warn aware).
 for contract in "$WORK/boot/initramfs"/*.contract; do
 	[ -f "$contract" ] || continue
 	if grep -qE '/usr/(share/liuqin/(kernel\.release|kernel-modules\.manifest)|lib/modules/)' "$contract"; then
-		die "P0-1 violation: rebuilt contract still pins kernel identity paths: $contract (boot-tools contract generator must drop kernel-identity pins)" 1
+		die "kernel-identity invariant violation: rebuilt contract still pins kernel identity paths: $contract (boot-tools contract generator must drop kernel-identity pins)" 1
 	fi
 done
 

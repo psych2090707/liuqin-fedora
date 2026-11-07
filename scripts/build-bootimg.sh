@@ -712,9 +712,9 @@ if [ "$ramdisk_mode" = installer ]; then
 		die "installer ramdisk is not in read-only storage mode"
 	[ -e "$ramdisk_dir/usr/sbin/mkfs.ext4" ] || die "installer ramdisk lacks mkfs.ext4"
 	[ -e "$ramdisk_dir/usr/lib/liuqin/install-root.sh" ] || die "installer ramdisk lacks install-root.sh"
-	# ADR-0004 D4: installer.img must embed the admission contract v2.
+	# flat install contract: installer.img must embed the admission contract v2.
 	[ -f "$ramdisk_dir/etc/liuqin-fedora-root.contract" ] ||
-		die "installer ramdisk has no Fedora root contract (ADR-0004 D4)"
+		die "installer ramdisk has no Fedora root contract (flat install contract)"
 	[ "$(head -n 1 "$ramdisk_dir/etc/liuqin-fedora-root.contract")" = LIUQIN_FEDORA_ROOT_CONTRACT_V2 ] ||
 		die "installer ramdisk contract header is not LIUQIN_FEDORA_ROOT_CONTRACT_V2"
 else
@@ -1020,7 +1020,7 @@ lands in the same order of magnitude as the published ramdisk.
 - DTB: qcom,msm-id / qcom,board-id / xiaomi,miboard-id, /chosen bootargs, __symbols__ sink, simple-framebuffer geometry, /chosen cell counts and ranges
 - boot image fits the 192 MiB partition
 
-## 6. Not verified here (requires hardware, Phase 6)
+## 6. Not verified here (requires hardware, attended device write)
 
 - ABL acceptance of the DTB and of the image as a whole
 - kernel boot, UFS fail-closed admission, slot-successful marking

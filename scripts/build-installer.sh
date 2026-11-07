@@ -13,13 +13,13 @@
 #   out/installer/logs/            container/build logs
 #
 # The final installer.img is assembled by the boot-builder pipeline
-# (scripts/build-initramfs.sh + scripts/build-bootimg.sh, task-7): this script
+# (scripts/build-initramfs.sh + scripts/build-bootimg.sh, the installer assembly work): this script
 # produces the INSTALLER_RUNTIME/overlay it consumes and refuses to pretend it
 # can build a boot image without that pipeline.  Nothing here touches a device.
 #
 # Package sources, in order of preference:
 #   --from-rootfs DIR   already-unpacked Fedora aarch64 root (e.g. a mkosi rootfs
-#                       or out/rootfs/rootfs produced by task-6)
+#                       or out/rootfs/rootfs produced by the rootfs build)
 #   --from-rpms DIR     a directory of Fedora aarch64 *.rpm files
 #   --download          (default) pull packages with dnf inside an emulated
 #                       Fedora aarch64 container and export its rootfs
@@ -53,7 +53,7 @@ usage() {
 		'  --busybox PATH     static aarch64 BusyBox from the boot-builder pipeline' \
 		'                     (recorded in the overlay manifest; required for the RAM image)' \
 		'  --contract PATH    Fedora root admission contract v2 (single producer:
-                     tools/build-root-contract.py; see ADR-0004 D1/D2)
+                     tools/build-root-contract.py; see single-producer rule)
   --privileges PATH  rootfs-derived privileged-file expectations
                      (setuid/setgid modes + security.capability xattrs; required
                      for installer.img, produced by scripts/build-image.sh)'

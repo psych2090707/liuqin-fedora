@@ -7,7 +7,7 @@ ARCH=aarch64
 DESKTOP=gnome
 LOGIN_MANAGER=gdm
 ROOT_LABEL=LIUQIN_ROOT
-# Flat image layout (ADR-0004 D4): /home is part of the root partition.
+# Flat image layout (flat install contract): /home is part of the root partition.
 HOME_LABEL=none
 ROOT_LAYOUT=flat
 DISPLAY_CONNECTOR=DSI-1

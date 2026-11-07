@@ -6,7 +6,7 @@ A PATH-injected Fastboot simulator (tests/installer/fake-fastboot) answers the
 read-only queries; the installer runs with --dry-run, which is the only mode
 these tests can reach because every mutating Fastboot command needs
 --yes-write-device and that is never passed.  Assertions cover the refusal
-branches required by task-8: wrong device, locked bootloader, too-small
+branches required by the installer dry-run work: wrong device, locked bootloader, too-small
 userdata, boot partition size mismatch, unrecognised GPT and the
 partition-table restore/rollback path.
 

@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 #
-# Privileged-file validation for the Fedora RAM installer (ADR-0004 D3/D4).
+# Privileged-file validation for the Fedora RAM installer (privileged-file and flat install contracts).
 #
 # The expectation list is NOT hardcoded here: scripts/build-image.sh scans the
 # real assembled rootfs (every setuid/setgid file and every file carrying a

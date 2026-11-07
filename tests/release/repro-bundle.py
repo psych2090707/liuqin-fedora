@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Reproducibility probe for an assembled liuqin bundle (task-22).
+"""Reproducibility probe for an assembled liuqin bundle (release tooling).
 
-Re-runs the key assembly stages of task-14 against the staged inputs and compares
+Re-runs the key assembly stages of the image assembly against the staged inputs and compares
 byte hashes with the shipped bundle:
 
   1. rootfs.tar.gz  — same deterministic tar+gzip command over the staged
@@ -254,7 +254,7 @@ def main(argv=None):
     parser.add_argument('--out', type=Path,
                         help='probe output directory (default out/bundle-acceptance/repro-<name>)')
     parser.add_argument('--work', type=Path,
-                        help='task-14 staging directory (default out/image-build/<bundle-name>)')
+                        help='image staging directory (default out/image-build/<bundle-name>)')
     parser.add_argument('--skip-boot', action='store_true')
     parser.add_argument('--skip-rootfs-tar', action='store_true')
     parser.add_argument('--skip-root-img', action='store_true')

@@ -95,7 +95,7 @@ def make_dtb(marker):
 
 
 def write_tree(root, release):
-    # ADR-0004 D4: the delivered root is FLAT (partition root == rootfs root).
+    # flat install contract: the delivered root is FLAT (partition root == rootfs root).
     native = root
 
     def text(relative, content, mode=0o644):
@@ -147,7 +147,7 @@ def build_fixture(work):
     subprocess.run(['mkfs.ext4', '-q', '-F', '-L', 'LIUQIN_ROOT', '-b', '4096', '-m', '0',
                     '-U', '11111111-2222-3333-4444-555555555555', '-d', str(tree),
                     str(root_img)], check=True)
-    # ADR-0004 D4: the archive root is the rootfs root; the installer extracts it
+    # flat install contract: the archive root is the rootfs root; the installer extracts it
     # directly onto the partition root (no native-root/ level).
     with (bundle / 'rootfs.tar.gz').open('wb') as stream:
         subprocess.run(['tar', '-czf', '-', '-C', str(tree), '.'],
@@ -155,7 +155,7 @@ def build_fixture(work):
 
     marker_sha = sha(tree / 'etc/liuqin-fedora-root')
     contract = ('LIUQIN_FEDORA_ROOT_CONTRACT_V2\n' +
-                '# fixture v2 topology contract (ADR-0004 D2)\n' +
+                '# fixture v2 topology contract (topology contract)\n' +
                 f'marker /etc/liuqin-fedora-root 0644 {marker_sha}\n' +
                 'file /usr/lib/systemd/system/plasmalogin.service\n' +
                 'exec /usr/lib/systemd/system/plasmalogin\n' +

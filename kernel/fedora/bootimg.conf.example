@@ -12,10 +12,10 @@
 # Applying a staged image is an explicit operator action:
 #   liuqin-apply-boot --image /boot/liuqin/boot-<kver>.img   # dry-run
 #
-# --- P0: on-device boot rebuild tool stack ---------------------------------
+# --- required: on-device boot rebuild tool stack ---------------------------------
 # The kernel-install hook MUST rebuild root contract + initramfs + boot.img for
 # the new kernel (never reuse the stale ramdisk). Provide the boot-assets root
-# (Phase 3 package liuqin-boot-tools): bin/build-initramfs.sh,
+# (liuqin-boot-tools package liuqin-boot-tools): bin/build-initramfs.sh,
 # bin/build-bootimg.sh, bin/busybox, firmware-pool/, wlan-hsp2-tuple/,
 # audio/Xiaomi-Pad-6-Pro-tplg.bin, and the rootfs hash manifest.
 LIUQIN_BOOT_ASSETS_DIR=/usr/libexec/liuqin/boot-assets
@@ -51,7 +51,7 @@ LIUQIN_BOOTIMG_DTB_SOURCE=stock-rom
 
 # --- inputs ----------------------------------------------------------------
 # NOTE: there is no LIUQIN_RAMDISK knob anymore. The hook always rebuilds the
-# initramfs from the assets above for the new kernel (task-15 P0-1); a stale
+# initramfs from the assets above for the new kernel (the boot refresh invariant); a stale
 # prebuilt ramdisk must never be reused.
 
 # AOSP mkbootimg checkout shipped in the kernel RPM (python scripts).

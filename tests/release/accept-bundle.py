@@ -3,12 +3,12 @@
 """Offline acceptance test for a real liuqin Fedora bundle.
 
 TEST-ONLY HARNESS: the single *project* bundle verifier is
-``scripts/verify-bundle.sh`` (ADR-0004 D1).  This runner is kept as a task-22
+``scripts/verify-bundle.sh`` (single-producer rule).  This runner is kept as a release tooling
 test harness for release-asset packaging checks and must not be treated as a
 second production verifier; the delivery gate evidence comes from
 scripts/verify-bundle.sh.
 
-This is the task-22 end-to-end acceptance runner: it takes an assembled bundle
+This is the end-to-end acceptance runner: it takes an assembled bundle
 directory (``images/<name>/``: boot.img, installer.img, root.img,
 rootfs.tar.gz, bundle.json, SHA256SUMS, manifests/, VERIFICATION.md,
 LICENSE, NOTICE) and verifies everything that can be verified without a
@@ -19,7 +19,7 @@ tablet:
      fake Fastboot simulator (no device, no writes)
   C  kernel release chain: bundle.json <-> root.img (flat root) <-> rootfs.tar.gz
      <-> manifests/kernel-modules.manifest <-> kernel source lock
-  D  root.img content: e2fsck, ext4 label/block size, FLAT layout (ADR-0004 D4),
+  D  root.img content: e2fsck, ext4 label/block size, FLAT layout (flat install contract),
      os-release, fstab labels, plasmalogin display manager, release-gate
      prerequisite files, aarch64-only ELF scan (fuse2fs, read-only), package list
   E  boot.img structure: Android header v2, 192 MiB limit, ramdisk initramfs
@@ -205,7 +205,7 @@ class Report:
             f'- generated: `{manifest_data["generated"]}`',
             f'- host: `{manifest_data["host"]}`',
             f'- verdict: **{manifest_data["verdict"]}**',
-            f'- Phase 6 install candidate: **{manifest_data["phase6_candidate"]}**',
+            f'- install candidate: **{manifest_data["phase6_candidate"]}**',
             f'- device_ready: `{manifest_data["device_ready"]}`',
             '',
         ]
@@ -495,7 +495,7 @@ def section_d_root_img(report, bundle, bundle_json, out):
 
     root_ls = debugfs(image, 'ls -l /')
     root_names = (root_ls.stdout or '')
-    report.ok(section, 'D3 flat layout (ADR-0004 D4)',
+    report.ok(section, 'D3 flat layout (flat install contract)',
               'native-root' not in root_names and 'etc' in root_names and 'usr' in root_names,
               'LIUQIN_ROOT root IS the rootfs root (/etc, /usr at the image root; no native-root/)')
     marker = debugfs_cat(image, '/etc/liuqin-fedora-root')
@@ -651,7 +651,7 @@ def section_e_boot(report, bundle):
               contract_lines[:1] == ['LIUQIN_FEDORA_ROOT_CONTRACT_V2']
               and len(topology) >= 8 and not content_pins,
               f'header={contract_lines[:1]!r} topology_entries={len(topology)} '
-              f'content_pins={len(content_pins)} (ADR-0004 D2)')
+              f'content_pins={len(content_pins)} (topology contract)')
     report.ok(section, 'E4 boot size limit', header['bytes'] <= BOOT_PARTITION_BYTES,
               f'{header["bytes"]} <= {BOOT_PARTITION_BYTES}')
 
@@ -695,7 +695,7 @@ def section_g_verification(report, bundle, bundle_json, out):
     if qemu:
         report.info(section, 'G2 qemu user-space validation', json.dumps(qemu)[:400])
     else:
-        report.info(section, 'G2 historical qemu validation', 'not required; VM simulation retired (ADR-0005)')
+        report.info(section, 'G2 historical qemu validation', 'not required; VM simulation retired (retired VM plan)')
 
     if not VERIFY_BUNDLE.is_file():
         report.skip(section, 'G3 project verifier', 'scripts/verify-bundle.sh missing')
@@ -816,7 +816,7 @@ def accept(bundle, out, skip_external=False, simulator=FAKE_FASTBOOT):
     (out / 'acceptance.json').write_text(json.dumps(manifest, indent=2) + '\n')
     (out / 'ACCEPTANCE.md').write_text(report.render_markdown(manifest))
     print('\nverdict: ' + verdict, flush=True)
-    print('Phase 6 install candidate: ' + ('YES' if phase6 else 'NO'), flush=True)
+    print('install candidate: ' + ('YES' if phase6 else 'NO'), flush=True)
     return 0 if counts['FAIL'] == 0 else 1
 
 

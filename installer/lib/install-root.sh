@@ -5,7 +5,7 @@
 #           every change carries a "# FEDORA:" comment.  The Ubuntu-original
 #           stays at upstream/xiaomipad-6pro-mainline/tools/lib/install-root.sh.
 # Device-side installer, intended only for the dedicated read-only RAM image.
-# Fedora changes (ADR-0004 D4):
+# Fedora changes (flat install contract):
 #   * FLAT installation: the rootfs archive is extracted onto the partition root
 #     (no /native-root subdirectory), matching root.img, the boot image's Fedora
 #     profile and the admission contract; the old nested layout is gone;
@@ -14,7 +14,7 @@
 #   * the installer image embeds the Fedora admission contract v2, validated
 #     before the first write, applied to the extracted tree after extraction and
 #     re-applied after a read-only remount; mutable content hashes are never
-#     compared (ADR-0004 D2);
+#     compared (topology contract);
 #   * /etc/fstab is written with the filesystem UUID created here, the
 #     machine-id is cleared and random-seed removed; files owned by the RPMs /
 #     listed in the contract are never rewritten by the installer.
@@ -207,7 +207,7 @@ enable_unit() { # <target root> <unit file name>
 	done
 }
 
-# --- Fedora root admission contract v2 (ADR-0004 D2/D4) --------------------
+# --- Fedora root admission contract v2 (topology contract) --------------------
 # Topology only: the installer verifies the extracted tree with the same
 # predicate the boot image runs (root role marker, PID1/login manager/Plasma
 # programs, kernel identity interface).  Mutable configuration and device-payload
@@ -427,7 +427,7 @@ fedora_desktop() { # <target root>
 	fd_user=$(/bin/busybox awk -F: '$3 >= 1000 && $3 < 65534 {print $1; exit}' "$1/etc/passwd")
 	[ -n "$fd_user" ] ||
 		die 'the Fedora rootfs ships no desktop user (UID >= 1000)' \
-			'—— 根文件系统没有桌面用户；请在镜像构建时内置首个用户（Phase 6 策略）'
+			'—— 根文件系统没有桌面用户；请在镜像构建时内置首个用户'
 	printf 'liuqin-install: desktop user: %s (login manager: %s)\n' "$fd_user" "$fd_lm_name"
 	enable_unit "$1" "$fd_lm_unit"
 	# Both profiles enable the login manager through the systemd alias; the
@@ -446,7 +446,7 @@ fedora_desktop() { # <target root>
 		/bin/busybox chmod 0444 "$fd_id"
 	done
 	rm -f "$1/var/lib/systemd/random-seed"
-	# SELinux is a Phase 6 decision: an enforcing rootfs without a relabel
+	# SELinux is an image-build decision: an enforcing rootfs without a relabel
 	# step may not reach the display manager.  Record it where the operator
 	# sees it instead of guessing.
 	if [ -f "$1/etc/selinux/config" ] &&
@@ -510,7 +510,7 @@ case $4 in ''|*[!0-9]*) die 'invalid archive size' ;; esac
 available=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
 [ "$4" -gt 0 ] && [ "$(( $4 + 536870912 ))" -lt "$((available * 1024))" ] ||
 	die 'insufficient RAM to stage this archive safely'
-# FEDORA (ADR-0004 D4): every check that can be done without touching the target
+# FEDORA (flat install contract): every check that can be done without touching the target
 # partitions happens before the first write:
 #   1. the embedded admission contract v2 is structurally valid;
 #   2. the downloaded rootfs archive matches the bundle's size and sha256;
@@ -565,7 +565,7 @@ download_mounted=true
 /bin/busybox wget -O "$archive" "$2"
 [ "$(stat -c %s "$archive")" = "$4" ] || die 'downloaded archive size mismatch'
 printf '%s  %s\n' "$3" "$archive" | /bin/busybox sha256sum -c -
-# FLAT-layout preflight (ADR-0004 D4): the archive root must be the rootfs root.
+# FLAT-layout preflight (flat install contract): the archive root must be the rootfs root.
 # This is a pure read of the downloaded archive, before any partition write.
 archive_entries=/mnt/install-download/rootfs.entries
 /usr/bin/tar -tzf "$archive" >"$archive_entries" ||
@@ -599,14 +599,14 @@ opened=true
 /bin/busybox blockdev --setrw "$home"
 prepare_home "$home" "$keep_home"
 # A filesystem UUID is generated here so /etc/fstab names the home filesystem by
-# UUID (ADR-0004 D4); the root filesystem stays discoverable by LABEL=LIUQIN_ROOT
+# UUID (flat install contract); the root filesystem stays discoverable by LABEL=LIUQIN_ROOT
 # exactly as the boot image expects.
 root_uuid=$(cat /proc/sys/kernel/random/uuid)
 case $root_uuid in *[!0-9a-f-]*|'') die 'could not generate a root filesystem UUID' ;; esac
 /usr/sbin/mkfs.ext4 -F -L LIUQIN_ROOT -m 0 -U "$root_uuid" "$root"
 mount -t ext4 "$root" /mnt/install
 mounted=true
-# ADR-0004 D4: FLAT install.  The partition root IS the rootfs root, exactly
+# flat install contract: FLAT install.  The partition root IS the rootfs root, exactly
 # like root.img and the boot image's Fedora profile; there is no /native-root.
 /usr/bin/tar -xzf "$archive" -C /mnt/install \
 	--numeric-owner --same-owner --same-permissions --acls --xattrs --xattrs-include='*' --warning=no-timestamp
@@ -649,7 +649,7 @@ printf 'liuqin-install: privileged metadata preserved (%s entries: %s setuid/set
 [ "$fpf_total" -gt 0 ] ||
 	printf 'liuqin-install: note: the image declared no privileged files\n' >&2
 fedora_desktop /mnt/install
-# ADR-0004 D4: the extracted+configured tree must satisfy the same admission
+# flat install contract: the extracted+configured tree must satisfy the same admission
 # topology the boot image runs.  No mutable content hashes are compared; the
 # marker content and the KDE topology are the fail-closed surface.
 [ ! -e /mnt/install/native-root ] ||
@@ -657,7 +657,7 @@ fedora_desktop /mnt/install
 		'—— 安装结果出现 native-root 嵌套目录（平铺安装失败）'
 contract_apply /mnt/install
 cleanup
-# ADR-0004 D4: after the writes, remount read-only and re-run the admission
+# flat install contract: after the writes, remount read-only and re-run the admission
 # check; this is the last gate before an install can be reported successful.
 mount -t ext4 -o ro "$root" /mnt/install ||
 	die 'could not remount the installed root read-only' \

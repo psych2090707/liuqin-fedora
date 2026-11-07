@@ -51,7 +51,9 @@
 ## 重新生成审计差异
 
 ```sh
-diff -u upstream/xiaomipad-6pro-mainline/initramfs/init initramfs/init \
+diff -u --label upstream/xiaomipad-6pro-mainline/initramfs/init \
+  --label initramfs/init \
+  upstream/xiaomipad-6pro-mainline/initramfs/init initramfs/init \
   > initramfs/fedora-profile.diff || true
 ```
 

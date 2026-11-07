@@ -3,7 +3,7 @@
 #
 # /usr/libexec/liuqin/bootimg-builder — on-device boot.img builder entry point.
 #
-# EXIT/INTERFACE PLACEHOLDER (task-11): the real boot image assembly lives in the
+# EXIT/INTERFACE PLACEHOLDER: the real boot image assembly lives in the
 # project's scripts/build-bootimg.sh (owned by boot-builder). This wrapper keeps
 # the kernel-install hook decoupled from that script's location and version:
 #
@@ -18,7 +18,7 @@
 #   * exit 1 on build/verification failure, 2 on usage/environment error;
 #   * only write below --out; never write a device/boot partition.
 #
-# Until a target-side builder package exists (Phase 3+), point this wrapper at a
+# Until a target-side builder package exists, point this wrapper at a
 # real builder via LIUQIN_BUILD_BOOTIMG_SCRIPT (dev hosts use the project script):
 #
 #   LIUQIN_BUILD_BOOTIMG_SCRIPT="/path/to/repo/scripts/build-bootimg.sh"

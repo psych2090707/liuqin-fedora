@@ -2,30 +2,30 @@
 # SPDX-License-Identifier: MIT
 """Generate a Fedora KDE or GNOME stage-1 admission contract for liuqin (v2).
 
-This is the single contract producer (ADR-0004 D1/D2).  Consumers:
+This is the single contract producer (single-producer rule).  Consumers:
 
   * initramfs/init ``storage_fedora_root_ok()`` -- fail-closed boot admission;
   * installer/lib/install-root.sh -- RAM-installer pre/post-install topology
-    check (the contract is embedded in installer.img, ADR-0004 D4);
+    check (the contract is embedded in installer.img, flat install contract);
   * scripts/build-image.sh -- embeds the one generated contract in boot.img and
     installer.img, so both boot paths agree on the same policy;
   * scripts/verify-bundle.sh -- audits the delivered contract.
 
 Contract v2 changed the semantics from content hashes to *identity + topology*:
 
-  * removed (ADR-0004 D2-C): sha256 pins of /etc/hostname, /etc/locale.conf,
+  * removed (topology contract-C): sha256 pins of /etc/hostname, /etc/locale.conf,
     /etc/vconsole.conf, /etc/fstab, /etc/selinux/config, /etc/environment.d/*,
     /etc/chrony*, /etc/plasmalogin.conf.d/*, /etc/skel/* and of project device
     payloads.  Those files are owned by RPM or edited by the user; pinning them
     turned a normal ``dnf upgrade`` or hostname change into a rescue boot;
-  * kept fail-closed (ADR-0004 D2-A/B): root role marker, PID1/login manager/
+  * kept fail-closed (topology contract-A/B): root role marker, PID1/login manager/
     Plasma session topology (existence, type, executable bit, ownership), and
     the device/storage identity gates that stay in initramfs/init and are not
     part of this file;
   * kernel identity is NOT a content pin: /usr/share/liuqin/kernel.release and
     kernel-modules.manifest are only required to exist as root-owned regular
     files here; the running-kernel comparison in initramfs/init is a warning,
-    and the strict check belongs to the update/apply tools (ADR-0004 D5).
+    and the strict check belongs to the update/apply tools (metadata contract).
 
 Contract file format (ASCII, LF, sorted/stable order, no trailing spaces)::
 
@@ -51,7 +51,7 @@ Semantics, all paths resolved inside the target root without chroot:
                    systemd alias /etc/systemd/system/display-manager.service or
                    through a multi-user.target/graphical.target .wants symlink;
                    the resulting unit must exist.  Both Fedora forms are
-                   accepted (ADR-0004 D2-B).
+                   accepted (topology contract).
 
 At build time the generator must be given the assembled rootfs (``--rootfs``)
 and/or its hash manifest (``--manifest``) so a contract that cannot pass on the
@@ -101,7 +101,7 @@ CONTRACT_ENTRIES: tuple[tuple[str, ...], ...] = (
     ("exec", "/usr/lib/systemd/systemd"),
     ("exec", "/usr/bin/plasmalogin"),
     # Plasma session: at least one exec bit is required, not an exact 0755
-    # (ADR-0004 D2-B; 0555 from a frozen tree must not be required either).
+    # (topology contract; 0555 from a frozen tree must not be required either).
     ("exec", "/usr/bin/plasmashell"),
     ("exec", "/usr/bin/kwin_wayland"),
     ("exec", "/usr/bin/startplasma-wayland"),
@@ -142,7 +142,7 @@ def desktop_entries(desktop: str) -> tuple[tuple[str, ...], ...]:
     return GNOME_ENTRIES if desktop == "gnome" else CONTRACT_ENTRIES
 
 COMMENT_LINES = (
-    "# Fedora/KDE stage-1 admission contract v2 (ADR-0004 D2): device/partition",
+    "# Fedora/KDE stage-1 admission contract v2 (topology contract): device/partition",
     "# identity lives in initramfs/init; this file is the Fedora KDE topology.",
 )
 
@@ -475,7 +475,7 @@ def main() -> None:
 
     if args.extra_pins_file is not None:
         die("--extra-pins-file is a v1 concept: contract v2 has no content pins "
-            "(ADR-0004 D2); remove the flag instead of weakening boot admission")
+            "(topology contract); remove the flag instead of weakening boot admission")
     if args.allow_missing_pins:
         print("build-root-contract: note: --allow-missing-pins is a deprecated v1 no-op "
               "(contract v2 has no content pins)", file=sys.stderr)

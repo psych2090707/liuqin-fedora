@@ -350,7 +350,7 @@ manifest = {
     "diffstat": head_stat,
     "series": series,
     "groups": [groups[prefix] for prefix in GROUP_ORDER if groups[prefix]["commits"]],
-    # Forward-port hard groups (task-24): touch/HID, USB Type-C/DP, and the
+    # Forward-port hard groups (the forward-port grouping): touch/HID, USB Type-C/DP, and the
     # DP combo-PHY patches that the classifier splits between display and usb.
     "high_risk_groups": [prefix for prefix in GROUP_ORDER
                          if prefix in {"0200-display", "0300-input-touch-hid", "0700-usb-dp"}

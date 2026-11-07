@@ -180,7 +180,7 @@ printf '1\n' >"$fixture/blockdev-state/sda"
 add_part "$work/root.img" linux_root sda36
 add_part "$work/home.img" linux_home sda37
 
-# A dummy Fedora KDE root with the ADR-0004 D2 topology the contract v2 checks:
+# A dummy Fedora KDE root with the topology contract topology the contract v2 checks:
 # root marker, plasmalogin login manager, Plasma session programs, PID1 handoff,
 # kernel identity interface, plus the privileged files tar must restore with
 # their modes/capabilities.
@@ -211,7 +211,7 @@ done
 ln -s ../lib/systemd/systemd "$rootfs/usr/sbin/init"
 printf '#!/bin/sh\nexit 0\n' >"$rootfs/usr/bin/sudo"
 chmod 4111 "$rootfs/usr/bin/sudo"
-# Real Fedora 44 facts (the P0 this test previously missed): iputils ping is
+# Real Fedora 44 facts (the required this test previously missed): iputils ping is
 # mode 0755 with NO file capability (it uses net.ipv4.ping_group_range), while
 # /usr/bin/kwin_wayland DOES carry cap_sys_nice=ep.  The installer's expectation
 # list is derived from the tree, so the fixture must contain the same shape and
@@ -266,7 +266,7 @@ write_privileges() { # valid|missing-cap
 }
 write_privileges valid
 
-# The Fedora root admission contract v2 (ADR-0004 D2): topology only.  The
+# The Fedora root admission contract v2 (topology contract): topology only.  The
 # "corrupt" variant stays structurally valid so it passes the pre-write format
 # gate and is rejected by the post-extraction topology check (marker content).
 write_contract() { # valid|corrupt

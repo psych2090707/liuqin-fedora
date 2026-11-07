@@ -1167,7 +1167,7 @@ def cmd_stage(args) -> int:
         say(f"record: {record_path}")
         say("nothing was written to a device. Next:")
         say(f"  {record['dry_run_command']}    # validate")
-        say(f"  {record['apply_command']}      # write boot_a (Phase 6, double-gated)")
+        say(f"  {record['apply_command']}      # write boot_a (explicit device write, double-gated)")
     return EXIT_OK
 
 
@@ -1178,7 +1178,7 @@ def _check_write_permission() -> None:
     if os.environ.get("LIUQIN_EXPERIMENTAL_DEVICE_WRITE") != "1":
         raise Refused(
             "device write is gated: explicitly arm with LIUQIN_EXPERIMENTAL_DEVICE_WRITE=1 "
-            "after Phase 6 device authorization")
+            "after explicit device authorization")
 
 
 def cmd_apply(args) -> int:

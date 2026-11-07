@@ -27,6 +27,7 @@
 已有检查覆盖 ext4 一致性、必要目录、内核与模块匹配、Android v2 结构、两份 ramdisk 的契约，以及去固件/补齐的完整文件比较。实际产物回归入口为：
 
 ```sh
+scripts/check-docs.sh --quiet
 python3 tests/release/test-public-image.py --help
 python3 tests/installer/test-dry-run.py
 ```
