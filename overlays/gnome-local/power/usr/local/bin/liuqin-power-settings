@@ -1,8 +1,8 @@
 #!/usr/bin/python3
 # SPDX-License-Identifier: MIT
-# TN0086: "电源键与合盖" settings app for the liuqin tablet.
+# "电源键与合盖" settings app for the liuqin tablet.
 #
-# Writes /etc/liuqin/power-policy.conf (root:laplus 0664) and keeps GNOME's
+# Writes /etc/liuqin/power-policy.conf (root:<desktop group> 0664) and keeps GNOME's
 # native power-button-action at 'nothing' so gsd-media-keys does not
 # double-handle the power key. The actual key/lid handling lives in the system
 # services; this app is the update-safe UI.
@@ -30,7 +30,7 @@ LONG_VALUES = [
 ]
 LID_VALUES = [("blank", "熄屏 + 锁屏"), ("suspend", "挂起"), ("nothing", "无操作")]
 
-CONFIG_HEADER = """# TN0086: liuqin power-key / lid policy.
+CONFIG_HEADER = """# liuqin power-key / lid policy.
 # Written by /usr/local/bin/liuqin-power-settings; read by the power-key helper
 # and the lid watcher. Keep one key per line.
 #

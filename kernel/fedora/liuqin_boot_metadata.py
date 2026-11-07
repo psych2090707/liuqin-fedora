@@ -4,7 +4,7 @@
 # liuqin_boot_metadata.py — the SINGLE implementation of the liuqin boot
 # metadata schema (v2) shared by every producer and consumer.
 #
-# Producer/consumer map (ADR-0004 D5, TN0032):
+# Producer/consumer map:
 #   liuqin-bootimg-refresh            -> CLI `merge`   (writes build-info.json v2)
 #   99-liuqin-android-boot.install    -> CLI `stage`   (validates v2, writes
 #                                        boot-<kver>.manifest + .SHA256SUMS)
@@ -13,7 +13,7 @@
 #
 # Installed path: /usr/lib/liuqin/liuqin_boot_metadata.py (kernel-liuqin RPM).
 # The repo copy (kernel/fedora/liuqin_boot_metadata.py) and the packaged copy
-# are byte-identical; docs/maintenance/boot-update.md §"schema v2" is the human contract.
+# are byte-identical; the schema documented below is the human contract.
 #
 # ============================== SCHEMA v2 ==================================
 # The metadata file is JSON.  Canonical (nested) locations carry the data; the
@@ -22,7 +22,7 @@
 # refresh output: flat bootimg_sha256/kernel_release/dtb_source with the
 # boot-builder document nested under "bootimg_build_info") are still READ by
 # the consumer so an existing device can diagnose staged images, but staging
-# and write-mode apply require schema v2 (see docs/maintenance/boot-update.md §5).
+# and write-mode apply require schema v2.
 #
 # {
 #   "schema": "liuqin-boot-metadata",
@@ -314,8 +314,8 @@ def _canonical_v2(raw: dict) -> dict:
 
 
 def _canonical_v1(raw: dict) -> dict:
-    """Map the pre-TN0032 refresh output (schema v1) onto the canonical view."""
-    warnings = ["legacy schema v1 metadata: produced before TN0032; re-run the "
+    """Map the legacy schema-v1 refresh output onto the canonical view."""
+    warnings = ["legacy schema v1 metadata: produced by an older refresh tool; re-run the "
                 "kernel-install hook to stage schema v2 before writing"]
     builder = raw.get("bootimg_build_info") or {}
     initramfs = raw.get("initramfs_build_info") or {}
@@ -651,7 +651,7 @@ def stage_metadata(*, build_info: Path, image: Path, staged_dir: Path, kver: str
         "device_write": "not performed (staged only; use liuqin-apply-boot)",
         "qbootctl": "not used; gpt_slot_attributes=not modified",
     }
-    lines = ["# liuqin boot image staging manifest (schema v2; TN0032)"]
+    lines = ["# liuqin boot image staging manifest (schema v2)"]
     lines += [f"{key}={value}" for key, value in manifest.items()]
     _atomic_text(staged_dir / names["manifest"], "\n".join(lines) + "\n")
     _atomic_text(staged_dir / names["sums"],

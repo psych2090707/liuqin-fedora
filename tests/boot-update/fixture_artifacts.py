@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Offline simulation fixtures for the liuqin update/rollback chain (TN0032).
+"""Offline simulation fixtures for the liuqin update/rollback chain.
 
 Everything here is a regular file under a temporary directory: no block device,
-no loop device, no tablet.  The important rule from docs/archive/direction-review-2026-10-20.md §4.2 is
+no loop device, no tablet.  The important rule is
 obeyed: **the staging metadata consumed by liuqin-apply-boot is always produced
 by running the real producer commands** (liuqin_boot_metadata.py `merge` and
 `stage`, i.e. exactly what liuqin-bootimg-refresh and the kernel-install hook

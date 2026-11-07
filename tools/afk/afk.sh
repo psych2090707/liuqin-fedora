@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — host-side control tool for the liuqin Fedora device.
+# AFK channel — host-side control tool for the liuqin Fedora device.
 #
 # One USB cable, no interaction, scriptable:
 #   afk.sh setup                 # local keys/config/state only (not device setup)
@@ -19,7 +19,7 @@
 # Configuration: tools/afk/afk.env (see afk.env.example), or AFK_* environment
 # variables.  Everything written goes to out/afk/ (git-ignored).
 #
-# Docs: docs/maintenance/afk-channel.md
+# Docs: tools/afk/README.md
 set -euo pipefail
 
 AFK_TOOLS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -94,7 +94,7 @@ cmd_setup() {
     section "next steps"
     cat <<EOF
 Try the existing connection first: tools/afk/afk.sh run 'id'
-Current GNOME maintenance: docs/maintenance/afk-channel.md
+Current GNOME maintenance: tools/afk/README.md
 Do not reinstall the historical KDE overlay or assume the example credentials
 match this device. Network setup, device changes and reboot are separate actions.
 EOF
@@ -148,7 +148,7 @@ cmd_up() {
         ok "key auth works"
     else
         note "key auth not usable; check the current account/key in private afk.env"
-        note "see docs/maintenance/afk-channel.md; do not reinstall the old KDE overlay"
+        note "see tools/afk/README.md; do not reinstall the old KDE overlay"
     fi
     section "device"
     afk_remote_summary || warn "device summary unavailable (SSH not authenticated yet)"
@@ -295,7 +295,7 @@ cmd_pull() {
 
 # ------------------------------------------------------------------- screenshot ---
 cmd_shot() {
-    die "legacy KDE screenshot command retired; current GNOME capture is not implemented (docs/maintenance/afk-channel.md)"
+    die "legacy KDE screenshot command retired; current GNOME capture is not implemented (tools/afk/README.md)"
 }
 
 # -------------------------------------------------------------------- logs ---
@@ -460,7 +460,7 @@ EOF
 
 # ---------------------------------------------------------------------- rdp ---
 cmd_rdp() {
-    die "legacy KRDP command retired; current GNOME remote desktop is not implemented (docs/maintenance/afk-channel.md)"
+    die "legacy KRDP command retired; current GNOME remote desktop is not implemented (tools/afk/README.md)"
 }
 
 cmd_tunnel() {

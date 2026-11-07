@@ -1,10 +1,9 @@
 # WCD938x RX alert: preserve codec IRQ dispatch without NULL regmap access
 
-Local fix for the 2026-11-03 overnight failure investigation. It remains
-outside the default patch series. After bounded RAM audio/sleep checks, the
-user authorized deployment to B; the full partition readback and a normal
-boot were verified on 2026-11-03. Overnight reliability remains unverified.
-Current build/test state belongs to the existing task result.
+Local fix for an overnight-failure investigation. It remains outside the
+default patch series. After bounded RAM audio/sleep checks, it was deployed to
+the maintenance device; a full partition readback and a normal boot were
+verified. Overnight reliability remains unverified.
 
 The matching failed-boot trace has `regmap_read(NULL, ...)` called from
 `wcd9380_interrupt_callback`, then the SoundWire IRQ thread exits. The driver

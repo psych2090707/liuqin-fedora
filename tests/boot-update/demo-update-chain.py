@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Reproducible offline evidence for the TN0032 update/rollback chain.
+"""Reproducible offline evidence for the boot update/rollback chain.
 
 Runs the deliverable sequence on a simulated tablet (regular files only):
 
@@ -204,7 +204,7 @@ def main() -> int:
     # ------------------------------------------------------------- summary
     emit("hashes")
     evidence = {
-        "task": "TN0032",
+        "scope": "boot update/rollback chain",
         "simulation": "regular files only (no block/loop device, no tablet)",
         "releases": {
             tag: {

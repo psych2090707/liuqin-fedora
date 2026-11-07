@@ -1,15 +1,15 @@
 # overlays/rootfs/ — device-layer injection point (root.img assembly stage)
 
-> 历史 KDE 完整镜像离线接口，不是把本树覆盖当前 GNOME 的方法；不写现机 root.img。当前维护看 build-pipeline。
+> 保留的历史 KDE 完整镜像离线接口，不代表当前 GNOME 镜像的组装方式；不写现机 root.img。
 
-The KDE rootfs produced by `scripts/build-rootfs.sh` is **device-neutral** on
-purpose: it contains Fedora userspace only. Everything liuqin-specific — kernel,
-DTBs, firmware, ALSA UCM/topology, sensor stack, fingerprint bits, power/boot
-helpers, KDE device defaults — is injected **after** the rootfs export and
-**before** `root.img` is created.
+The KDE rootfs produced by `scripts/build-rootfs.sh --profile plasma` was
+**device-neutral** on purpose: it contains Fedora userspace only. Everything
+liuqin-specific — kernel, DTBs, firmware, ALSA UCM/topology, sensor stack,
+fingerprint bits, power/boot helpers, KDE device defaults — is injected **after**
+the rootfs export and **before** `root.img` is created.
 
-This directory defines that interface so the image task (task-7/task-8) can
-consume it without touching the mkosi build.
+This directory defines that interface so the image assembler can consume it
+without touching the mkosi build.
 
 ## Contract: `rootfs.d/<NN>-<component>/`
 
@@ -32,7 +32,7 @@ rootfs.d/50-liuqin-desktop/      KDE/tablet config (kdeglobals, plasmalogin,
                                  kwin output defaults, systemd units)
 ```
 
-Rules for the assembler (`scripts/build-image.sh`, later task):
+Rules for the assembler (`scripts/build-image.sh`):
 
 1. Copy `out/rootfs/rootfs/` → staging root, then for each `rootfs.d/*/` in
    order: `dnf --installroot=<staging> -y install rpms/*.rpm` (offline, local
@@ -40,16 +40,16 @@ Rules for the assembler (`scripts/build-image.sh`, later task):
    `chroot <staging> /path/to/install.sh` if present.
 2. Never put device-unique data in here (calibration, serials, MACs, persist
    blobs, fingerprint templates): those come from the user's own device at
-   provisioning time. See the repo red lines in `AGENTS.md`.
+   provisioning time.
 3. Firmware with unclear redistribution rights must not be committed to the
    repo; reference it from a user-supplied `--firmware-dir` and record hashes.
 4. After injection, generate the final root contract/manifest from the *staged
    tree* (do not reuse `out/rootfs/rootfs.files.sha256`) and run the
    `scripts/build-rootfs.sh --skip-build --out <staging>` validation where
    meaningful (kernel.absent will legitimately fail — the device kernel is now
-   present; run the image task's own checks instead).
+   present; run the image assembler's own checks instead).
 
-## What the image task can rely on from the rootfs build
+## What the assembler can rely on from the rootfs build
 
 - `/etc/liuqin/image-contract` — device/labels/display/login-manager contract
   (read it, do not hardcode).
@@ -62,12 +62,12 @@ Rules for the assembler (`scripts/build-image.sh`, later task):
   with NEVRA/arch/size) plus artifact hashes; `build-info.json` records inputs,
   `target.display_manager_service` the actual `display-manager.service` target.
 - `/etc/systemd/system/display-manager.service -> /usr/lib/systemd/system/
-  plasmalogin.service` and `plasmalogin.service` enabled: assert this alias in
-  the boot/initramfs contract (do not assume sddm).
+  plasmalogin.service` and `plasmalogin.service` enabled in the historical KDE
+  profile: assert this alias in the boot/initramfs contract (do not assume sddm).
 - `systemd-firstboot` is masked and absent from `sysinit.target.wants`: the image
   must boot unattended; keep that contract when regenerating the tree.
 - No kernel/initramfs is present: inject `kernel-liuqin` first, then run dracut.
-- Fedora 44 ships device-relevant firmware as split, xz-compressed packages:
+- Fedora ships device-relevant firmware as split, xz-compressed packages:
   `atheros-firmware` (WCN6855 WiFi/BT), `cirrus-audio-firmware` (CS35L41 speaker
   protection DSP), `qcom-firmware` (a730_sqe). They are in the rootfs.
   **Firmware pool check for the initramfs/image stage:** upstream liuqin

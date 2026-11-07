@@ -1,4 +1,4 @@
-# AFK channel (TN0048) — opt-in systemd hardware watchdog.
+# AFK channel — opt-in systemd hardware watchdog.
 #
 # INSTALLED ONLY WITH: install.sh --watchdog   (shipped as .off otherwise)
 #

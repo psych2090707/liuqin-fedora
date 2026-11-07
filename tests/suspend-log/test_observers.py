@@ -5,7 +5,7 @@
 Run from the project root:
     python3 -B -m unittest discover -s tests/suspend-log -p 'test_*.py' -v
 
-Cases map to docs/archive/spontaneous-wake-runbook.md S3:
+Cases map to the spontaneous-wake runbook S3:
 N1-N3 notification recording, I1 IRQ kept without post wake flag,
 T1-T2 clock/window handling, S1-S2 screen-latest classification.
 """

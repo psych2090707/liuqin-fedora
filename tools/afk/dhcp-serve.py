@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AFK channel (TN0048) — minimal bootstrap DHCP server for the USB NCM link.
+"""AFK channel — minimal bootstrap DHCP server for the USB NCM link.
 
 Why this exists
 ---------------

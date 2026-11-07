@@ -36,7 +36,7 @@
 #   /usr/local/sbin/    -> /usr/libexec/liuqin/
 #   /usr/local/bin/     -> /usr/libexec/liuqin/
 #
-# Deliberately excluded (GNOME/Ubuntu-specific; see docs/maintenance/device-packages.md):
+# Deliberately excluded (GNOME/Ubuntu-specific):
 #   dconf/gdm profiles, gnome-storage-guard, gnome-usb-rescue, snap admission,
 #   Snapshot desktop/dbus entries, liuqin-shell, liuqin-camera, liuqin-rescue,
 #   power-menu (zenity/GNOME), flash-kernel marker, environment.d dmabuf.

@@ -8,6 +8,8 @@ tag `v0.6.0`（2026-10-08），本仓库锁定 commit
 本目录所有源自上游的文件都保留 `SPDX-License-Identifier: MIT` 并加注来源 commit；
 Fedora 改写处以 `# FEDORA:` 注释标出。
 
+下表中的 `tools/…`、`device/…` 和 `tests/…` 指上游仓库内的路径；本仓库对应文件列在“本目录”一列。
+
 **复用程度（按行）**：host 安装器 871 行中约 320 行是新增的 Fedora 门控/dry-run/测试钩子
 （diff `+323 / -51`），其余为逐字上游代码；四个设备侧 shell 脚本与 C helper 只加了来源注释
 （每个 +6~9 行 diff），`liuqin_layout.py` 只改了一处用户可见文案（+9 行 diff，含注释）；
@@ -30,8 +32,8 @@ Fedora 改写处以 `# FEDORA:` 注释标出。
 |---|---|
 | `installer/build-runtime.py` | Fedora aarch64 包树 → installer runtime；参考上游 `tools/lib/build-installer-runtime.py` 的清单机制（同样 7 个 ELF + `mke2fs.conf` + 静态 reboot），改用无第三方依赖的 ELF 读取器 |
 | `installer/assemble-installer.py` | 生成 RAM 安装器 overlay + `installer-image.json`（boot-builder 接口） |
-| （已删除）`installer/make-root-contract.py` | ADR-0004 D1：重复的 v1 契约生成器已删除；唯一生产者是 `tools/build-root-contract.py`（契约 v2 拓扑语义） |
-| （已删除）`installer/make-bundle.py` | ADR-0004 D1：重复的 bundle 生成器已删除；唯一生产者是 `scripts/build-image.sh`，唯一验证者是 `scripts/verify-bundle.sh` |
+| （已删除）installer/make-root-contract.py | ADR-0004 D1：重复的 v1 契约生成器已删除；唯一生产者是 `tools/build-root-contract.py`（契约 v2 拓扑语义） |
+| （已删除）installer/make-bundle.py | ADR-0004 D1：重复的 bundle 生成器已删除；唯一生产者是 `scripts/build-image.sh`，唯一验证者是 `scripts/verify-bundle.sh` |
 | `scripts/build-installer.sh` | runtime/overlay 一键构建（podman Fedora 容器 / mkosi rootfs / RPM 目录三种来源） |
 | `tests/installer/*` | 离线测试；`test-layout.py`、`test-layout-sh.sh`、`test-host.py` 由上游 `tests/installer-layout.py`、`tests/install-layout.sh`、`tests/installer.py` 适配（同样 MIT，注明来源）；`fake-fastboot` 是本项目新增模拟器 |
 

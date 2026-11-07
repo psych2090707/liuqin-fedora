@@ -733,8 +733,8 @@ async fn main() -> Result<()> {
 
     let (dry_run, probe, ensure_on_requested, ensure_off_requested) = parse_args();
     let uid = std::env::var("LIUQIN_UID").unwrap_or_else(|_| "1000".to_string());
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/laplus".to_string());
-    let user = std::env::var("USER").unwrap_or_else(|_| "laplus".to_string());
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
+    let user = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
     let runtime_dir = PathBuf::from(format!("/run/user/{uid}"));
     let state_dir = state_dir_for_uid(&uid);
     if let Err(error) = fs::create_dir_all(&state_dir) {

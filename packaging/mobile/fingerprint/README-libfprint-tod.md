@@ -1,14 +1,9 @@
-# libfprint-tod：复用锁定 TOD 开源代码的 Fedora 构建（TN0034）
+# libfprint-tod：复用锁定 TOD 开源代码的 Fedora 构建
 
 状态（2026-10-20）：**完成（verified-offline）** —— 源码核实 PASS、3 个 Fedora 44 aarch64 RPM
 构建成功、离线验证 PASS（`packaging/mobile/fingerprint/verify-libfprint-tod.sh`）。
-结论分级：**源码可复现构建/包可安装/TOD 可枚举 = `verified-offline`；指纹录入/解锁 = `pending-device`**
-（本机无平板，禁止宣称可用）。完整结论/证据/遗留见
-`tasks/archive/TN0034-fingerprint-tod-reuse/RESULT.md`。
-
-本文替换原 `README-libfprint-tod-BLOCKED.md` 中"禁止使用 Ubuntu 源包 / 自行移植 TOD ABI"
-的方向。撤销依据：DIRECTION-REVIEW.md 一（指纹）与
-ADR-0004 D7。
+结论分级：**源码可复现构建/包可安装/TOD 可枚举 = `verified-offline`；指纹录入/解锁 = `pending-device`**。
+没有实机录入/解锁证据时不得宣称可用。
 
 ## 1. 事实：Fedora 没有 TOD，但 TOD 源码是公开的 LGPL 开源代码
 
@@ -97,10 +92,10 @@ scripts/build-mobile-rpms.sh fingerprint-tod
 
 验证脚本：`packaging/mobile/fingerprint/verify-libfprint-tod.sh`（主机编排，arm64 容器内执行；
 另一 throwaway 容器把 `/dev/null` 绑定为假 `/dev/fpc1020`）。
-**最终结果：`TN0034 VERIFY: PASS`**（`out/fingerprint-tod/logs/verify-tod5.log`；
+**最终结果：`VERIFY: PASS`**（`out/fingerprint-tod/logs/verify-tod5.log`；
 明细 `out/fingerprint-tod/verify/{rpm-verify,probe-verify}.log`）。
 
-关键实测输出（详见 RESULT.md）：
+关键实测输出：
 
 - `fprintd-oem` 的 **47** 个 `fp_*` 未定义符号 + `LIBFPRINT_2.0.0` 版本全部由重建的 TOD 库提供
   → 现有 `fprintd-oem` 二进制无需重建；
@@ -145,7 +140,7 @@ scripts/build-mobile-rpms.sh fingerprint-tod
 
 ## 6. 遗留与下一步
 
-- 本机未连设备，指纹录入/解锁仍 `pending-device`，不阻挡第一版桌面；
+- 当前没有连接设备，指纹录入/解锁仍 `pending-device`，不阻挡第一版桌面；
 - 实机阶段：`liuqin-fpc-stable-module.service` 加载匹配内核模块 → 用户 `modem_a`
   提取 TA 固件 → 私有 daemon 起 → `fprintd-enroll`/PAM 验收；
 - 版本升级：TOD 源码升级需同时更新 `SOURCE_LOCK.json`（上游仓库）与本目录文档中的

@@ -5,9 +5,8 @@ Desktop-neutral device layer for the Xiaomi Pad 6 Pro magnetic keyboard cover
 
 The MCU pulses its wake line on every suspend entry. With wake enabled this
 aborts deep suspend with `Wakeup pending` / `wake IRQ with no resume`, and can
-end an otherwise good sleep. This was first recorded in TN0067 (2026-10-24) on
-the old KDE image; the same behaviour was observed on F45 / 7.3.1 on
-2026-11-07.
+end an otherwise good sleep. The behaviour was first recorded on the old KDE
+image and was still observed on F45 / 7.3.1 in November 2026.
 
 The rule disables only this device's `power/wakeup`:
 
@@ -30,7 +29,3 @@ overlay.
 Rollback: delete the rule (or set `power/wakeup` back to `enabled` for
 `4-004c`) and reboot. The old KDE copy is available in git history before the
 move, and the rule content is unchanged.
-
-Source/evidence: TN0067 (`tasks/archive/TN0067-sync-state-power/`) and the
-2026-11-07 F45/7.3.1 standby analysis
-(`tasks/suspend-capture/RESULT.md#first-long-standby-20261107`).

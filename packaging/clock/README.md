@@ -8,7 +8,7 @@
 
 - [systemd v259 `clock_apply_epoch()`](https://github.com/systemd/systemd/blob/v259/src/core/clock-warp.c)
   在 PID1 初始化时读取 `/usr/lib/clock-epoch` 的 mtime，早于离线更新服务。
-  本机 `/usr` 在根分区、由自定义 init 直接交给根上的 systemd；不新增 initramfs。
+  `/usr` 在根分区、由自定义 init 直接交给根上的 systemd；不新增 initramfs。
 - [社区同型配置](https://terinstock.com/post/2021/12/Systemds-clock-epoch-for-RTC-less-systems/)
   已有 epoch service/timer 做法。这里增加可信检查、关机保存和离线测试，避免无条件 touch 错误日期。
 - [chronyc waitsync](https://chrony-project.org/doc/4.9/chronyc.html#waitsync) 做一次本地检查，
@@ -27,16 +27,15 @@
 独立 noarch RPM 只包含 helper、两个 service 和一个不自动启用的 timer。
 没有 RPM scriptlet、preset 或对 chronyd 的覆盖，避免重装整个 device-support 覆盖当前修复。
 `/usr/lib/clock-epoch` 是管理员运行数据，**不作为 RPM payload/ghost**，避免更新或卸载把
-mtime 变成打包时间、或删掉最后可信时间。现机已有 root:root、0644、空的该文件。
-RPM 安装不修改它；首次激活需单独备份/授权。SELinux enforcing 下未验，不以 permissive 结果承诺。
+mtime 变成打包时间、或删掉最后可信时间。
+RPM 安装不修改它；首次激活时单独备份。SELinux enforcing 下未验，不以 permissive 结果承诺。
 helper 会 fsync 并读回 mtime；I/O/fsync 失败会报告 error，不能把内存中读到的新 mtime 当作已经可靠落盘。
 服务只保留 `CAP_DAC_OVERRIDE` 以访问 chrony 自有且非其他用户可写的 Unix socket；
 没有 `CAP_SYS_TIME`，文件系统只放行 epoch、自有 runtime 和 `/run/chrony` 的写入。
 chronyc 4.9 的 Unix 查询会在服务端 socket 所在目录创建临时回信 socket，再自行清理；
 该 runtime 放行不改 chronyd 配置，也不发送校时命令。显式 `chronyc -u root` 防止 Fedora
 客户端再次降权触发被 sandbox 禁止的 setgroups/setuid；不授予 CAP_SETUID/GID 或 CAP_SYS_TIME。
-实机验收必须在 chronyd
-已同步时看到 service 的 `source=chrony`，不能仅看退出成功或 `source=holdover`。
+实机验收必须在 chronyd 已同步时看到 service 的 `source=chrony`，不能仅看退出成功或 `source=holdover`。
 
 ## 离线构建与检查
 
@@ -46,25 +45,23 @@ bash scripts/build-clock-rpm.sh
 ```
 
 构建仅使用已存在的 Fedora RPM builder，`--network=none --pull=never`，不联网装依赖。
-默认候选在 `out/tn0094-store-update-audit/clock-candidate-v4/`；重复构建另指定新输出路径，
-不清理其他任务产物。检查和实机授权/恢复步骤见
-TN0094 结果。
+重复构建请指定新的输出路径，不要清理其他产物。
 
-## 待授权的实机步骤（本轮不执行）
+## 部署与回退
 
-所有命令都针对平板，**不是宿主机**。部署前核对本次候选 SHA256、设备仍是现有 Fedora/GNOME、
-chronyd 已同步；重启和商店更新另行由用户确认，不在安装包时顺带触发。
+所有命令都针对平板，**不是宿主机**。部署前核对候选 SHA256、设备发行版/桌面、
+chronyd 已同步；重启和商店更新另行确认，不在安装包时顺带触发。
 
 1. 只读前检：包尚未安装，四个 payload 目标不存在；epoch 是 root:root、无组/其他用户写权限、
    单硬链接普通空文件；`/run/liuqin-clock` 若已有未知内容则停止核查，不覆盖。
    核对现有 chronyd 的配置/启用状态与内核 Build ID，保留其摘要作部署后对照。
-2. 在 `/var/backups/liuqin-clock-TN0094-<本次标识>/` 建 root-only 备份，使用 `cp -a`
-   保留 epoch 的**mtime 纳秒、owner/mode、SELinux 标签**；另记路径原先不存在的事实和 unit 状态。
+2. 在 `/var/backups/liuqin-clock-<标识>/` 建 root-only 备份，使用 `cp -a`
+   保留 epoch 的 **mtime 纳秒、owner/mode、SELinux 标签**；另记路径原先不存在的事实和 unit 状态。
    空文件 SHA256 恒定，**单独备份内容摘要不够回退时间下限**。
 3. 用 `rpm -Uvh --test <候选.rpm>` 正常检查依赖/冲突，再只安装这个包；不加 `--nodeps`、
    不更新 device-support 或其他包。核对 `rpm -V liuqin-clock-support` 与 payload 摘要，
    确认安装本身没有改 epoch 或启用任何 unit；按系统现有规则 `restorecon` 新文件。
-4. 仅此处才进入明确获准的激活：
+4. 明确确认后才激活：
 
    ```sh
    sudo systemctl daemon-reload
@@ -80,9 +77,8 @@ chronyd 已同步；重启和商店更新另行由用户确认，不在安装包
 5. **实机验收另行确认**：一次正常重启看 PID1 的 `System time advanced to ... /usr/lib/clock-epoch`
    或实际启动时间，确认它早于离线更新、并保留同 boot ID/单调时间证据；随后在用户实际点击商店
    更新时核对事务成功与版本变化。不为测试故意把真机时钟拨错、不关闭网络、不跑完整刷机。
-   更新列表可能已变，须重新检查不含未获准的专用内核/模块替换。
 
-## 停用与完整回退（同样待授权）
+## 停用与完整回退
 
 先 disable/stop `liuqin-clock-save.timer`，停止可能仍在运行的 save service，最后 disable/stop
 `liuqin-clock-shutdown.service`。**最后一步会执行一次 ExecStop 保存**，所以不能先恢复备份再停止它。
@@ -91,5 +87,5 @@ chronyd 已同步；重启和商店更新另行由用户确认，不在安装包
 - 如需完整还原，先确认新 unit 全部停止，再正常 `rpm -e` 仅卸载本包并 daemon-reload，
   最后 `cp -a` 恢复备份 epoch 并读回 mtime/owner/mode/标签；不清理其他 runtime/备份目录。
   若原文件不存在则按备份事实处理，不能猜测删除。
-- 恢复本机原先 1970 mtime 会重新暴露旧时钟回退/离线更新失败；这不是完整系统回滚，
+- 恢复原先 1970 mtime 会重新暴露旧时钟回退/离线更新失败；这不是完整系统回滚，
   也不回退之后由商店安装的软件。

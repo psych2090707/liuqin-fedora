@@ -11,7 +11,7 @@
   "original_mainline_pre_custom": "90d970cade8e67e20b09bbfdc2f0b52064322921",
   "original_seed_config": "out/wcd938x-irq/kernel/dist/config",
   "original_seed_sha256": "ce1e2b2c78096af7e7be68951b9ba64b2b5f740d582997ea4ed6eaf3a4ab063a",
-  "pon_source_origin": "tasks/archive/TN0069-crash-forensics/pon/afk_pon_snapshot.c",
+  "pon_source_origin": "byte-identical copy of the archived read-only PON snapshot (see modules/pon/)",
   "license": "GPL-2.0 Linux-derived patches; MIT build helpers; retained original notices",
   "additional_upstream_fixes": [
     {

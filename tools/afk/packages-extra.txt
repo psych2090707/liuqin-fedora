@@ -1,4 +1,4 @@
-# AFK channel (TN0048) — optional/plan-B packages, installed only with
+# AFK channel — optional/plan-B packages, installed only with
 #   tools/afk/afk.sh repo build --with-extra
 #
 # krfb + krfb-libs: VNC server, the plan B if KRDP (RDP) cannot get an

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Integration smoke test for the TN0097 lid service on a private D-Bus.
+"""Integration smoke test for the lid service on a private D-Bus.
 
 The state machine and helper are also covered by test-lid-policy.py and
 test-power-helper.py. This test runs the real service against a fake UPower,
@@ -223,7 +223,7 @@ def main():
             module.CONFIG = str(config)
             module.POLICY_HELPER = str(helper)
             module.active_session = lambda: {
-                "uid": "1000", "gid": "1000", "name": "laplus",
+                "uid": "1000", "gid": "1000", "name": "user",
                 "home": str(work), "runtime": runtime,
             }
 

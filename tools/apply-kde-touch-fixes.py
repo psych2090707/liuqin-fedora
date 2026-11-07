@@ -20,7 +20,7 @@ OLD = '''        onExited: {
         }
 '''
 NEW = '''        // A touchscreen release also emits exited. Keep the input visible
-        // until the existing inactivity timer or Escape hides it (TN0063).
+        // until the existing inactivity timer or Escape hides it.
 '''
 
 # Additional touch fixes: the initial position must never hide a just-pressed
@@ -36,7 +36,7 @@ TOUCH_REPLACEMENTS = (
      'Component.onCompleted: { launchAnimation.start(); uiVisible = true; }'),
     # The prompt is shown from the start, so uiVisible never changes again.
     # A lock with a grace period ignores that first start; keep asking until
-    # authentication has actually started (TN0064).
+    # authentication has actually started.
     ('        PropertyAnimation {\n            id: launchAnimation',
      '        Timer {\n'
      '            id: graceStartTimer\n'
@@ -76,7 +76,7 @@ def apply(root, write=False):
         print('lockscreen_touch_fix=already-applied')
         return
     if write:
-        backup_dir = root / ('var/lib/liuqin-updates/TN0063/lockscreen' if root == Path('/')
+        backup_dir = root / ('var/lib/liuqin-updates/lockscreen' if root == Path('/')
                              else 'usr/share/liuqin/kde-fixes')
         backup_dir.mkdir(parents=True, exist_ok=True)
         backup = backup_dir / 'LockScreenUi.qml.before'

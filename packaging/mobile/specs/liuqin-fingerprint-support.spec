@@ -29,7 +29,7 @@ libfprint-tod and liuqin-fpc1264-tod RPMs; they coexist with Fedora's libfprint.
 Offline packaging and fake-device enumeration are verified, not enrollment or
 unlock on a tablet. The FPC1264 TA firmware must come from the owner's modem_a
 partition and is never packaged. Activation remains kernel-candidate bound;
-enrollment and unlock are pending-device (see docs/maintenance/mobile-stack-packages.md).
+enrollment and unlock are pending-device.
 
 %prep
 %autosetup -n %{name}-%{version}
@@ -89,7 +89,7 @@ fi
 %changelog
 * Wed Oct 28 2026 liuqin project <liuqin@localhost> - 1.0-7.liuqin
 - Follow display-manager instead of pulling in Plasma Login Manager
-- Match stable_module readiness to the selected display manager (TN0083)
+- Match stable_module readiness to the selected display manager
 
 * Fri Oct 23 2026 liuqin project <liuqin@localhost> - 1.0-6.liuqin
 - Add KDE lock screen fingerprint PAM stack without the pam_fprintd timeout

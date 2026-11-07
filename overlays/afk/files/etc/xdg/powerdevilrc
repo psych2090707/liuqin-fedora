@@ -1,4 +1,4 @@
-# liuqin tablet defaults; user request TN0063 (2026-10-23).
+# liuqin tablet defaults for the retained KDE profile.
 # Screen off after 600 seconds on every power source. PowerDevil is the
 # sole power-button owner: 128 toggles display, 64 turns the display off.
 # Automatic suspend stays disabled until device suspend/resume is accepted.

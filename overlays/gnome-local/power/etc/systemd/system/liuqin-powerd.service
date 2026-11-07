@@ -13,8 +13,8 @@ Wants=upower.service
 [Service]
 # The daemon reads /dev/input and talks to the user session bus, so it runs as
 # the single desktop user.  The polkit rule allows this user to request suspend.
-User=laplus
-Group=laplus
+User=user
+Group=user
 SupplementaryGroups=input
 Type=simple
 # The device and the stock image both create the desktop user with UID 1000.

@@ -42,7 +42,7 @@ UPSTREAM_COMMIT = 'f5a535f5c1c980f042b58cb77467ff8f02a5518e'
 RAM_SCRIPTS = (
     ('install-root.sh', 'device-side installer: formats the root, unpacks the '
                         'Fedora root archive (flat install), provisions persist, '
-                        'KDE/plasmalogin first boot'),
+                        'GNOME/GDM or retained KDE/plasmalogin first boot'),
     ('install-privileges.sh', 'privileged-file validator sourced by install-root.sh: '
                               'setuid/setgid modes + security.capability xattrs from the '
                               'rootfs-derived expectation list'),
@@ -52,7 +52,7 @@ RAM_SCRIPTS = (
     ('provision.sh', 'reads the factory persist partition read-only into the new root'),
 )
 CONTRACT_HEADER = 'LIUQIN_FEDORA_ROOT_CONTRACT_V2'
-# Contract v2 grammar (ADR-0004 D2): topology only, no content-hash pins.
+# Contract v2 grammar: topology only, no content-hash pins.
 CONTRACT_FIELDS = {'marker': 4, 'file': 2, 'exec': 2, 'resolve': 3, 'display-manager': 2}
 SHA256 = re.compile(r'^[0-9a-f]{64}$')
 

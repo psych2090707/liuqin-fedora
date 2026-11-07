@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Recreate/refresh the read-only upstream checkouts used by this project.
-# Pins are recorded in docs/maintenance/upstream-tracking.md; update both together.
+# Pins are recorded in this script and in kernel/patches/manifest.json; update together.
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -22,7 +22,7 @@ clone_pinned() { # name url branch commit
     echo "   -> $(git -C "$dir" rev-parse HEAD)"
 }
 
-# Keep in sync with docs/maintenance/upstream-tracking.md
+# Keep in sync with kernel/patches/manifest.json
 clone_pinned xiaomipad-6pro-mainline \
     https://github.com/yzddmr6/xiaomipad-6pro-mainline.git main \
     f5a535f5c1c980f042b58cb77467ff8f02a5518e

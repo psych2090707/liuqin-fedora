@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 /*
- * Offline probe for the liuqin FPC1264 TOD stack (TN0034).
+ * Offline probe for the liuqin FPC1264 TOD stack.
  *
  * Creates an FpContext exactly like fprintd does, enumerates fingerprint
  * devices and prints what was found. It is run by

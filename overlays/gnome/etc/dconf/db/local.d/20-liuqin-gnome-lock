@@ -1,4 +1,4 @@
-# GNOME screen shield is available once GDM owns the login chain (TN0083).
+# GNOME screen shield is available once GDM owns the login chain.
 [org/gnome/desktop/screensaver]
 lock-enabled=true
 lock-delay=uint32 0

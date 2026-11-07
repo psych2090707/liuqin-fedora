@@ -142,7 +142,7 @@ if [ -z "$BUNDLE_ARG" ]; then
 fi
 
 # ---------------------------------------------------------------- autodetect --
-# P1-1 (TN0036): when a bundle is explicitly selected, the delivery artifacts
+# When a bundle is explicitly selected, the delivery artifacts
 # INSIDE that bundle are the verification subject.  Never fall back to unrelated
 # out/boot / out/rootfs trees (those are stale historical artifacts).
 BUNDLE_FIRST=0
@@ -562,7 +562,7 @@ def load_dtb():
         "reserved-memory node is linux_splash@b8000000"
         if splash_ok else "missing linux_splash@b8000000 or still carries splash_region@b8000000")
     if b"gnome.is_vm=0" not in data:
-        add("dtb.gnome_is_vm", "dtb", "FAIL", "cmdline lacks gnome.is_vm=0 (TN0085)")
+        add("dtb.gnome_is_vm", "dtb", "FAIL", "cmdline lacks gnome.is_vm=0")
     else:
         add("dtb.gnome_is_vm", "dtb", "PASS", "cmdline carries gnome.is_vm=0")
     if b"console=drm_log" in data:
@@ -638,7 +638,7 @@ def load_initramfs():
                 hit = want in names or any(n.endswith("/" + want.rsplit("/", 1)[-1]) for n in names)
                 add(f"initramfs.{want.replace('/', '_')}", "initramfs",
                     "PASS" if hit else "WARN", f"{want} present" if hit else f"{want} not found")
-            # TN0054: qcom_q6v5_pas probes adsp.mbn at ~2.6 s, still inside the
+            # qcom_q6v5_pas probes adsp.mbn at ~2.6 s, still inside the
             # initramfs, and never retries after switch_root.  Without the DSP
             # firmware (and the AudioReach topology the card loads) the DSPs stay
             # offline, q6prm exports no LPASS clocks, and every SoundWire/macro/
@@ -653,18 +653,18 @@ def load_initramfs():
                 "PASS" if has_dsp else "WARN",
                 "DSP firmware staged in the ramdisk" if has_dsp else
                 "no " + dsp_fw + " in the ramdisk: ADSP/CDSP stay offline and the "
-                "device reports no soundcards (TN0054)")
+                "device reports no soundcards")
             add("initramfs.audio_topology", "initramfs",
                 "PASS" if has_tplg else "WARN",
                 "AudioReach topology staged in the ramdisk" if has_tplg else
                 "no " + tplg + " in the ramdisk: the q6apm card cannot load its "
-                "topology (TN0054)")
+                "topology (missing audio firmware)")
             gate_add("gate.initramfs.dsp_audio",
                      has_dsp and has_tplg,
                      "initramfs carries DSP firmware and AudioReach topology"
                      if (has_dsp and has_tplg) else
                      "initramfs lacks the DSP firmware/topology: this image boots with "
-                     "no sound card on liuqin (TN0054); build with --firmware-pool "
+                     "no sound card on liuqin; build with --firmware-pool "
                      "(dsp-sm8475) and --audio-topology")
         except Exception as exc:  # noqa: BLE001
             add("initramfs.cpio", "initramfs", "FAIL", f"could not parse cpio: {exc}")
@@ -768,7 +768,7 @@ def load_metadata():
             "build-info header matches boot.img" if not mism else "header mismatch: " + ", ".join(mism))
     payload = meta.get("payload", {})
     k = payload.get("kernel", {})
-    # P1-1/P2-1 (TN0036): compare against the kernel payload ACTUALLY inside the
+    # Compare against the kernel payload ACTUALLY inside the
     # audited boot.img; falling back to a sidecar Image.gz (out/boot/Image.gz)
     # compares a stale artifact and turns a correct delivery into a FAIL.
     delivered_kernel = BOOT_PAYLOAD.get("kernel")
@@ -1480,7 +1480,7 @@ def _staged_rootfs():
         # The explicitly selected bundle is the verification subject.  Only its
         # own assembled tree may be used: falling back to the newest unrelated
         # out/image-build tree would attribute another build's rootfs to this
-        # bundle (TN0045 finding).  A custom --work tree must be passed via
+        # bundle.  A custom --work tree must be passed via
         # --rootfs explicitly.
         bases = [PROJECT / "out/image-build" / BUNDLE.name]
     else:
@@ -1757,7 +1757,7 @@ def load_release_gate():
         else:
             gate_add("gate.bundle.contract_embedded", False,
                      "bundle has no manifests/liuqin-fedora-root.contract to compare the embedded copies with")
-        # TN0054: qcom_q6v5_pas asks for adsp.mbn ~2.6 s into the boot, while the
+        # qcom_q6v5_pas asks for adsp.mbn ~2.6 s into the boot, while the
         # kernel is still running the ramdisk, and never retries after
         # switch_root.  An image whose ramdisk lacks the DSP firmware (and the
         # AudioReach topology the card loads) boots to "no soundcards" on liuqin
@@ -1781,7 +1781,7 @@ def load_release_gate():
                  bool(dsp_audio.get("adsp.mbn")) and bool(dsp_audio.get("tplg")),
                  "boot.img ramdisk carries the DSP firmware and AudioReach topology: "
                  + json.dumps(dsp_audio, sort_keys=True))
-        # TN0058: the firmware pool record must match the shipped per-file
+        # The firmware pool record must match the shipped per-file
         # manifest, and the ramdisk must carry every stage-1-critical category.
         firmware = bdata.get("firmware") or {}
         pool_detail = "no firmware record in bundle.json (built without --firmware-pool)"
@@ -1858,7 +1858,7 @@ def load_release_gate():
         else:
             gate_add("gate.bundle.privileges_embedded", False,
                      "bundle has no manifests/installer-privileges.txt")
-        # P1-2 (TN0036): cross-check the bundle's installer-image.json against
+        # Cross-check the bundle's installer-image.json against
         # the ACTUAL installer.img ramdisk.  SHA256SUMS only proves the manifest
         # file was not modified; this proves its content describes the shipped
         # ramdisk (file hashes, contract, privileged expectations).
@@ -1913,7 +1913,7 @@ def load_release_gate():
         gate_add("gate.bundle.payloads", not problems,
                  "boot.img/root.img/rootfs.tar.gz/installer.img present and hashed"
                  if not problems else "; ".join(problems), path=BUNDLE)
-        # P2-1 (TN0036): POSITIVE kernel provenance.  The bundle's recorded
+        # POSITIVE kernel provenance.  The bundle's recorded
         # source must equal the delivered boot.img build-info label, the release
         # must agree, and the kernel bytes inside boot.img must match the payload
         # sha that build-info recorded (no "does not contain a bad string" test).
@@ -2077,7 +2077,7 @@ def load_release_gate():
     if INITRAMFS is not None and INITRAMFS.is_file():
         initramfs_bytes = INITRAMFS.read_bytes()
     elif BOOT_PAYLOAD.get("ramdisk"):
-        # P1-1 (TN0036): the boot ramdisk that is actually DELIVERED inside
+        # The boot ramdisk that is actually DELIVERED inside
         # boot.img is the one to audit; do not require a separate out/boot file.
         initramfs_bytes = BOOT_PAYLOAD["ramdisk"]
     if initramfs_bytes is not None:

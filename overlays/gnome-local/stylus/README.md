@@ -2,8 +2,8 @@
 
 在 GNOME 51 顶栏显示小米触控笔（Xiaomi Smart Pen）的电量和充电状态。
 
-**2026-11-07 状态**：已在 A 槽（Build ID `b9077d5c…`）系统级安装并启用；
-用户确认顶栏显示 `🖊 100%`，UPower 也列出 `battery_qcom_battmgr_pen`。
+**2026-11-07 状态**：已在维护设备上系统级安装并启用；
+顶栏显示 `🖊 100%`，UPower 也列出 `battery_qcom_battmgr_pen`。
 低电量/充电中 ⚡ 和菜单进度条的实际外观尚未在低电量下确认。
 
 数据来自内核 `qcom-battmgr-pen` 电源设备：

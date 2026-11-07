@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — bundle device diagnostics to stdout as a tar.gz.
+# AFK channel — bundle device diagnostics to stdout as a tar.gz.
 #
 # Host side:  tools/afk/afk.sh logs   (ssh + extract into out/afk/logs/<ts>/)
 #

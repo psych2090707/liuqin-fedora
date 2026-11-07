@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # SPDX-License-Identifier: MIT
-"""liuqin GPU hang evidence watcher (TN0081).
+"""liuqin GPU hang evidence watcher.
 
 Why this exists: on liuqin a wedged GPU leaves the panel dark and touch/keyboard
 dead while the kernel, SSH and the rest of userspace keep running.  The usual

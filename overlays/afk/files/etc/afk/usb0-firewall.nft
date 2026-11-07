@@ -1,4 +1,4 @@
-# AFK channel (TN0048) — optional nftables restriction (install.sh --firewall).
+# AFK channel — optional nftables restriction (install.sh --firewall).
 #
 # The tablet has no Wi-Fi firmware, so usb0 is its only network interface and
 # these ports are already unreachable without the cable.  This ruleset is

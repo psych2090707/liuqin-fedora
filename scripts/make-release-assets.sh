@@ -363,7 +363,7 @@ readme += [
 install = [
     f'# Installing {bundle_name}',
     '',
-    'Read `docs/build/installer.md` of the project repository first; this file only',
+    'Read `INSTALL.md` in the project repository first; this file only',
     'summarises the release-asset steps.',
     '',
     '1. Verify the assets: `sha256sum -c SHA256SUMS`.',
@@ -373,7 +373,7 @@ install = [
     '4. Rehearsal, no device writes:',
     '   `python3 install.py --bundle . --serial SERIAL --backup ~/liuqin-backup \\',
     '     --erase-userdata --layout linux-only --allow-unverified --dry-run`.',
-    '5. A real installation needs the Phase 6 gate described in `docs/build/installer.md`',
+    '5. A real installation needs the attended-write gate described in `INSTALL.md`',
     '   (`--yes-write-device`), a matching stock Fastboot ROM, a private backup and',
     '   the tablet physically present.',
     '',

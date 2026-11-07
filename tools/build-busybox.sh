@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 #
 # Build the pinned, statically linked aarch64 BusyBox used as PID-1 interpreter
-# of the Fedora liuqin initramfs (see docs/maintenance/boot-initramfs.md).
+# of the Fedora liuqin initramfs.
 #
 # Why a source build and not a distribution package:
 #   * the initramfs init script executes BusyBox directly from the root of the
@@ -18,8 +18,8 @@
 # sha256 recorded in REFERENCE_SHA256 below (evidence in out/boot/VERIFICATION.md).
 #
 # BusyBox's build system does not support a source/build path containing spaces
-# ("make: *** No rule to make target '/home/laplus/Agent'"), and this project
-# lives in ".../Agent Studio/Fedora".  The script therefore builds in a
+# ("make: *** No rule to make target '/path/with'"), and this project may live
+# in a directory with spaces.  The script therefore builds in a
 # space-free work directory (default ${TMPDIR:-/tmp}/liuqin-busybox-<version>)
 # and installs only the resulting artifact into the repository.
 #

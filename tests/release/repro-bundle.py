@@ -304,7 +304,7 @@ def main(argv=None):
               ' so they are expected to be byte-reproducible.',
               '- `root.img` is currently **not reproducible**: `mkfs.ext4 -d` stamps the'
               ' superblock/inode times and SELinux xattrs depend on the host. The'
-              ' recommended release recipe is in `docs/build/release.md` §Reproducibility.',
+              ' recommended release recipe is in `BUILD.md`.',
               '']
     (out / 'reproducibility.md').write_text('\n'.join(lines))
     print('\nreproducibility results: ' + json.dumps(counts), flush=True)

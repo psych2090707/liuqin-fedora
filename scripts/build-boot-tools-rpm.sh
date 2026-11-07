@@ -120,7 +120,7 @@ copy "$PROJECT_ROOT/upstream/xiaomipad-6pro-mainline/initramfs/init" \
 	upstream/xiaomipad-6pro-mainline/initramfs/init
 copy "$PROJECT_ROOT/upstream/xiaomipad-6pro-mainline/device/native-bootargs.txt" \
 	upstream/xiaomipad-6pro-mainline/device/native-bootargs.txt
-# TN0085 + linux_splash: the on-device boot rebuild must use the same verified
+# linux_splash: the on-device boot rebuild must use the same verified
 # A-slot cmdline as the host image (console=tty0, gnome.is_vm=0).  Copy the
 # project file instead of deriving it again so the host and device cannot drift.
 copy "$PROJECT_ROOT/overlays/boot/liuqin-bootargs.txt" liuqin-bootargs.txt

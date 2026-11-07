@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — screenshot the live Plasma (Wayland) session.
+# AFK channel — screenshot the live Plasma (Wayland) session.
 #
 # Usage:  afk-shot [full|monitor|active] [output.png]
 # Prints the PNG path on stdout and nothing else; diagnostics go to stderr.

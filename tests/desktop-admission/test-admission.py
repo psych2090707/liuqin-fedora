@@ -79,7 +79,7 @@ with tempfile.TemporaryDirectory(prefix='liuqin-desktop-admission-') as tmp:
     check('transition accepts complete KDE route', True)
     select('gdm.service')
     check('transition accepts complete GNOME route', True)
-    # TN0083 KDE removal: the selected GNOME branch must tolerate removal of
+    # The selected GNOME branch must tolerate removal of
     # every KDE-specific topology file, not just plasmashell alone.
     kde_only = []
     for entry in c.CONTRACT_ENTRIES:

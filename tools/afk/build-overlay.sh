@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — pack overlays/afk into a self-contained tarball.
+# AFK channel — pack overlays/afk into a self-contained tarball.
 #
 # The tarball is what tools/afk/install-overlay.sh pushes to the device:
 #

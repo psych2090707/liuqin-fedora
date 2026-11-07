@@ -23,7 +23,7 @@
 #                                re-verifying its board identity, /chosen
 #                                bootargs, __symbols__ sink and framebuffer
 #                                properties.  Structurally valid; see the risk
-#                                note in docs/maintenance/boot-initramfs.md §5.
+#                                note in the boot build notes.
 #               auto             stock-rom when --stock-rom-dir is usable,
 #                                otherwise upstream-artifact.
 #
@@ -242,13 +242,13 @@ command -v cpio >/dev/null 2>&1 || die_usage "host cpio is required"
 
 cmdline=$(cat "$cmdline_file")
 [ -n "$cmdline" ] || die_usage "cmdline file is empty: $cmdline_file"
-# TN0085: gsd-power treats this board as a VM unless gnome.is_vm=0 is present
+# gsd-power treats this board as a VM unless gnome.is_vm=0 is present
 # (Gunyah DT node, no DMI), so automatic suspend is ignored.  The verified
 # A-slot cmdline also uses console=tty0; drm_log is not part of the daily boot
 # profile and was removed after the display handoff review.
 case " $cmdline " in
 *" gnome.is_vm=0 "*) ;;
-*) die_usage "cmdline must carry gnome.is_vm=0 (TN0085); got: $cmdline" ;;
+*) die_usage "cmdline must carry gnome.is_vm=0; got: $cmdline" ;;
 esac
 case " $cmdline " in
 *" console=drm_log "*) say "warning: console=drm_log is present; the verified A-slot boot uses console=tty0" ;;

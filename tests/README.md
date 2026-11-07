@@ -2,7 +2,6 @@
 
 | 修改对象 | 检查入口 | 证明范围 |
 |---|---|---|
-| 文档或文档检查器 | `scripts/check-docs.sh --quiet`；检查器改动再跑 `tests/docs/test-check-docs.sh` | 链接、路径、术语与检查器回归；不判断全部自然语言矛盾 |
 | GNOME 按键/合盖/输入 | [desktop-admission](desktop-admission/README.md) | 合成输入、状态机、私有测试总线；不操作桌面或真实设备 |
 | boot 更新元数据/回退逻辑 | `tests/boot-update/` | 合成镜像和文件；不能当真实内核更新验收 |
 | 固件/设备验证/构建适配 | `tests/integration/test-firmware-pool.py`、`tests/device-validation/` 等 | 先看具体脚本是否依赖产物或写 rootfs，不默认全跑 |
@@ -10,4 +9,4 @@
 | 充电认证受控候选 | [charging/test-staged-auth.py](charging/test-staged-auth.py) | 假 sysfs 下角色请求/SVID/HMAC/失败清理分支；不是实机认证或功率验收 |
 | 旧安装器 | `tests/installer/` | 历史布局与协议的定向回归，不安装当前平板 |
 
-离线与实机结论分开。文档修改不构建系统、不运行 QEMU 整机模拟或硬件检查；当前功能依据在硬件表。
+离线与实机结论分开。文档修改不构建系统、不运行 QEMU 整机模拟或硬件检查。

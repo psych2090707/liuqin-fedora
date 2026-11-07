@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Regression: scripts/assemble-firmware-pool.sh reproduces the reviewed pool.
 
-TN0055 assembled the pool with a task-local script and verified on hardware that
-the resulting initramfs stages every firmware category.  TN0058 promoted that
+An earlier task assembled the pool with a local script and verified on hardware that
+the resulting initramfs stages every firmware category.  That work promoted the
 step into the build path, so the pool digest now has to stay stable: a change in
 the layout or in the copied files must fail here instead of silently changing
 what the release builds ship.

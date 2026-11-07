@@ -3,7 +3,7 @@
 
 # Distribution-neutral liuqin device services, relocated to Fedora paths.
 #
-# Included upstream pieces (see docs/maintenance/device-packages.md for the full map):
+# Included upstream pieces:
 #   * systemd units/drop-ins: power-key policy, backlight default, WLAN MAC,
 #     Bluetooth public address, MiPPS charger authentication, Gunyah node hide,
 #     logind power-key handoff, NetworkManager/BlueZ ordering drop-ins

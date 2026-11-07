@@ -5,14 +5,14 @@
 #
 # Packages:
 #   liuqin-firmware         vendor board firmware closure (LOCAL PRIVATE; not
-#                           redistributable -- see docs/maintenance/device-packages.md)
+#                           redistributable)
 #   liuqin-audio            AudioReach topology (built from source) + ALSA UCM2
 #   liuqin-device-support   systemd/udev/polkit/chrony units + helpers
 #
 # The x86_64 host only orchestrates: it stages a space-free work tree under
 # /var/tmp, builds two static aarch64 helper binaries with the host cross
 # toolchain (the Fedora container's cross-gcc has no target libc -- see
-# docs/maintenance/device-packages.md), and runs rpmbuild --target aarch64 inside
+# the device package notes), and runs rpmbuild --target aarch64 inside
 # Fedora 45.  A persistent builder image is created once and reused.
 #
 # Usage:
@@ -149,7 +149,7 @@ GPL-2.0-only and is derived from xiaomi-mipps-auth (see NOTICE).
 Path relocation to Fedora FHS is done at package time by
 relocate-device-support.sh; the upstream checkout is never modified.
 The power-key action helper is a Fedora/KDE replacement for the upstream
-GNOME/Mutter implementation.  See docs/maintenance/device-packages.md for the full mapping.
+GNOME/Mutter implementation.  See packaging/device/README.md for the mapping.
 The daily-use sampler and its service/timer are project sources in
 tools/afk/daily-log; they never wake the tablet or change sleep policy.
 The package ships the timer without enabling it automatically.
@@ -209,7 +209,7 @@ grep -q '/usr/libexec/liuqin/liuqin-power-key-action' "$power_keyd_src" ||
 
 # Static aarch64: the Fedora cross-gcc package has no target libc, so the
 # helpers are linked statically with the host cross toolchain and are fully
-# self-contained on the tablet (docs/maintenance/device-packages.md records the deviation).
+# self-contained on the tablet.
 "$cross_gcc" -std=c11 -O2 -pipe -static -s -Wall -Wextra -Wformat=2 \
 	-fstack-protector-strong -D_FORTIFY_SOURCE=3 \
 	"-ffile-prefix-map=$upstream=/build/upstream" \

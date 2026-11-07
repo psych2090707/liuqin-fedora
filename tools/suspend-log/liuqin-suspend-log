@@ -991,10 +991,20 @@ def do_show(args):
 
 
 def notification_log():
-    candidates = [
-        Path("/home/laplus/.local/state/liuqin-notify-log/notifications.jsonl"),
-        Path.home() / ".local" / "state" / "liuqin-notify-log" / "notifications.jsonl",
-    ]
+    candidates = []
+    # When run through sudo, the recorder's file lives in the invoking user's
+    # home, not root's.
+    sudo_user = os.environ.get("SUDO_USER")
+    if sudo_user:
+        try:
+            import pwd
+            candidates.append(
+                Path(pwd.getpwnam(sudo_user).pw_dir) / ".local" / "state"
+                / "liuqin-notify-log" / "notifications.jsonl")
+        except KeyError:
+            pass
+    candidates.append(
+        Path.home() / ".local" / "state" / "liuqin-notify-log" / "notifications.jsonl")
     for path in candidates:
         if path.exists():
             rows = []

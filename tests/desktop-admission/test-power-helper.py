@@ -26,8 +26,8 @@ if name=='loginctl':
  if a[0]=='show-seat': print('1')
  elif a[0]=='show-session':
   prop=next(x.split('=',1)[1] for x in a if x.startswith('--property='))
-  print({'Active':'yes','Class':'user','User':'1000','Name':'laplus'}[prop])
-elif name=='getent': print('laplus:x:1000:1000::/home/laplus:/bin/bash')
+  print({'Active':'yes','Class':'user','User':'1000','Name':'user'}[prop])
+elif name=='getent': print('user:x:1000:1000::/home/user:/bin/bash')
 elif name=='id': print(config.get('uid', 1000))
 elif name=='chown': sys.exit(0)
 elif name=='setpriv':

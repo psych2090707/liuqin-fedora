@@ -1,11 +1,10 @@
 # 日常低干扰日志
 
-TN0074 实现 TN0072 L0。复用已有持久 journal/PON 归档；不复制 journal/dmesg，不触发睡眠、
+低频、只读的设备状态采样。复用已有持久 journal/PON 归档；不复制 journal/dmesg，不触发睡眠、
 联网探测或指纹认证，不读取按键/应用内容/debugfs，不写 RTC 或持有 inhibitor。
 
 `sample.py` 是单次采样器，随 `liuqin-device-support` 源码配方交付。
-系统服务用 Python 显式执行，timer 需单独获准启用；不会随 RPM 安装自动启用。
-本轮实机使用同源三个文件直接安装、逐文件 SHA256 读回；未重建或重装整个支持包。
+系统服务用 Python 显式执行，timer 需单独启用；不会随 RPM 安装自动启用。
 
 - 启动两分钟后开始，完成后每五分钟一次，合并精度一分钟，`WakeSystem=false`。
 - 单次超时十秒，不自动重启；D-Bus/命令单次超时 0.4 秒。
@@ -29,7 +28,7 @@ python3 -B tools/afk/daily-log/sample.py --stdout
 最大 16 MiB，不覆盖已有摘要。设备常驻仅写 64 MiB 样本；如将摘要放回设备，另限一份 16 MiB，合计 80 MiB。
 
 ```sh
-python3 -B tools/afk/daily-log/summarize.py out/tn0074-daily-log-input/samples --output /tmp/liuqin-daily-summary.json
+python3 -B tools/afk/daily-log/summarize.py <samples-dir> --output /tmp/liuqin-daily-summary.json
 python3 -B tools/afk/tests/test-daily-log.py
 ```
 
@@ -37,6 +36,4 @@ python3 -B tools/afk/tests/test-daily-log.py
 `ΔBOOTTIME−ΔMONOTONIC`。端点不能证明整个区间的亮屏或充电状态，故区间暂列混合/未知；
 不能从缺采样推断睡眠或崩溃，不能证明 AOSD/CXSD，也不外推精确电流/续航。
 事件只保留固定类别、boot ID、单调时间，不复制用户应用的消息正文。
-
-安装、备份、回退和本轮实机依据见 TN0074。
 定时器语义依据 [systemd.timer](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html)。

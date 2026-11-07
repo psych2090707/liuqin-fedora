@@ -62,7 +62,7 @@
 #       --stock-rom-dir /path/to/stock-rom --firmware-pool /path/fw \
 #       --wlan-hsp2-tuple /path/hsp2 --audio-topology /path/tplg.bin
 #
-# Docs: docs/build/image-build.md
+# Docs: see BUILD.md and overlays/rootfs/README.md
 
 set -eu
 umask 022
@@ -128,8 +128,8 @@ privileges_file=
 
 RPM_IMAGE_DEFAULT=localhost/liuqin-rpmbuild:fc45
 RPM_IMAGE_FALLBACK=quay.io/fedora/fedora:45
-# TN0058 audio-topology baseline: the project-built AudioReach topology that was
-# verified audible on liuqin (TN0054).  The upstream tree ships a different
+# Audio-topology baseline: the project-built AudioReach topology that was
+# verified audible on liuqin.  The upstream tree ships a different
 # binary (dff0c8af…); build-initramfs.sh pins the same project sha, so the
 # upstream file is not an accepted baseline.
 AUDIO_TOPOLOGY_BASELINE_SHA=9c9f8bfcffde1f52c143d58cba821c5f6b3899553370ab92a88b90d81fef9ee9
@@ -314,7 +314,7 @@ if [ "$build_mode" = release ]; then
 		die_usage "--build-mode release: --stock-rom-dir must carry 44 DTBO entries and 14 base DTBs"
 	[ "$allow_missing_pins" = 0 ] ||
 		die_usage "--build-mode release forbids --partial/--allow-missing-pins (the root contract must be complete)"
-	# TN0058: the full pool is assembled from the pinned upstream tree by
+	# The full pool is assembled from the pinned upstream tree by
 	# default; --firmware-pool DIR still overrides it with a reviewed tree.
 	[ -n "$firmware_pool" ] || firmware_pool=auto
 	[ -z "$boot_img_input" ] ||
@@ -324,7 +324,7 @@ say "build mode: $build_mode, dtb source: $dtb_source$([ "$dtb_source" = stock-r
 export BUILD_DTB_SOURCE=$dtb_source
 [ -n "$bundle_name" ] || bundle_name=liuqin-fedora-$release-dev
 # Container bind sources must be absolute: podman treats a relative -v source
-# as a named volume instead of a host path (TN0045 finding).  Resolve before any
+# as a named volume instead of a host path.  Resolve before any
 # use so the documented relative --work form works.
 case $work_root in /*) ;; *) work_root="$project_root/$work_root" ;; esac
 case $images_root in /*) ;; *) images_root="$project_root/$images_root" ;; esac
@@ -361,7 +361,7 @@ mkdir -p "$work" "$bundle_dir" "$work/logs" "$manifests_dir"
 log_stamp=$(date -u '+%Y%m%dT%H%M%SZ')
 say "bundle=$bundle_name work=$work"
 
-# --- firmware inputs (TN0058) ---------------------------------------------
+# --- firmware inputs -------------------------------------------------------
 # `--firmware-pool auto` (and release mode without an explicit pool) assembles
 # the complete pool straight from the pinned upstream tree; the assembler
 # verifies the 197-file firmware.manifest before copying anything.
@@ -370,7 +370,7 @@ if [ -n "$audio_topology" ]; then
 		die_usage "--audio-topology is not a regular file: $audio_topology"
 	audio_topology_sha=$(sha256sum "$audio_topology" | cut -d' ' -f1)
 	[ "$audio_topology_sha" = "$AUDIO_TOPOLOGY_BASELINE_SHA" ] ||
-		die_usage "audio topology sha256 $audio_topology_sha is not the project baseline $AUDIO_TOPOLOGY_BASELINE_SHA (the upstream binary is not a supported baseline; see docs/maintenance/boot-initramfs.md)"
+		die_usage "audio topology sha256 $audio_topology_sha is not the project baseline $AUDIO_TOPOLOGY_BASELINE_SHA (the upstream binary is not a supported baseline)"
 fi
 if [ "$firmware_pool" = auto ]; then
 	say "firmware pool: assembling from the pinned upstream tree (scripts/assemble-firmware-pool.sh)"
@@ -712,8 +712,8 @@ stage_rootfs_tree() {
 	fi
 
 	# P2-B6: the delivered kernel is SELinux=y while the rootfs ships
-	# SELINUX=disabled.  Lead decision: permissive (documented in
-	# docs/build/image-build.md), so policy violations are visible during bring-up
+	# SELINUX=disabled.  The first release uses permissive (documented in
+	# the build notes), so policy violations are visible during bring-up
 	# without enforcing policy. This is not proof of correct labels; enforcing
 	# still requires a full relabel and device validation. Record the mode.
 	sudo sh -c 'sed -i "s/^SELINUX=.*/SELINUX=permissive/" "$1/etc/selinux/config"' sh "$rootfs_stage" ||
@@ -800,7 +800,7 @@ stage_native_fingerprint() {
 		' sh "$rootfs_stage" >>"$work/logs/fingerprint-pam.log" 2>&1 ||
 			die "cannot enable native fingerprint PAM"
 		# KDE never restarts a timed-out fingerprint service; use the packaged
-		# lock-screen stack without the pam_fprintd timeout (TN0064).  GDM's
+		# lock-screen stack without the pam_fprintd timeout.  GDM's
 		# PAM stack is managed by authselect/fprintd-pam and must not be replaced
 		# by the KDE-specific file.
 		if [ "$desktop" = plasma ] && [ -f "$rootfs_stage/etc/pam.d/liuqin-kde-fingerprint-auth" ]; then
@@ -952,15 +952,15 @@ apply_rootfs_overlays() {
 			-maxdepth 1 -type f -exec chmod 0755 {} + 2>/dev/null || true
 		sudo find "$rootfs_stage/usr/local/share/applications" -maxdepth 1 \
 			-type f -name '*.desktop' -exec chmod 0644 {} + 2>/dev/null || true
-		# The maintenance unit names the current daily account (laplus).  The
-		# offline image creates the project's stock desktop account (user); point
-		# only the image copy at it instead of changing the live-device source.
+		# Bind the shipped system units to the image desktop account.  The source
+		# units use the stock account name (user); an alternate --user value is
+		# substituted only in the image copy.
 		for unit in liuqin-lid-policy.service liuqin-powerd.service; do
-			sudo sed -i "s/^User=laplus$/User=$image_user/; s/^Group=laplus$/Group=$image_user/" \
+			sudo sed -i "s/^User=.*$/User=$image_user/; s/^Group=.*$/Group=$image_user/" \
 				"$rootfs_stage/etc/systemd/system/$unit" ||
 				die "cannot bind $unit to the image desktop user"
 		done
-		sudo sed -i "s/subject.user == \"laplus\"/subject.user == \"$image_user\"/" \
+		sudo sed -i "s/subject.user == \"[^\"]*\"/subject.user == \"$image_user\"/" \
 			"$rootfs_stage/etc/polkit-1/rules.d/49-liuqin-lid-suspend.rules" ||
 			die "cannot bind the lid polkit rule to the image desktop user"
 		if [ -f "$rootfs_stage/etc/liuqin/power-policy.conf" ]; then
@@ -1102,7 +1102,7 @@ write_rootfs_identity() {
 	fi
 
 	# Kernel identity interface consumed by the initramfs fedora profile and the
-	# root contract (see docs/maintenance/boot-initramfs.md §4.5).
+	# root contract.
 	kver=$(installed_kernel_release)
 	if [ -z "$kver" ]; then
 		# No kernel RPM installed: fall back to the kernel payload this image
@@ -1773,7 +1773,7 @@ stage_bundle() {
 	if [ -f "$work/fingerprint-image.json" ]; then
 		cp -f "$work/fingerprint-image.json" "$bundle_dir/manifests/fingerprint-image.json"
 	fi
-	# TN0058: ship the firmware-pool record (and its per-file manifest) so the
+	# Ship the firmware-pool record (and its per-file manifest) so the
 	# release gate can audit what the ramdisk was built from.
 	if [ -n "$firmware_pool_meta" ] && [ -f "$firmware_pool_meta" ]; then
 		cp -f "$firmware_pool_meta" "$bundle_dir/manifests/firmware-pool.json"
@@ -1792,7 +1792,7 @@ stage_bundle() {
 	fi
 	[ -f "$installer_manifest_dir/installer-image.json" ] &&
 		cp -f "$installer_manifest_dir/installer-image.json" "$bundle_dir/manifests/installer-image.json"
-	# P1-1/P2-1 (TN0036): ship the build-info of the DELIVERED boot.img (and of
+	# Ship the build-info of the DELIVERED boot.img (and of
 	# installer.img) so verify-bundle/release-gate can audit the bundle's own
 	# artifacts instead of falling back to unrelated out/boot state.
 	for info_pair in "boot-img:boot-build-info.json" "installer-img:installer-build-info.json"; do
@@ -1832,7 +1832,7 @@ except Exception:
 		python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("commit",""))' \
 			"$upstream/kernel/source.json" 2>/dev/null || true)
 	project_commit=$(git -C "$project_root" rev-parse HEAD 2>/dev/null || true)
-	# TN0036 P2-2 provenance: project_dirty describes the DELIVERY INPUTS, not
+	# Provenance: project_dirty describes the DELIVERY INPUTS, not
 	# unrelated work of other concurrent tasks.  These are the paths this build
 	# consumes; when they equal HEAD, the bundle is reproducible from
 	# project_commit even if a parallel task keeps uncommitted files elsewhere.
@@ -1968,7 +1968,7 @@ if privileges_path.is_file():
                         'security.capability xattr (ADR-0004 D3/D4); no hardcoded '
                         'distribution assumptions such as a ping capability',
     }
-# TN0058: describe the firmware pool the ramdisk was staged from (absent for a
+# Describe the firmware pool the ramdisk was staged from (absent for a
 # dev bundle built with --allow-missing-firmware).
 firmware_record = None
 firmware_json = bundle_path / 'manifests/firmware-pool.json'
@@ -2077,7 +2077,7 @@ manifest = {
     },
     'rebuild_interface': {
         # What an on-device rebuild (dnf kernel update / kernel-install hook)
-        # needs; see docs/build/image-build.md §10 and docs/maintenance/boot-initramfs.md §7.2.
+        # needs.
         'entry_points': ['scripts/build-initramfs.sh', 'scripts/build-bootimg.sh'],
         'rootfs_manifest': 'manifests/rootfs.files.sha256',
         'root_contract': 'regenerated from the rootfs manifest after RPM injection',
@@ -2227,7 +2227,7 @@ verify_root_img() {
 		# Firmware sanity (four speakers need the CS35L41 DSP wmfw; rootfs-builder
 		# reported it is not in Fedora's base linux-firmware).  A missing wmfw is
 		# a WARN here (the bundle is offline-only anyway) and is recorded.
-		# P1-3 (TN0036): real Fedora 44 layout is the COMPRESSED linux-firmware
+		# Real Fedora layout is the COMPRESSED linux-firmware
 		# tree /usr/lib/firmware/cirrus/cs35l41/v6.*/*.wmfw.xz (plus
 		# cirrus-audio-firmware's cs35l41-dsp1-spk-prot).  The old check looked at
 		# /lib/firmware/cs35l41/*.wmfw, which never exists, and produced a false
@@ -2446,7 +2446,7 @@ verify_boot_img() {
 	strings -a "$verify_dtb" | grep -q 'linux_splash@b8000000' ||
 		die "boot.img DTB lacks linux_splash@b8000000"
 	strings -a "$verify_dtb" | grep -q 'gnome.is_vm=0' ||
-		die "boot.img DTB cmdline lacks gnome.is_vm=0 (TN0085)"
+		die "boot.img DTB cmdline lacks gnome.is_vm=0"
 	if strings -a "$verify_dtb" | grep -q 'console=drm_log'; then
 		die "boot.img DTB cmdline still uses console=drm_log (verified A-slot cmdline uses console=tty0)"
 	fi
@@ -2645,7 +2645,7 @@ verify_with_project_verifier() {
 	verifier=$project_root/scripts/verify-bundle.sh
 	[ -x "$verifier" ] || { add_skip "verify-bundle-sh: scripts/verify-bundle.sh is absent"; return 0; }
 	report=$work/logs/verify-bundle-sh.json
-	# P1-1 (TN0036): verify-bundle must audit the DELIVERED artifacts of this
+	# verify-bundle must audit the DELIVERED artifacts of this
 	# bundle, never the stale out/boot or out/rootfs trees.  Pass them explicitly.
 	set -- "$verifier" --bundle "$bundle_dir" --json "$report" --bundle-partial --no-color
 	if [ -f "$bundle_dir/boot.img" ]; then

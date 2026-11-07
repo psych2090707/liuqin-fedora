@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression for TN0050's real parent-RO and hidden-home injection failures."""
+"""Regression for real parent-RO and hidden-home injection failures."""
 import importlib.util
 from pathlib import Path
 import unittest

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline fake-sysfs tests for tasks/charging-power/staged-auth.py.
+"""Offline fake-sysfs tests for the charging staged-auth helper.
 
 No device, kernel or root on the host is involved: every scenario builds a
 temporary sysfs tree, a stub of the installed liuqin-mipps-auth module and runs

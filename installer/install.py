@@ -11,10 +11,10 @@ tools/install-liuqin.py, MIT).  The Fedora changes are additive and are marked
   installation against read-only Fastboot queries and a simulated/saved
   partition table, printing every write instead of running it;
 * any real device write needs the explicit ``--yes-write-device`` flag, which
-  docs/build/installer.md allows only in Phase 6 (attended tablet, user present);
+  the install notes allow only in an attended run with the user present;
 * ``bundle.json`` may carry a ``fedora`` extension (Fedora release, rootfs
   manifest, installer runtime manifest, root admission contract), validated
-  here and documented in docs/build/installer.md.
+  here and in the install notes.
 
 The device-side protocol, the Fastboot command lines, the zero-filled boot
 image, the GPT backup/restore format and the layout engine are upstream

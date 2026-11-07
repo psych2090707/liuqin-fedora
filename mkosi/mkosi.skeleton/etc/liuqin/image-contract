@@ -1,5 +1,5 @@
 # liuqin rootfs -> image assembly contract. Read by scripts/build-image.sh /
-# boot.img assembly; keep in sync with mkosi/mkosi.conf and docs/build/rootfs-build.md.
+# boot.img assembly; keep in sync with mkosi/mkosi.conf and mkosi/README.md.
 IMAGE_ID=liuqin-fedora-gnome
 DEVICE=liuqin
 DEVICE_NAME=Xiaomi Pad 6 Pro

@@ -130,12 +130,12 @@ exit 0
 * Wed Oct 28 2026 Fedora liuqin port <liuqin@localhost> - 0.6.0-6
 - Allow the canonical stock-rom boot build to use the project cmdline even when
   it differs from the raw kernel DTB /chosen bootargs (the overlay replaces it);
-  add an offline check that gnome.is_vm=0 reaches the final DTB (TN0085)
+  add an offline check that gnome.is_vm=0 reaches the final DTB
 
 * Wed Oct 28 2026 Fedora liuqin port <liuqin@localhost> - 0.6.0-5
 - Ship the project DT cmdline (`upstream native-bootargs + gnome.is_vm=0`) and
   use it by default so kernel-update boot rebuilds keep GNOME auto-suspend
-  working (TN0085)
+  working
 
 * Wed Oct 28 2026 Fedora liuqin port <liuqin@localhost> - 0.6.0-4
 - Support GNOME-only admission contracts after the KDE removal

@@ -22,7 +22,7 @@
 # `dnf install rpm-build kmod createrepo_c` goes through the host proxy
 # (--network=host + http_proxy), and the container is torn down afterwards.
 #
-# Why not `rpmbuild` on the host: CachyOS has no rpm toolchain; and the payload
+# Why not `rpmbuild` on the host: the build host may have no rpm toolchain; and the payload
 # is aarch64. Container keeps the host clean (no sudo package installs).
 #
 # Usage: scripts/build-kernel-rpm.sh --help
@@ -39,7 +39,7 @@ SPEC="$FEDORA_DIR/kernel-liuqin.spec"
 CONTAINER_IMAGE="${LIUQIN_RPM_CONTAINER:-}"
 if [ -z "$CONTAINER_IMAGE" ]; then
 	# Prefer the locally cached builder image (dnf packages preinstalled by
-	# docs/maintenance/kernel-rpm.md §3 bootstrap) to keep iteration fast; fall back to the
+	# the kernel RPM notes) to keep iteration fast; fall back to the
 	# base Fedora image.
 	if sudo podman image inspect localhost/liuqin-rpmbuild:fc45 >/dev/null 2>&1; then
 		CONTAINER_IMAGE=localhost/liuqin-rpmbuild:fc45
@@ -75,7 +75,7 @@ usage: scripts/build-kernel-rpm.sh [options]
   --skip-verify          skip post-build verification (not recommended)
   --help                 this help
 
-Output layout: see the header of this script and docs/maintenance/kernel-rpm.md.
+Output layout: see the header of this script and kernel/fedora/README.kernel-liuqin.
 EOF
 }
 
@@ -374,7 +374,7 @@ if [ "$NO_CONTAINER" -eq 1 ]; then
 else
 	command -v sudo >/dev/null 2>&1 || die "sudo is required for rootful podman"
 	sudo podman image inspect --format '{{.Id}}' "$CONTAINER_IMAGE" >/dev/null 2>&1 ||
-		die "podman image not available locally: $CONTAINER_IMAGE (pull it first; see docs/maintenance/kernel-rpm.md)"
+		die "podman image not available locally: $CONTAINER_IMAGE (pull it first; see kernel/fedora/README.kernel-liuqin)"
 	CONTAINER_ID=$(sudo podman image inspect --format '{{.Id}}' "$CONTAINER_IMAGE")
 	log "container image: $CONTAINER_IMAGE ($CONTAINER_ID)"
 	log "running rpmbuild inside Fedora container (aarch64 image under qemu-user)"
@@ -399,7 +399,7 @@ log "built: $RPM_BASENAME ($(du -h "$RPM_FILE" | cut -f1))"
 # out of the regenerated root contract (task-15 P0-1) and the invariant enforced.
 
 # ---------------------------------------------------------------- schema v2 fixtures
-# TN0032: the refresh tool and the kernel-install hook stage all boot metadata
+# The refresh tool and the kernel-install hook stage all boot metadata
 # through the single schema v2 implementation (kernel/fedora/liuqin_boot_metadata.py).
 # The offline contract tests below therefore must produce REAL inputs (a minimal
 # Android boot image v2, a boot-builder document in the real scripts/build-bootimg.sh
@@ -1103,7 +1103,7 @@ info_rpm = {
         "RPM was not signed (device uses unlocked bootloader; signing is a future decision).",
         "Actual boot partition write is intentionally not implemented as an automated step; liuqin-apply-boot is dry-run by default and Phase-6 gated.",
         "P0 (task-15): kernel-install hook rebuilds root contract + initramfs + boot.img and never reuses a stale ramdisk; kernel identity is excluded from the regenerated contract pins and the refresh tool fails closed if a contract still pins it.",
-        "Pre-apply stale-boot window still needs the initramfs-side dynamic kernel-release warning (boot-builder scope); see docs/maintenance/kernel-rpm.md §4.3.",
+        "Pre-apply stale-boot window still needs the initramfs-side dynamic kernel-release warning (boot-builder scope).",
     ],
 }
 with open(os.path.join(out_dir, "build-info.json"), "w") as handle:

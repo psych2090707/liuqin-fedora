@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# TN0034 offline verification entry point for the libfprint-tod /
+# Offline verification entry point for the libfprint-tod /
 # liuqin-fpc1264-tod RPMs. Runs on the host and orchestrates:
 #   1. container-side RPM/layout/ABI/install/systemd checks  (mbuilder)
 #   2. a throwaway arm64 container with a FAKE char device at /dev/fpc1020
@@ -60,11 +60,11 @@ sudo -n podman rm -f "$probe_container" >/dev/null 2>&1 || true
 
 echo
 if [ "$fail" -eq 0 ]; then
-  echo "TN0034 VERIFY: PASS (verified-offline only; fingerprint unlock = pending-device)"
+  echo "libfprint-tod VERIFY: PASS (verified-offline only; fingerprint unlock = pending-device)"
   echo "logs: $verify_dir/rpm-verify.log, $verify_dir/probe-verify.log"
   exit 0
 else
-  echo "TN0034 VERIFY: FAIL ($fail stage(s))"
+  echo "libfprint-tod VERIFY: FAIL ($fail stage(s))"
   echo "logs: $verify_dir/rpm-verify.log, $verify_dir/probe-verify.log"
   exit 1
 fi

@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — generate the dedicated host->device SSH key.
+# AFK channel — generate the dedicated host->device SSH key.
 #
 # The private key stays on the host and is git-ignored
 # (tools/afk/keys/.gitignore); only the .pub is baked into the overlay tarball

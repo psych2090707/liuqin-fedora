@@ -28,7 +28,7 @@
 #     never blocks the pipeline. Present scripts are called only through their
 #     documented CLI.
 #   * NOTHING in this script writes a device, boots the tablet, calls fastboot or
-#     touches real device partitions. VM simulation was retired in TN0065.
+#     touches real device partitions. VM simulation was retired.
 #   * Fedora release stays at 44. Other release parameters remain available;
 #     changing the target requires a separate user request (ADR-0005).
 #   * --skip-build runs env/validate/docs only (fast, safe during parallel work);
@@ -137,7 +137,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-case "$RELEASE" in 44|45) ;; *) die "--release must be 44 or 45 (parameterised; see docs/maintenance/ci.md)" ;; esac
+case "$RELEASE" in 44|45) ;; *) die "--release must be 44 or 45 (parameterised)" ;; esac
 case "$PROFILE" in plasma|tty) ;; *) die "--profile must be plasma or tty" ;; esac
 case "$JOBS" in ''|*[!0-9]*) die "--jobs must be a positive integer" ;; esac
 
@@ -186,7 +186,7 @@ if [ "$LIST" -eq 1 ]; then
         done
         printf '%-12s %-10s %s\n' "$s" "${state% }" "${DESC[$s]}"
     done
-    printf '\nFedora release: %s (default 44; --release 45 after GA — see docs/maintenance/ci.md)\n' "$RELEASE"
+    printf '\nFedora release: %s (default 44; --release 45 after GA)\n' "$RELEASE"
     printf 'Scripts present: '; for s in "${ALL_STAGES[@]}"; do for f in ${STAGE_SCRIPTS[$s]}; do
         [ -e "$PROJECT_ROOT/$f" ] && printf '%s ' "$f"; done; done; printf '\n'
     printf 'Missing/pending: '; for s in "${ALL_STAGES[@]}"; do for f in ${STAGE_SCRIPTS[$s]}; do
@@ -429,7 +429,7 @@ run_kernel_rpm() {
     fi
     if ! have scripts/build-kernel-rpm.sh; then
         skip_step kernel-rpm kernel-liuqin-rpm \
-            "pending: scripts/build-kernel-rpm.sh (kernel-builder task) — interface documented in docs/maintenance/ci.md" \
+            "pending: scripts/build-kernel-rpm.sh (kernel-builder task)" \
             "stage-kernel-rpm.log"
         stage_end kernel-rpm SKIP
         return 0

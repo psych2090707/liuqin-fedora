@@ -1,8 +1,8 @@
-# GPU 锁死取证常驻服务（TN0081）
+# GPU 锁死取证常驻服务
 
 liuqin 上 GPU 锁死时机器**不会死机**：内核、SSH、用户态都还活着，只是画面无法合成、
 屏幕和输入看起来全无反应。这种故障既不会 panic、也不会复位，常规崩溃收集器一无所获；
-等人发现时 dmesg 早已被复读冲掉（TN0081 实测 63 分钟内 1852 次 hangcheck，60k 行内核日志）。
+等人发现时 dmesg 早已被复读冲掉（一次实测在 63 分钟内出现 1852 次 hangcheck、约 60k 行内核日志）。
 
 本目录的 `gpu-hang-watch.py` 是常驻、只读、低开销的取证器：盯着内核日志，一旦出现
 GPU fault / hangcheck lockup / GMU 超时，立刻把**当时仍然存活的 GPU 状态**落盘，
@@ -23,7 +23,7 @@ GPU fault / hangcheck lockup / GMU 超时，立刻把**当时仍然存活的 GPU
 
 `events.csv` 记录每次事件（含未触发完整抓取的先兆事件）；`LAST-HANG.txt` 指向最近一次完整抓取。
 先兆事件（GMU HFI 超时、`gmu_set_oob` 超时、ringbuffer 无空间）也会抓一次，
-它们常常**早于**锁死若干分钟——TN0081 里 `14:09:52` 的 HFI 超时比 `14:24:44` 的致命超时早了 15 分钟。
+它们常常**早于**锁死若干分钟——一次记录中 HFI 超时比致命超时早了约 15 分钟。
 
 ## 开销与保留
 
@@ -52,5 +52,3 @@ python3 -B /usr/libexec/liuqin/gpu-hang-watch.py capture --reason "手动"
 - 不是修复手段：它只负责把现场留下来。GPU 一旦锁死仍只能重启恢复。
 - 内核 panic 或整机复位时来不及落盘；那种情况仍走 pstore/journal 路径。
 - debugfs 读数在极端卡死时可能超时，收集器有 25 秒上限，超时会被记录而不是拖住服务。
-
-部署与实机验证见 TN0081。

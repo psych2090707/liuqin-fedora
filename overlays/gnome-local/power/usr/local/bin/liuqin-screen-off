@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# TN0086: immediate "screen off" action for GNOME/Wayland (user scope).
+# Immediate "screen off" action for GNOME/Wayland (user scope).
 # Locks the session, then asks Mutter to put the panel into PowerSaveMode 3.
 set -u
 /usr/bin/loginctl lock-session 2>/dev/null || true

@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — push the AFK overlay to the device and install it.
+# AFK channel — push the AFK overlay to the device and install it.
 #
 #   tools/afk/install-overlay.sh --dry-run          # show what would change
 #   tools/afk/install-overlay.sh                    # real install (backs up first)

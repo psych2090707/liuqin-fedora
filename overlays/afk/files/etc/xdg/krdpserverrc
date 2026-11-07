@@ -1,4 +1,4 @@
-# AFK channel (TN0048) — KRDP (RDP server) configuration.
+# AFK channel — KRDP (RDP server) configuration.
 #
 # Read by krdpserver via KConfig (~/.config/krdpserverrc overrides this
 # system-wide /etc/xdg file).  See the upstream CLI recipe in
@@ -12,7 +12,7 @@
 #
 # Port stays at the default 3389.  krdpserver listens on 0.0.0.0 and the only
 # interface that exists on this tablet is usb0 (no Wi-Fi firmware), so the
-# listener is reachable only through the USB cable; docs/maintenance/afk-channel.md
+# listener is reachable only through the USB cable; see tools/afk/README.md
 # documents the optional nftables restriction as well.
 [General]
 Certificate=/home/user/.local/share/krdpserver/krdp.crt

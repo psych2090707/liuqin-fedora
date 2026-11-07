@@ -15,7 +15,7 @@
 # The same script supports the Fedora Workstation/GNOME profile (default since
 # Fedora 45) and the retained KDE Plasma profile.
 #
-# Docs: docs/build/rootfs-build.md
+# Docs: mkosi/README.md
 
 set -euo pipefail
 

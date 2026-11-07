@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# TN0086: configurable power-key policy helper for the pinned liuqin evdev
+# Configurable power-key policy helper for the pinned liuqin evdev
 # daemon (liuqin-power-keyd). The daemon calls this with "short" or "long";
 # the lid watcher calls it with "lid-short" to toggle blank/wake without
 # consulting the native GNOME power-button setting.
@@ -61,13 +61,13 @@ short)
 	esac
 	;;
 ensure-off|ensure-on)
-	# TN0097: idempotent display actions used by the lid service. Unlike the
+	# Idempotent display actions used by the lid service. Unlike the
 	# power-key path they do not consult the native GNOME action, and unlike
 	# lid-short they never toggle.
 	exec "$ORIGINAL_HELPER" "$action"
 	;;
 lid-short)
-	# Kept for an older running lid service during a rolling update. The TN0097
+	# Kept for an older running lid service during a rolling update. These
 	# service calls ensure-off/ensure-on instead of this toggle.
 	exec "$ORIGINAL_HELPER" short
 	;;

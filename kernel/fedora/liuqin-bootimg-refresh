@@ -23,7 +23,7 @@
 #                            and writes <out>/initramfs/liuqin-firstboot.cpio.gz
 #                            + initramfs-info.json (device_ready true) and the
 #                            regenerated contract (liuqin-fedora-root.contract).
-#                            Exit 0/1/2 as documented in docs/maintenance/boot-initramfs.md.
+#                            Exit 0/1/2 as documented in the boot update notes.
 #   bin/build-bootimg.sh     wrapper around scripts/build-bootimg.sh accepting
 #                            --kernel-out --ramdisk --out --dtb-source
 #                            --stock-rom-dir --mkbootimg-dir --cmdline-file
@@ -47,7 +47,7 @@
 #                     + flat projections (kernel_release, bootimg_sha256,
 #                     artifact_sha256, kernel_image_sha256, dtb_source,
 #                     dtb_sha256, board_dtb_sha256, ramdisk_sha256,
-#                     contract_sha256).  See docs/maintenance/boot-update.md §5.1.
+#                     contract_sha256).
 # Exit: 0 success; 1 build/verification failure; 2 missing input/asset.
 set -eu
 umask 022
@@ -190,11 +190,11 @@ PYFILTER
 
 # Enforce the P0-1 contract invariant: no fail-closed kernel identity pins may
 # survive into the rebuilt contract (the boot-tools contract generator must be
-# kernel-identity-policy=warn aware; see docs/maintenance/kernel-rpm.md §4.3).
+# kernel-identity-policy=warn aware).
 for contract in "$WORK/boot/initramfs"/*.contract; do
 	[ -f "$contract" ] || continue
 	if grep -qE '/usr/(share/liuqin/(kernel\.release|kernel-modules\.manifest)|lib/modules/)' "$contract"; then
-		die "P0-1 violation: rebuilt contract still pins kernel identity paths: $contract (boot-tools contract generator must drop kernel-identity pins; see docs/maintenance/kernel-rpm.md §4.3)" 1
+		die "P0-1 violation: rebuilt contract still pins kernel identity paths: $contract (boot-tools contract generator must drop kernel-identity pins)" 1
 	fi
 done
 
@@ -249,7 +249,7 @@ cp -f "$IMAGE" "$OUT/boot-liuqin-dev.img"
 # cross-checks the boot-builder document against the real boot.img sections,
 # the kernel-out Image/board DTB, the ramdisk and the contract before writing
 # $OUT/build-info.json.  Consumers (kernel-install hook, liuqin-apply-boot)
-# read exactly this schema; see docs/maintenance/boot-update.md §5.
+# read exactly this schema.
 python3 "$METADATA" merge \
 	--build-info "$BINFO" \
 	--initramfs-info "$IFINFO" \

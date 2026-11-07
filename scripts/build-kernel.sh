@@ -18,7 +18,7 @@
 # IMPORTANT — why the scratch tree is not under the project directory:
 #   The kernel top-level Makefile rejects a source tree whose path contains a
 #   space or a colon ("source directory cannot contain spaces or colons",
-#   Makefile:217). This project lives under ".../Agent Studio/Fedora", so the
+#   Makefile:217). This project may live under a path containing spaces, so the
 #   kernel source and the O= output directory must live in a space-free scratch
 #   root (default: /var/tmp/liuqin-kbuild). Only the final artifacts are copied
 #   into out/kernel/. Use --build-root to relocate the scratch tree.

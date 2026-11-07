@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — pin the USB NCM device address, idempotently.
+# AFK channel — pin the USB NCM device address, idempotently.
 #
 # Called by afk-usb0-address.service (early, before network.target/sshd) and by
 # afk-usb0-address.timer (every 2 minutes as a safety net).  NetworkManager is

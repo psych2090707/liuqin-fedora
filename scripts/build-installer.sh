@@ -246,4 +246,4 @@ fi
 
 say 'runtime ready; no device access'
 say 'next: boot-builder (scripts/build-initramfs.sh with INSTALLER_RUNTIME='"$out/image-overlay"','
-say '      then scripts/build-bootimg.sh) produces installer.img; see docs/build/installer.md'
+say '      then scripts/build-bootimg.sh) produces installer.img; see installer/README.md'

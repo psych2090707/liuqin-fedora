@@ -25,7 +25,7 @@ run() { # NAME COMMAND...
 
 for tool in python3 sh sgdisk; do
 	command -v "$tool" >/dev/null 2>&1 || {
-		printf 'missing host tool: %s (see docs/build/installer.md)\n' "$tool" >&2
+		printf 'missing host tool: %s (see installer/README.md)\n' "$tool" >&2
 		exit 1
 	}
 done

@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — pre-authorize krdpserver for the KDE RemoteDesktop portal.
+# AFK channel — pre-authorize krdpserver for the KDE RemoteDesktop portal.
 #
 # Runs as a Plasma-session user unit (afk-krdp-preauth.service) before
 # app-org.kde.krdpserver.service.  Without this the portal would pop a

@@ -3,7 +3,7 @@
 # --firmware-pool` consumes, straight from the pinned read-only upstream tree
 # (upstream/xiaomipad-6pro-mainline/device/firmware).
 #
-# Why this exists (TN0055, promoted to a build input in TN0058):
+# Why this exists:
 #   * The upstream repository tracks the whole firmware closure (197 files) with
 #     per-file sha256 in device/firmware/firmware.manifest, and every category
 #     our builder pins matches it byte for byte.  No user/ROM extraction step is
@@ -35,7 +35,7 @@ manifest=$upstream_fw/firmware.manifest
 src=$upstream_fw/usr/lib/firmware
 
 # AudioReach topology baselines.  The project pin is the one built from the
-# pinned AudioReach sources and verified audible on liuqin (TN0054); the
+# pinned AudioReach sources and verified audible on liuqin; the
 # upstream tree ships a different binary.  Release builds use the project pin.
 TOPOLOGY_PROJECT_SHA=9c9f8bfcffde1f52c143d58cba821c5f6b3899553370ab92a88b90d81fef9ee9
 TOPOLOGY_UPSTREAM_SHA=dff0c8af945c66d542a004931af66435966cee12c6c430d0fa0610c6d3d5d126

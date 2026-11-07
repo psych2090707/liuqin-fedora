@@ -8,7 +8,7 @@
 #   /usr/local/sbin/liuqin-early-wake-log
 #   /usr/lib/systemd/system-sleep/50-liuqin-suspend-log
 #   /usr/local/bin/liuqin-notify-log
-#   /home/laplus/.config/systemd/user/liuqin-notify-log.service
+#   $DEV_HOME/.config/systemd/user/liuqin-notify-log.service
 # Restarts the already-running user service (enable --now alone would leave the
 # old process in place), reads the hashes back, then runs one pre/post self-test
 # in /tmp (not in the real state directory) and one labelled test notification.
@@ -16,6 +16,8 @@
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+DEV_USER="${LIUQIN_DEV_USER:-user}"
+DEV_HOME="${LIUQIN_DEV_HOME:-/home/$DEV_USER}"
 AFK="$ROOT/tools/afk/afk.sh"
 SRC="$ROOT/tools/suspend-log"
 TEST_STATE="/tmp/liuqin-suspend-log-selftest"
@@ -25,10 +27,10 @@ TARGETS=(
     /usr/local/sbin/liuqin-early-wake-log
     /usr/lib/systemd/system-sleep/50-liuqin-suspend-log
     /usr/local/bin/liuqin-notify-log
-    /home/laplus/.config/systemd/user/liuqin-notify-log.service
+    "$DEV_HOME/.config/systemd/user/liuqin-notify-log.service"
 )
-NOTIFY_LOG=/home/laplus/.local/state/liuqin-notify-log/notifications.jsonl
-SCREEN_LOG=/home/laplus/.local/state/liuqin-notify-log/screen-events.jsonl
+NOTIFY_LOG="$DEV_HOME/.local/state/liuqin-notify-log/notifications.jsonl"
+SCREEN_LOG="$DEV_HOME/.local/state/liuqin-notify-log/screen-events.jsonl"
 
 [ -x "$AFK" ] || { echo "missing $AFK" >&2; exit 1; }
 for name in liuqin-suspend-log liuqin-early-wake-log 50-liuqin-suspend-log liuqin-notify-log \
@@ -58,29 +60,30 @@ if [ "$before_active" != active ]; then
 fi
 before_start="$(sed -n 's/^ExecMainStartTimestampMonotonic=//p' <<<"$service_before")"
 
-"$AFK" sudo '
+"$AFK" sudo "
 set -euo pipefail
 install -D -m 0755 /tmp/liuqin-suspend-log /usr/local/sbin/liuqin-suspend-log
 install -D -m 0755 /tmp/liuqin-early-wake-log /usr/local/sbin/liuqin-early-wake-log
 install -D -m 0755 /tmp/50-liuqin-suspend-log /usr/lib/systemd/system-sleep/50-liuqin-suspend-log
 rm -f /etc/systemd/system-sleep/50-liuqin-suspend-log
 install -D -m 0755 /tmp/liuqin-notify-log /usr/local/bin/liuqin-notify-log
-install -D -o laplus -g laplus -m 0644 /tmp/liuqin-notify-log.service /home/laplus/.config/systemd/user/liuqin-notify-log.service
+install -D -o $DEV_USER -g $DEV_USER -m 0644 /tmp/liuqin-notify-log.service $DEV_HOME/.config/systemd/user/liuqin-notify-log.service
 install -d -m 0700 /var/lib/liuqin-suspend-log
 rm -f /tmp/liuqin-suspend-log /tmp/liuqin-early-wake-log /tmp/50-liuqin-suspend-log /tmp/liuqin-notify-log /tmp/liuqin-notify-log.service
-'
+"
 
 "$AFK" run "env $USER_ENV systemctl --user daemon-reload"
 # The service is already running, so an explicit restart is required.
 "$AFK" run "env $USER_ENV systemctl --user restart liuqin-notify-log.service"
 
-remote_hashes="$("$AFK" sudo 'sha256sum /usr/local/sbin/liuqin-suspend-log /usr/local/sbin/liuqin-early-wake-log /usr/lib/systemd/system-sleep/50-liuqin-suspend-log /usr/local/bin/liuqin-notify-log /home/laplus/.config/systemd/user/liuqin-notify-log.service')"
-python3 - "$SRC" "$remote_hashes" <<'PY'
+remote_hashes="$("$AFK" sudo "sha256sum /usr/local/sbin/liuqin-suspend-log /usr/local/sbin/liuqin-early-wake-log /usr/lib/systemd/system-sleep/50-liuqin-suspend-log /usr/local/bin/liuqin-notify-log $DEV_HOME/.config/systemd/user/liuqin-notify-log.service")"
+python3 - "$SRC" "$remote_hashes" "$DEV_HOME" <<'PY'
 import hashlib
 import sys
 from pathlib import Path
 
 src = Path(sys.argv[1])
+dev_home = sys.argv[3]
 remote = {}
 for line in sys.argv[2].splitlines():
     parts = line.split()
@@ -91,7 +94,7 @@ mapping = {
     "liuqin-early-wake-log": "/usr/local/sbin/liuqin-early-wake-log",
     "50-liuqin-suspend-log": "/usr/lib/systemd/system-sleep/50-liuqin-suspend-log",
     "liuqin-notify-log": "/usr/local/bin/liuqin-notify-log",
-    "liuqin-notify-log.service": "/home/laplus/.config/systemd/user/liuqin-notify-log.service",
+    "liuqin-notify-log.service": f"{dev_home}/.config/systemd/user/liuqin-notify-log.service",
 }
 for local, target in mapping.items():
     expected = hashlib.sha256((src / local).read_bytes()).hexdigest()

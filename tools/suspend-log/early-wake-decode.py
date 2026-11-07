@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Decode a sealed TN0092 recording offline. Never identify a physical waker.
+"""Decode a sealed early-wake recording offline. Never identify a physical waker.
 
 Sequence means recorder observation order, not hardware arrival order. Raw
 counter seconds are usable only after matching a unique observer pre/post pair

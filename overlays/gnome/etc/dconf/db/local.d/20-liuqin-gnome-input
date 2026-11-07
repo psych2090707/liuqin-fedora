@@ -1,4 +1,4 @@
-# TN0078 — GNOME 中文输入：切换快捷键与可见的拼音预编辑。
+# GNOME 中文输入：切换快捷键与可见的拼音预编辑。
 #
 # 背景：GNOME 50 Wayland 下只有 Super+Space 能切输入源；IBus 自己的
 # Ctrl+Space trigger 在 Wayland 没有全局抓键（GNOME 由 shell 直接调
@@ -10,7 +10,7 @@
 # 不改变输入源顺序或默认语言。回退：恢复对应备份文件后 `sudo dconf update`，
 # 不要为了撤销下方预编辑设置而删掉整个文件、丢失原有快捷键。
 #
-# 写入边界：TN0078/task-2 新建文件；不改 00-liuqin-gnome。
+# 写入边界：本文件只管理下列键，不改 00-liuqin-gnome。
 
 [org/gnome/desktop/wm/keybindings]
 switch-input-source=['<Super>space', '<Control>space', 'XF86Keyboard']

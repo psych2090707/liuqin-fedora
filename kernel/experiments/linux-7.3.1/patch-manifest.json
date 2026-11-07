@@ -213,7 +213,7 @@
       "drivers/input/touchscreen/nt36523/nt36xxx.c"
     ],
     "sha256": "168a6bf4c6936b602bb96d85146c3f41db968b45c11809e397537793c0718936",
-    "source": "tasks/stylus-support/evidence/pen-evdev-2026-11-06.json; kernel/patches/queue/0300-input-touch-hid/0024",
+    "source": "pen-evdev measurement 2026-11-06; kernel/patches/queue/0300-input-touch-hid/0024",
     "withdraw_when": "a liuqin pen report is measured in panel pixels instead of tenths, or the pen scale is set correctly by a board property upstream"
   }
 ]

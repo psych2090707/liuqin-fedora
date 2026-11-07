@@ -1,8 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# Fedora GNOME adaptation of pinned liuqin v0.6.0 helper (TN0083).
+# Fedora GNOME adaptation of the pinned liuqin v0.6.0 helper.
 # Reuse upstream shield/state handling; blank only, long hold remains inert.
-# TN0097: add idempotent ensure-off/ensure-on for the lid policy. Those actions
+# Add idempotent ensure-off/ensure-on for the lid policy. Those actions
 # only change Mutter PowerSaveMode; they never lock or unlock the session.
 set -eu
 
@@ -42,7 +42,7 @@ gid=$(printf '%s\n' "$passwd_entry" | cut -d: -f4)
 session_home=$(printf '%s\n' "$passwd_entry" | cut -d: -f6)
 case $gid in ''|*[!0-9]*) exit 3 ;; esac
 runtime=$runtime_base/$uid
-# The service may run as the session user (TN0097) or as root (power-key daemon).
+# The service may run as the session user or as root (power-key daemon).
 # Only switch credentials when they differ; a non-root process cannot clear
 # supplementary groups.
 current_uid=$("$id_cmd" -u)

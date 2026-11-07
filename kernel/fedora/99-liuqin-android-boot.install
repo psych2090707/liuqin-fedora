@@ -37,7 +37,7 @@
 # fails closed with a precise message instead of staging a half-consistent boot
 # image. The pre-apply window ("stale boot image vs new rootfs") is covered by
 # the initramfs policy change requested in task-15 P0-1: kernel identity is
-# advisory (warn), not a fail-closed pin; see docs/maintenance/kernel-rpm.md §4.3.
+# advisory (warn), not a fail-closed pin.
 #
 # Environment contract (values from /etc/liuqin/bootimg.conf override defaults):
 #   LIUQIN_BOOT_ASSETS_DIR       on-device boot-assets root (default /usr/libexec/liuqin/boot-assets)

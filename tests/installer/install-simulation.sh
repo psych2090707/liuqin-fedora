@@ -473,7 +473,7 @@ if unpack_ramdisk "$bundle/installer.img" "$ramdisk_installer" 2>"$work_root/ins
 	else
 		fail installer.flat_plasmalogin "installer is not the flat/plasmalogin Fedora path"
 	fi
-	# P1-4 (TN0036): execute the SHIPPED install-root.sh installation-time
+	# Execute the SHIPPED install-root.sh installation-time
 	# validation functions (contract_validate, fedora_privileged_files,
 	# contract_apply) against the REAL installed tar tree instead of grepping the
 	# shipped script text.  The functions are extracted VERBATIM from the shipped

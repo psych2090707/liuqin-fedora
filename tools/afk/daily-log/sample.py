@@ -40,7 +40,7 @@ def command(argv):
 
 
 def notes_build_id(data):
-    # Same NT_GNU_BUILD_ID parsing as TN0070 sleep_probe; sysfs is not an ELF file.
+    # Same NT_GNU_BUILD_ID parsing as the sleep probe; sysfs is not an ELF file.
     offset, found = 0, []
     while offset + 12 <= len(data):
         namesz, descsz, kind = struct.unpack_from('<III', data, offset)

@@ -10,11 +10,11 @@ After=upower.service systemd-logind.service
 Wants=upower.service
 
 [Service]
-# TN0097: the service runs as the desktop user so it may connect to the user
+# The service runs as the desktop user so it may connect to the user
 # session bus (D-Bus rejects a root EXTERNAL connection). The user is in the
 # input group, which is needed for the non-exclusive input watch.
-User=laplus
-Group=laplus
+User=user
+Group=user
 SupplementaryGroups=input
 Type=simple
 ExecStart=/usr/local/libexec/liuqin-lid-policy

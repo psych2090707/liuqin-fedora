@@ -1502,7 +1502,7 @@ hostname liuqin-firstboot
 [ ! -w /proc/sys/kernel/hotplug ] || echo /sbin/mdev >/proc/sys/kernel/hotplug
 mdev -s
 
-# FEDORA: optional early udev and stage-1 splash (TN0090). Plymouth only takes
+# FEDORA: optional early udev and stage-1 splash. Plymouth only takes
 # the udev discovery path it is built for when a real systemd-udevd is running;
 # with mdev alone it never opens a DRM card and there is no splash.
 # /etc/liuqin-early-udev and /etc/liuqin-early-plymouth exist only in images

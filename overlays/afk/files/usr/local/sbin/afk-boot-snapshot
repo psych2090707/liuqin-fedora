@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — capture "what happened in the last boot(s)".
+# AFK channel — capture "what happened in the last boot(s)".
 #
 # Runs at boot (afk-boot-snapshot.service) and at shutdown/reboot
 # (afk-shutdown-snapshot.service) as root.  Everything lands under

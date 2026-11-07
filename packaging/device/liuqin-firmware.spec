@@ -6,7 +6,7 @@
 # Qualcomm/Xiaomi/Cirrus Logic and their licensors and must never be published
 # in a repository or shipped inside a public image.  See NOTICE.
 #
-# Ownership policy decided in docs/maintenance/device-packages.md:
+# Ownership policy:
 #  * regulatory.db / regulatory.db.p7s are omitted (Fedora wireless-regdb owns
 #    those paths and the kernel consumes that copy);
 #  * qcom/sm8450/Xiaomi-Pad-6-Pro-tplg.bin is omitted (liuqin-audio owns it);

@@ -9,14 +9,14 @@
 PID1 是仅返回成功的静态合成程序；通过不等于真实 GNOME、系统启动或 ARM 硬件可用。
 
 `python3 tests/desktop-admission/test-power-helper.py` 用命令替身运行上游适配的按键 helper，
-覆盖空闲唤醒已亮屏不再次熄屏、手动亮灭、长按无动作、非 GNOME 会话跳过，以及 TN0097 的
+覆盖空闲唤醒已亮屏不再次熄屏、手动亮灭、长按无动作、非 GNOME 会话跳过，以及
 幂等 `ensure-off`/`ensure-on`（不锁屏、失败不写缓存、root 调用切换到会话用户）。
 不调用真实 D-Bus、按键或锁屏；用于代码逻辑的离线验证。
 
-Rust 电源服务：`scripts/build-powerd.sh` 运行 `liuqin-power-core` 的 22 个状态机测试、
+Rust 电源服务：`scripts/build-powerd.sh` 运行 `liuqin-power-core` 的状态机测试、
 `cargo fmt --check` 和 aarch64 release 构建；旧的 Python 状态机测试仍保留用于回退验证。
 
-`python3 tests/desktop-admission/test-lid-policy.py` 直接运行 TN0097 合盖状态机，
+`python3 tests/desktop-admission/test-lid-policy.py` 直接运行合盖状态机，
 覆盖恢复后重新熄屏、开盖取消、输入/交流电/电源键取消重睡、20 秒窗口、快速恢复限流和
 helper 连续失败暂停。
 

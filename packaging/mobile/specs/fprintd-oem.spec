@@ -44,9 +44,9 @@ print('fprintd source hashes verified:', len(ref), 'files')
 PYHASH
 python3 %{SOURCE2} . %{_builddir}/fprintd-oem-source --patch-output %{_builddir}/fprintd-oem-update.generated.patch
 cp %{SOURCE1} %{_builddir}/fprintd-oem-source/src/oem-update.inc
-# Recheck verify authorization while logind settles after suspend (TN0064).
+# Recheck verify authorization while logind settles after suspend.
 patch -d %{_builddir}/fprintd-oem-source -p1 --no-backup-if-mismatch < %{SOURCE5}
-# Keep a Claim pending while libfprint reports the device suspended (TN0064).
+# Keep a Claim pending while libfprint reports the device suspended.
 patch -d %{_builddir}/fprintd-oem-source -p1 --no-backup-if-mismatch < %{SOURCE6}
 
 %build

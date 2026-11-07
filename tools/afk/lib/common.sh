@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — shared host-side helpers.
+# AFK channel — shared host-side helpers.
 #
 # Sourced by tools/afk/afk.sh, build-overlay.sh, install-overlay.sh,
 # build-repo.sh.  Keep this file free of side effects other than loading config
@@ -14,11 +14,11 @@ AFK_TOOLS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 AFK_ROOT="$(cd -- "$AFK_TOOLS_DIR/../.." && pwd)"
 
 # ------------------------------------------------------------------- config ---
-# Committed defaults for the liuqin bring-up device (TN0047/TN0048).
+# Defaults for the liuqin bring-up device.
 AFK_DEV_HOST="${AFK_DEV_HOST:-192.168.7.2}"
 AFK_HOST_IP="${AFK_HOST_IP:-192.168.7.10}"
 AFK_DEV_USER="${AFK_DEV_USER:-user}"
-AFK_DEV_PASS="${AFK_DEV_PASS:-147147}"          # dev-only image password (docs/STATUS.md)
+AFK_DEV_PASS="${AFK_DEV_PASS:-}"                 # no default: set AFK_DEV_PASS or use SSH keys
 AFK_REPO_PORT="${AFK_REPO_PORT:-8080}"
 # The configfs NCM gadget pins the host-side MAC (initramfs/init sets host_addr).
 AFK_GADGET_HOST_MAC="${AFK_GADGET_HOST_MAC:-02:00:00:00:07:01}"
@@ -38,8 +38,8 @@ if [ -f "$AFK_TOOLS_DIR/afk.env" ]; then
 fi
 
 # OpenSSH tokenises -o values on whitespace, so a state path containing spaces
-# (for example a workspace named "Agent Studio") silently loads a truncated
-# path such as "$HOME/Agent" as the known_hosts file and rejects the device.
+# (a directory with a space) silently loads a truncated path such as
+# "$HOME/Agent" as the known_hosts file and rejects the device.
 # Route the option through a no-space symlink when needed; the link points at
 # the real file, so accept-new still appends to the intended store.
 afk_known_hosts_opt() {

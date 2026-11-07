@@ -565,7 +565,7 @@ class RealRomOnlyTests(unittest.TestCase):
         (sha256 885faaab…) when the ROM is OS2.0.6.0.VMYCNXM and the kernel is
         the locked commit; otherwise the builder's VERIFICATION.md reports the
         differing identity/bootargs fields (the expected cause is a different
-        ROM version; see docs/maintenance/stock-rom-inputs.md).
+        ROM version).
         """
 
 

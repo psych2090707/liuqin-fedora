@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""KDE lock screen fingerprint PAM redirect (TN0064): apply/revert/refusal."""
+"""KDE lock screen fingerprint PAM redirect: apply/revert/refusal."""
 import importlib.util
 from pathlib import Path
 import subprocess

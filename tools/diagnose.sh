@@ -198,7 +198,7 @@ fw_check() { # id title path... (globs allowed expanded by caller via present ch
 		pass "$id" firmware "$title" file "present: $*"
 	else
 		fail "$id" firmware "$title" file "missing:$missing" "ls /usr/lib/firmware" \
-			"check the pinned upstream device/firmware pool and early initramfs (docs/maintenance/firmware-closure.md)"
+			"check the pinned upstream device/firmware pool and early initramfs"
 	fi
 }
 fw_check firmware.touch "NT36532 touch firmware (both panel variants)" \
@@ -231,7 +231,7 @@ else
 		"install wireless-regdb (or liuqin-firmware's pinned copy)"
 fi
 # Fedora ships these in the cirrus-audio-firmware subpackage, xz-compressed
-# (F44/F45 both provide the same generic bytes; see docs/maintenance/firmware-closure.md).
+# (F44/F45 both provide the same generic bytes).
 cs35_dsp=0
 for base in cirrus/cs35l41-dsp1-spk-prot.wmfw cirrus/cs35l41-dsp1-spk-prot.bin; do
 	for candidate in "$base" "$base.xz" "$base.zst" "$base.gz"; do
@@ -268,7 +268,7 @@ if [ "$calr" = 4 ]; then
 else
 	skip firmware.cs35l41_calr firmware "per-device calibration incomplete ($calr/4); not proof of silence" device \
 		"ls /usr/lib/firmware/cirrus/cs35l41-liuqin-*-calr.bin" \
-		"see docs/maintenance/firmware-closure.md; do not re-provision automatically"
+		"do not re-provision automatically"
 fi
 if [ "$MODE" = device ]; then
 	out=$(timeout "$TIMEOUT" sh -c 'dmesg 2>/dev/null | grep -i -E "failed to load firmware|direct firmware load" | head -n 20' 2>/dev/null)
@@ -376,7 +376,7 @@ input_check() { # id title pattern evidence
 		pass "$1" input "$2 detected" file "cat /sys/class/input/*/name"
 	elif [ "$MODE" = device ]; then
 		fail "$1" input "$2 not detected" device "cat /sys/class/input/*/name /proc/bus/input/devices" \
-			"check kernel driver/module, dmesg, DT node (docs/research/kernel-and-boot.md §1.3)"
+			"check kernel driver/module, dmesg and the DT node"
 	else
 		skip "$1" input "$2 (needs device input subsystem)" device "cat /sys/class/input/*/name" \
 			"run diagnose on the tablet"
@@ -479,7 +479,7 @@ else
 fi
 skip power.powerdevil_decision power "power-key ownership needs selected desktop policy" known-gap \
 	"current GNOME uses the custom policy; the native action is nothing" \
-	"read docs/STATUS.md and /etc/liuqin/power-policy.conf; do not apply old KDE defaults"
+	"read /etc/liuqin/power-policy.conf; do not apply old KDE defaults"
 
 # ---------------------------------------------------------------------------
 # sensors / rotation
@@ -513,14 +513,14 @@ else
 fi
 if present /etc/liuqin/power-policy.conf || present /usr/share/wayland-sessions/gnome.desktop; then
 	skip sensors.rotation_config sensors "legacy KWin rotation configuration not applicable to GNOME" known-gap \
-		"GNOME session/config present" "do not restore KDE to satisfy this check; see docs/STATUS.md"
+		"GNOME session/config present" "do not restore KDE to satisfy this check"
 elif present /var/lib/plasmalogin/.config/kwinoutputconfig.json; then
 	if grep -q 'autoRotation' "$(rd /var/lib/plasmalogin/.config/kwinoutputconfig.json)" 2>/dev/null; then
 		pass sensors.rotation_config sensors "KWin autoRotation configured" file \
 			"cat /var/lib/plasmalogin/.config/kwinoutputconfig.json"
 	else
 		fail sensors.rotation_config sensors "autoRotation missing in KWin config" file \
-			"cat /var/lib/plasmalogin/.config/kwinoutputconfig.json" "fix kwinoutputconfig (docs/build/rootfs-build.md)"
+			"cat /var/lib/plasmalogin/.config/kwinoutputconfig.json" "fix kwinoutputconfig"
 	fi
 else
 	skip sensors.rotation_config sensors "KWin output config not found" file \
@@ -537,7 +537,7 @@ if present /usr/lib64/liuqin-fingerprint/libfprint-tod/libfprint-2.so.2 && \
 else
 	skip fingerprint.libfprint_tod fingerprint "Private TOD runtime not installed" file \
 		"install the source-built libfprint-tod and liuqin-fpc1264-tod RPMs" \
-		"see docs/maintenance/mobile-stack-packages.md; no TOD ABI port is required"
+		"no TOD ABI port is required"
 fi
 if present /dev/fpc1020; then
 	pass fingerprint.device fingerprint "FPC1264 device node visible" file "ls -l /dev/fpc* /sys/bus/spi/devices/"
@@ -557,7 +557,7 @@ if present /dev/video0; then
 else
 	skip camera.video_devices camera "camera is experimental upstream (no AF/calibration)" known-gap \
 		"upstream support is experimental; front camera unsupported" "ls -l /dev/video*" \
-		"see docs/research/kernel-and-boot.md"
+		"see the kernel notes in kernel/README.md"
 fi
 file_or_device usbdp.typec usb-dp "USB-C typec port (UCSI)" /sys/class/typec/port0 \
 	"ls /sys/class/typec/" "check pmic-glink/UCSI + dwc3"
@@ -585,7 +585,7 @@ if [ "$staged" -gt 0 ]; then
 		"ls -l /boot/liuqin/*.img; liuqin-apply-boot status --json"
 else
 	skip boot.staged_images boot "no staged boot image" file "ls -l /boot/liuqin/" \
-		"no staged image is required for diagnostics; read docs/maintenance/kernel-rpm.md before updating"
+		"no staged image is required for diagnostics; read kernel/fedora/README.kernel-liuqin before updating"
 fi
 if present /boot/liuqin/apply-state.json; then
 	phase=$(sed -n 's/.*"phase": "\([^"]*\)".*/\1/p' "$(rd /boot/liuqin/apply-state.json)" 2>/dev/null | head -n 1)
@@ -600,7 +600,7 @@ else
 	skip boot.apply_journal boot "no apply-boot journal yet" file "cat /boot/liuqin/apply-state.json" \
 		"no update applied since install"
 fi
-# boot tool stack installed? (kernel-liuqin + liuqin-boot-tools RPMs; Lead 2026-10-20)
+# boot tool stack installed? (kernel-liuqin + liuqin-boot-tools RPMs)
 if present /usr/libexec/liuqin/boot-assets; then
 	pass boot.boot_assets boot "boot-assets installed (on-device boot rebuild assets)" file \
 		"ls -l /usr/libexec/liuqin/boot-assets"
@@ -637,7 +637,7 @@ elif grep -qi '^SELINUX=disabled' "$(rd /etc/selinux/config)" 2>/dev/null; then
 	skip security.selinux security \
 		"SELinux still disabled: rebuild pending (decision: permissive, ADR-0002 addendum)" known-gap \
 		"etc/selinux/config: SELINUX=disabled" \
-		"rebuild the rootfs/image with SELINUX=permissive (docs/adr/0002-*; rootfs-build.md §9)"
+		"rebuild the rootfs/image with SELINUX=permissive"
 else
 	fail security.selinux security "SELinux config missing/unparseable" file "cat /etc/selinux/config" \
 		"restore /etc/selinux/config (permissive for first release)"
@@ -731,7 +731,7 @@ tmp_json=$WORKDIR/report.json
 		done
 	printf '\n  ],\n'
 	printf '  "hardware_support_ref": "docs/hardware-support.md",\n'
-	printf '  "checklist_ref": "docs/device-validation/VERIFICATION-CHECKLIST.md"\n'
+	printf '  "checklist_ref": "device validation checklist"\n'
 	printf '}\n'
 } >"$tmp_json" || die "cannot write JSON report"
 mv "$tmp_json" "$JSON_OUT" || die "cannot write JSON report to $JSON_OUT"

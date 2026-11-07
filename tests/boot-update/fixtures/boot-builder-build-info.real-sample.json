@@ -28,7 +28,7 @@
       "release": "6.17.0-rc1-gfe81794b5e1b"
     },
     "ramdisk": {
-      "path": "/home/laplus/Agent Studio/Fedora/out/boot/initramfs/liuqin-firstboot.cpio.gz",
+      "path": "/build/liuqin-fedora/out/boot/initramfs/liuqin-firstboot.cpio.gz",
       "sha256": "d51c7bbe359c442ac2172cf31dab117f8745f92b3f015d3d6ada05db4941dbc3",
       "bytes": 1998639,
       "mode": "persistent",
@@ -54,7 +54,7 @@
     "raw_kernel_dtb_comparison": "raw kernel DTB present (sha256 bbb3e271b965a49fb50e18bde32ba647ae801acd6a6bf6e706272993f8a2d4ea, 124152 bytes); __symbols__=no (upstream injects the union from 44 DTBO entries + 14 base DTBs); qcom,msm-id=no (upstream identity overlay injects it); /chosen bootargs matches native-bootargs=yes; identity-overlay cross-check=pass"
   },
   "release_structure_reference": {
-    "bootimg": "/home/laplus/Agent Studio/Fedora/cache/upstream-v0.6.0/boot.img",
+    "bootimg": "/build/liuqin-fedora/cache/upstream-v0.6.0/boot.img",
     "bootimg_sha256": "7a368e58291f974f1cebd1e91e81ce8edc7256a19f75c4baea3fffd883157900",
     "kernel_gzip_bytes": "18120557",
     "ramdisk_bytes": "31864730",

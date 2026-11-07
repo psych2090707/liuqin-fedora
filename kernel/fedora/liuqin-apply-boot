@@ -566,7 +566,7 @@ def identity_gate(image: BootImage, staging_dir: Path, modules_dir: Path,
                   allow_dev_dtb_source: bool) -> dict:
     """Apply-time gate: the staged image must belong to the installed rootfs.
 
-    Since TN0032 the staged metadata is schema v2 (liuqin_boot_metadata.py) and
+    The staged metadata is schema v2 (liuqin_boot_metadata.py) and
     is cross-checked against the real boot.img sections AND against the
     installed kernel payload, so "kernel identity mismatch" is a hard failure
     for a device write instead of a warning.

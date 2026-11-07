@@ -176,7 +176,7 @@ if [ -s "$RAMDISK" ]; then
 		tail -n 25 "$WORK/bootimg-build.txt" | sed 's/^/  /'
 	fi
 fi
-# TN0085: the same builder must accept the project cmdline (upstream bootargs
+# The same builder must accept the project cmdline (upstream bootargs
 # plus gnome.is_vm=0) on the canonical stock-rom path and put it in the final
 # DTB /chosen bootargs. This is the cmdline a kernel update will use.
 if [ -s "$RAMDISK" ] && [ -n "$STOCK_ROM_DIR" ]; then

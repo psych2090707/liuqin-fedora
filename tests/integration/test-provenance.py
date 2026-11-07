@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small offline regressions for TN0040; no RPM builds or devices required."""
+"""Small offline regressions; no RPM builds or devices required."""
 import ast
 import gzip
 import hashlib
@@ -176,7 +176,7 @@ class KernelSnapshot(unittest.TestCase):
             config = meta.with_name("kernel.config")
             for snapshot, recorded, expected in [
                 (actual, actual, ["PASS", "PASS"]),
-                (stale, actual, ["FAIL", "PASS"]),  # TN0047: stale bundled snapshot
+                (stale, actual, ["FAIL", "PASS"]),  # stale bundled snapshot
                 (stale, stale, ["PASS", "FAIL"]),  # matching sidecars cannot hide a wrong kernel
                 (None, actual, ["FAIL", "PASS"]),
             ]:

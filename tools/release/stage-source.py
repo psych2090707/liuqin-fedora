@@ -18,7 +18,9 @@ PROJECT = Path(__file__).resolve().parents[2]
 ROOTS = ('kernel', 'initramfs', 'installer', 'mkosi', 'overlays', 'packaging',
          'rust', 'scripts', 'tools', 'tests')
 EXTRA = ('docs/research/liuqin-assets.json',)
-OMIT = ('tools/afk/keys/id_', 'tests/docs/',)
+OMIT = ('tools/afk/keys/id_', 'tests/docs/', 'scripts/check-docs.sh',
+        'tools/resume-install-root.py', 'packaging/device/SPEC-DELTA.md',
+        'packaging/mobile/fingerprint/README-libfprint-tod-BLOCKED.md')
 GITIGNORE = '''upstream/
 out/
 images/
@@ -110,12 +112,31 @@ def main():
     (out / '.gitattributes').write_text('*.patch -whitespace\n*.diff -whitespace\n*.tsv -whitespace\n')
     (out / 'AGENTS.md').write_text(
         '# Working on liuqin Fedora Remix\n\n'
-        'Read README.md, HARDWARE.md and INSTALL.md first. This is an experimental personal device port.\n'
-        'Consult upstream sources before changing device support. Keep hardware evidence specific to the exact artifact.\n'
-        'Do not flash, repartition, switch slots or erase data without explicit authorization, backups and readback checks.\n'
-        'Preserve SLPI disable safeguards. Never publish device calibration, serials, persist, fingerprint data or credentials.\n'
-        'Keep vendor firmware and locally prepared install bundles private. Do not modify read-only upstream clones.\n'
-        'Use scoped offline tests; do not operate the graphical desktop or change host networking automatically.\n')
+        'This repository builds an experimental Fedora 45 / GNOME 51 image for the\n'
+        'Xiaomi Pad 6 Pro (liuqin, SM8475). Read README.md, HARDWARE.md and INSTALL.md\n'
+        'first.\n\n'
+        '## For installation agents\n\n'
+        '- Use only the release artifacts and the exact commands in INSTALL.md. Check\n'
+        '  the artifact SHA256 before unpacking.\n'
+        '- Verify the model is liuqin, the bootloader is unlocked and the layout is the\n'
+        '  supported stock single-system layout before any write.\n'
+        '- Never invent a device path, slot switch or partition change. Stop and ask\n'
+        '  the user when the layout, capacity, model or checksum differs.\n'
+        '- Require a fresh backup and a rehearsal (`--dry-run`) before\n'
+        '  `--yes-write-device`.\n'
+        '- Do not operate graphical menus or change host networking automatically.\n'
+        '- Report the exact command, artifact SHA256 and observed output; never claim a\n'
+        '  device test that was not performed.\n\n'
+        '## For contributors\n\n'
+        '- Consult upstream sources before changing device support.\n'
+        '- Keep hardware evidence specific to the exact artifact and kernel Build ID.\n'
+        '- Do not flash, repartition, switch slots or erase data without explicit\n'
+        '  authorization, backups and readback checks.\n'
+        '- Preserve the SLPI disable safeguard.\n'
+        '- Never publish device calibration, serials, persist data, fingerprint\n'
+        '  templates or credentials; keep vendor firmware and prepared bundles private.\n'
+        '- Do not modify read-only upstream clones.\n'
+        '- Use scoped offline tests; document unverified behaviour as unverified.\n')
     for source in (PROJECT / 'packaging/release/public').glob('*.md.in'):
         shutil.copy2(source, out / source.name.removesuffix('.in'))
     licenses = out / 'LICENSES'

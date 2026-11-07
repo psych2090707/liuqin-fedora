@@ -1,18 +1,17 @@
-# overlays/afk — device side of the AFK channel (TN0048)
+# overlays/afk — device side of the AFK maintenance channel
 
-> **保留的旧 KDE 部署实现，不适用于当前 GNOME 重装覆盖。** 下文安装/卸载仅解释历史代码，不能沿用到当前账户、网络、电源与密码库配置。当前入口见 AFK。本目录仍含 USB/取证的在用源文件，不能整体删除。
+> **保留的旧 KDE 部署实现，不适用于当前 GNOME 系统。** 下文安装/卸载只解释历史代码，不能沿用到当前账户、网络、电源与密码库配置。本目录仍含 USB/取证的参考源文件，不要整体删除。
 
-> **层次（2026-11-06）**：干净镜像的 USB NCM 产品功能在 `overlays/rootfs/rootfs.d/60-liuqin-usb/`，名字是 `liuqin-usb0-*`。本目录的 `afk-*` 只是维护层，不应进入干净镜像。若维护基座已经带 `liuqin-usb0-link.service`，`install.sh` 会跳过 `afk-usb0-address/dhcp`，只保留 AFK 工具；`90-afk.preset` 也只服务于维护镜像。
+> **层次**：干净镜像的 USB NCM 产品功能在 `overlays/rootfs/rootfs.d/60-liuqin-usb/`，名字是 `liuqin-usb0-*`。本目录的 `afk-*` 只是维护层，不应进入干净镜像。若维护基座已经带 `liuqin-usb0-link.service`，`install.sh` 会跳过 `afk-usb0-address/dhcp`，只保留 AFK 工具；`90-afk.preset` 也只服务于维护镜像。
 
 Everything here runs **on the tablet** (or is baked into its rootfs later).
-The host side lives in [tools/afk](../../tools/afk/README.md); the full story is
-docs/maintenance/afk-channel.md.
+The host side lives in [tools/afk](../../tools/afk/README.md).
 
-TN0074 增加了 USB device-role 核对：现有 address service 的 drop-in 先核对控制器角色，
-udev 在 role/typec 变化时调度同一个服务，不新增轮询。仅当 Type-C 已报告 device、
-本机 rescue gadget 已绑定时修正误落到 host 的控制器；不改 Type-C 协商、不覆盖真实 host。
-原 address service 的 netdev 存在条件由 SLPI 标记条件替代，避免 netdev 消失时跳过修复。
-依据、验证边界与单独回退见 TN0074。
+USB device-role handling: the address service drop-in first checks the controller
+role; udev schedules the same service on role/Type-C changes instead of adding a
+poll loop. It only corrects a controller that landed in host mode while the local
+rescue gadget is bound; it does not change Type-C negotiation or override a real
+host. Rollback is a unit/drop-in removal.
 
 ```
 overlays/afk/
@@ -57,11 +56,11 @@ tools/afk/afk.sh overlay-install             # real install (+ --rpms auto-detec
 tools/afk/afk.sh reboot --wait 240           # autologin + KRDP user units apply after reboot
 ```
 
-`install-overlay.sh` builds the tarball, scp's it to `/tmp`, and runs
+`install-overlay.sh` builds the tarball, copies it to `/tmp`, and runs
 `sudo bash /tmp/afk-overlay/afk-overlay-*/install.sh` on the device. When the
-public key is not installed yet it authenticates with the dev password through
-`SSH_ASKPASS` (non-interactive) and switches to the key automatically once the
-installer has written `authorized_keys`.
+public key is not installed yet it authenticates with the configured dev password
+through `SSH_ASKPASS` (non-interactive) and switches to the key automatically once
+the installer has written `authorized_keys`.
 
 By default the installer runs **detached on the tablet** (`setsid --fork`,
 output in `/var/log/afk/install-<ts>.log`) and the host polls for its exit code:
@@ -94,19 +93,19 @@ Options (see `install.sh --help`): `--rpms DIR`, `--repo URL`, `--skip-packages`
    stays reachable and the installer can simply be rerun;
 3. installs the missing packages (`rpm -Uvh` from the offline bundle, one
    transaction; or `dnf5 --repofrompath` if a repo is given);
-3. appends the host public key to `/home/user/.ssh/authorized_keys`, adds the
+4. appends the host public key to the device user's `authorized_keys`, adds the
    user to `systemd-journal,adm` (unprivileged log collection), generates the
-   KRDP TLS identity (`/home/user/.local/share/krdpserver/krdp.{crt,key}`);
-4. creates `/var/log/journal` + `/var/log/afk`, enables `afk-usb0-dhcp`,
+   KRDP TLS identity under the user's home;
+5. creates `/var/log/journal` + `/var/log/afk`, enables `afk-usb0-dhcp`,
    `afk-boot-snapshot`, `afk-shutdown-snapshot`, `systemd-pstore`, restarts
    journald and flushes the journal;
-5. `sshd -t` then `systemctl reload sshd` (never restarts it, so the installing
+6. `sshd -t` then `systemctl reload sshd` (never restarts it, so the installing
    SSH session survives);
-6. **last**: reloads NetworkManager and activates `afk-usb0` (this can bounce
+7. **last**: reloads NetworkManager and activates `afk-usb0` (this can bounce
    the installing SSH session; `install-overlay.sh` waits for it to return).
 
 Re-running copies files and enables units again; it can overwrite newer account,
-desktop and network policy. It is not harmless on the migrated device.
+desktop and network policy. It is not harmless on a migrated device.
 
 **Never touched**: `/etc/liuqin-fedora-root`, `/etc/liuqin-fedora-root.contract`,
 `/etc/liuqin/image-contract` — the initramfs admission gate validates them on
@@ -148,33 +147,21 @@ To disable just the AFK layer without uninstalling, comment out
 [tools/afk/packages-extra.txt](../../tools/afk/packages-extra.txt) but not
 installed by default.
 
-## Baking into the mkosi rootfs later (without touching mkosi files now)
+## Baking into an image (optional, KDE profile)
 
 The overlay is deliberately a plain file tree + installer, so promoting it into
-the image build is mechanical.  When the Lead decides to bake it:
+the image build is mechanical:
 
 1. copy the tree into the mkosi skeleton, e.g.
    `cp -a overlays/afk/files/. mkosi/mkosi.skeleton/`
    (mkosi applies `mkosi.skeleton` as a root-filesystem overlay during the build);
 2. **do not** copy `install.sh`; instead add the enablement steps to
    `mkosi/mkosi.postinst.chroot` (chrooted, offline, no running services):
-   * `systemctl enable afk-usb0-dhcp afk-boot-snapshot afk-shutdown-snapshot systemd-pstore`
-   * `mkdir -p /var/log/journal && chmod 2755 /var/log/journal`
-   * `rpm -q krdp dnsmasq openssl` (or list them in `mkosi/mkosi.profiles/plasma.conf`)
-   * the user-unit symlinks are plain files under `/home/<user>/.config`, created
-     in the chroot with the right owner (mkosi preserves numeric ownership —
-     mirror the existing `mkosi.postinst.chroot` dev-user block);
-3. inject the **public** key at build time (never the private key):
-   e.g. a build-time `install -D -m600 <pubkey> /home/$DEV_USER/.ssh/authorized_keys`
-   fed from `tools/afk/keys/id_ed25519_afk.pub` (a build input, not a committed
-   device fact);
-4. `--watchdog` / `--firewall` / `--no-password-auth` are install-time choices;
-   if baking, pick one policy per image profile instead of per install;
-5. keep this as a **dev-only** profile: autologin + no lock screen +
+   enable `afk-usb0-dhcp afk-boot-snapshot afk-shutdown-snapshot systemd-pstore`,
+   create `/var/log/journal`, and list `krdp dnsmasq openssl` in the profile;
+3. inject the **public** key at build time (never the private key);
+4. keep this as a **dev-only** profile: autologin, no lock screen and
    `PasswordAuthentication yes` must not be the default for a release image.
-
-Nothing in this task writes `mkosi/` or `installer/` — the steps above are a
-recipe for whoever owns those directories.
 
 ## Notes / pitfalls encoded in the files
 
@@ -186,7 +173,7 @@ recipe for whoever owns those directories.
   restores host auto-configuration (`192.168.7.10-19`), DHCP only (`port=0`),
   no router/DNS options.
 * `sshd -t` is run before any reload because a broken drop-in would otherwise
-  lock the only remote channel out; `AllowUsers user` and `PermitRootLogin no`
+  lock the only remote channel out; `AllowUsers` and `PermitRootLogin no`
   are deliberate.
 * KRDP needs the KDE RemoteDesktop portal permission, otherwise someone has to
   click a sharing dialog on a tablet nobody is touching.  `afk-krdp-preauth` +

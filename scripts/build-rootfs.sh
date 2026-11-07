@@ -16,7 +16,7 @@
 #   out/rootfs/validation/             verification log + machine summary
 #   out/rootfs/logs/                   mkosi build log + resolved mkosi summary
 #
-# Docs: docs/build/rootfs-build.md. Device layer injection (kernel-liuqin,
+# Docs: mkosi/README.md. Device layer injection (kernel-liuqin,
 # liuqin-firmware, ...) is documented in overlays/rootfs/README.md and is NOT
 # part of this build.
 #
@@ -81,7 +81,7 @@ Usage: scripts/build-rootfs.sh [options]
 
 Artifacts: out/rootfs/{rootfs/,rootfs.manifest,rootfs.packages.txt,
            rootfs.files.sha256,build-info.json,validation/,logs/}
-Docs: docs/build/rootfs-build.md   Device layer: overlays/rootfs/README.md
+Docs: mkosi/README.md   Device layer: overlays/rootfs/README.md
 EOF
     exit 0
 }
@@ -734,7 +734,7 @@ PY
     # Fedora 44 split linux-firmware into per-driver packages and ships firmware
     # xz-compressed, so check both the provider packages and the on-disk paths.
     # Remaining device-specific blobs come from the user's own device (device
-    # layer); see docs/build/rootfs-build.md §4/§13.
+    # layer); see mkosi/README.md.
     local fw_ok=() fw_missing=() p
     for p in atheros-firmware cirrus-audio-firmware qcom-firmware; do
         if chroot_run rpm -q "$p" >/dev/null 2>&1; then fw_ok+=("$p"); else fw_missing+=("pkg:$p"); fi

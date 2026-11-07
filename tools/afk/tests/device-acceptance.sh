@@ -1,7 +1,7 @@
 #!/bin/bash
-# AFK channel (TN0048) — device acceptance checklist, one step at a time.
+# AFK channel — device acceptance checklist, one step at a time.
 #
-# Turns RESULT.md §5 ("待实机联调") into a repeatable, fail-fast run.  Each step
+# Turns the manual acceptance checklist into a repeatable, fail-fast run.  Each step
 # prints PASS/FAIL and the evidence path; on the first failure it stops and
 # prints what to look at.  It only uses tools/afk/afk.sh.
 #
@@ -218,7 +218,7 @@ done
 sect "summary"
 printf 'pass=%d fail=%d  log=%s\n' "$pass" "$fail" "$LOG"
 if [ "$fail" -eq 0 ]; then
-    say "all selected acceptance steps passed; record evidence paths in the current goal RESULT; see tasks/README.md"
+    say "all selected acceptance steps passed; record the evidence paths"
 else
     say "stopped on a failing step; see the FAIL lines and the log above"
 fi

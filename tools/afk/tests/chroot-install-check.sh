@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — install the overlay into the *real* device rootfs in a
+# AFK channel — install the overlay into the *real* device rootfs in a
 # user-mode QEMU chroot, without a device and without touching the rootfs tree.
 #
 # What this proves (offline):
@@ -206,7 +206,7 @@ else
 fi
 # The pre-existing 90-afk.conf must be restored (sentinel), so check that the
 # *overlay content* is gone rather than the path.
-assert_ok "overlay sshd content removed"      "! grep -q 'AFK channel (TN0048)' /etc/ssh/sshd_config.d/90-afk.conf"
+assert_ok "overlay sshd content removed"      "! grep -q 'AFK channel' /etc/ssh/sshd_config.d/90-afk.conf"
 assert_ok "pre-existing 90-afk.conf restored" "grep -q 'chroot-test sentinel' /etc/ssh/sshd_config.d/90-afk.conf"
 assert_ok "afk units removed"                 "test ! -e /etc/systemd/system/afk-usb0-dhcp.service"
 assert_ok "NM unmanaged conf removed"         "test ! -e /etc/NetworkManager/conf.d/90-afk-unmanaged.conf"

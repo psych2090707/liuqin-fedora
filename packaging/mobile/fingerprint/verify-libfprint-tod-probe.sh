@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
-# TN0034 in-container part of the fake-/dev/fpc1020 TOD enumeration test.
+# In-container part of the fake-/dev/fpc1020 TOD enumeration test.
 # Runs INSIDE the throwaway arm64 container created by
 # packaging/mobile/fingerprint/verify-libfprint-tod.sh, with:
 #   - /work mounted read-only-ish (same repo mount)

@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — device-side health snapshot.
+# AFK channel — device-side health snapshot.
 #
 # Read-only and defensive: it never asks for root and never exits non-zero for a
 # missing optional subsystem, so it can be the first thing to run when the AFK

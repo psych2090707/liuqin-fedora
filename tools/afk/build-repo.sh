@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — build an offline aarch64 RPM repo for the tablet.
+# AFK channel — build an offline aarch64 RPM repo for the tablet.
 #
 # The tablet has no Wi-Fi firmware and the delivery rootfs has no dnf, so the
 # only way to add packages is over the USB link.  This script prepares:
@@ -199,7 +199,7 @@ fi
 count="$(find "$OUT/rpms" -maxdepth 1 -name '*.rpm' | wc -l)"
 [ "$count" -gt 0 ] || die "no RPMs were downloaded; check the dnf5 output above"
 {
-    echo "# AFK offline aarch64 RPM repo (TN0048)"
+    echo "# AFK offline aarch64 RPM repo"
     echo "created_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "host=$(hostname)"
     echo "container_image=$IMAGE"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — offline self-check for the host-side tooling.
+# AFK channel — offline self-check for the host-side tooling.
 #
 # Verifies everything that can be verified without a device:
 #   * every shell script parses (bash -n) and every python file compiles
@@ -111,7 +111,7 @@ sect "sshd drop-in"
 if have_cmd sshd; then
     tmpconf="$work/sshd_test.conf"
     # Copy the drop-in to a whitespace-free path first: sshd's Include tokenizes
-    # on spaces and this workspace path contains "Agent Studio".
+    # on spaces, and the workspace path may contain spaces.
     cp "$AFK_ROOT/overlays/afk/files/etc/ssh/sshd_config.d/90-afk.conf" "$work/90-afk.conf"
     ssh-keygen -q -t ed25519 -N '' -f "$work/hostkey" >/dev/null 2>&1
     {
@@ -237,17 +237,21 @@ fi
 # ------------------------------------------------------------- 7. repo/docs ---
 sect "documentation and repo wiring"
 for f in \
-    "$AFK_ROOT/docs/maintenance/afk-channel.md" \
-    "$AFK_ROOT/tasks/archive/TN0048-afk-channel/README.md" \
     "$AFK_ROOT/overlays/afk/README.md" \
     "$AFK_ROOT/tools/afk/README.md" \
     "$TOOLS_DIR/packages.txt" "$TOOLS_DIR/afk.env.example" ; do
     if [ -f "$f" ]; then okc "exists ${f#"$AFK_ROOT/"}"; else failc "missing ${f#"$AFK_ROOT/"}"; fi
 done
-if grep -q 'tools/afk/afk.sh' "$AFK_ROOT/docs/maintenance/afk-channel.md" 2>/dev/null; then
-    okc "docs reference the host tool"
+# The full maintainer tree also carries a longer channel guide and the original
+# task record; a public source export intentionally omits them.
+if [ -f "$AFK_ROOT/docs/maintenance/afk-channel.md" ]; then
+    if grep -q 'tools/afk/afk.sh' "$AFK_ROOT/docs/maintenance/afk-channel.md"; then
+        okc "docs reference the host tool"
+    else
+        failc "docs/maintenance/afk-channel.md does not reference tools/afk/afk.sh"
+    fi
 else
-    failc "docs/maintenance/afk-channel.md does not reference tools/afk/afk.sh"
+    skipc "full maintainer channel guide not present (public source export)"
 fi
 if grep -qE '^krdp$' "$TOOLS_DIR/packages.txt"; then
     okc "packages.txt includes krdp"

@@ -51,7 +51,7 @@ Source13: unpack_bootimg.py
 Source14: native-bootargs.txt
 Source15: README.kernel-liuqin
 Source16: liuqin-bootimg-refresh
-# TN0032: single implementation of the boot metadata schema (v2) shared by
+# Single implementation of the boot metadata schema (v2) shared by
 # liuqin-bootimg-refresh / the kernel-install hook / liuqin-apply-boot, and the
 # kernel pair archive used to keep rollbacks boot+modules consistent.
 Source17: liuqin_boot_metadata.py
@@ -70,7 +70,7 @@ Requires:      python3
 # (double '-' separator). Out-of-tree modules for this device must therefore
 # depend on kernel-liuqin-<version>-<release> (or on
 # kernel-liuqin-modules) instead of the generic kernel-uname-r capability.
-# See docs/maintenance/kernel-rpm.md §2.1.
+# See the kernel RPM notes in this directory.
 Provides:      kernel-liuqin-modules = %{version}-%{release}
 Conflicts:     kernel
 Conflicts:     kernel-core
@@ -162,7 +162,7 @@ install -m 0644 %{SOURCE14} %{buildroot}/usr/share/liuqin/tools/native-bootargs.
 install -m 0644 %{SOURCE15} %{buildroot}/usr/share/liuqin/README.kernel-liuqin
 
 %pre
-# TN0032: preserve the currently installed kernel pair (Image + modules tree +
+# Preserve the currently installed kernel pair (Image + modules tree +
 # identity files) BEFORE rpm replaces the files.  It matters because the
 # kernelrelease is intentionally fixed: an upgrade overwrites the SAME
 # /usr/lib/modules/<kver> path, so without this archive a boot.img rollback
@@ -176,7 +176,7 @@ install -m 0644 %{SOURCE15} %{buildroot}/usr/share/liuqin/README.kernel-liuqin
 # one modules tree + vmlinuz, retained for LIUQIN_KERNEL_PAIR_RETAIN pairs).
 # Escape hatch for operators who accept a non-rollbackable update:
 #   LIUQIN_KERNEL_PAIR_ARCHIVE=0 dnf upgrade kernel-liuqin
-# Real-system gate (Lead review TN0032): scriptlets also run when an image is
+# Real-system gate: scriptlets also run when an image is
 # assembled into a staging rootfs (mkosi / dnf --installroot / rpm --root).
 # /run/systemd/system only exists on a system actually booted by systemd, so an
 # offline image build can never be disturbed by this archive step.  Build or

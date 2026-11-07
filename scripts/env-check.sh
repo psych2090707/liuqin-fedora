@@ -30,7 +30,7 @@ for arg in "$@"; do
     esac
 done
 
-# Reference versions this project was validated against (2026-10, CachyOS).
+# Reference versions this project was validated against (2026-10, Arch-family host).
 # They are informational: newer versions pass as long as capabilities hold.
 EXPECTED_PODMAN_MAJOR=6
 EXPECTED_MKOSI_MAJOR=27

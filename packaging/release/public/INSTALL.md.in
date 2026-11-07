@@ -14,15 +14,18 @@
 
 ## 下载镜像
 
-在本版本 Release 下载全部 `liuqin-fedora-45-gnome-20261107-base.tar.part-*` 分卷和 `BASE.SHA256`。源码附件供开发者使用，安装时可以稍后再下载。
+在本版本 Release 下载全部 `*-base.tar.part-*` 分卷和 `BASE.SHA256`。源码附件供开发者使用，安装时可以稍后再下载。
 
-把所有分卷放在同一个新目录中，执行：
+把所有分卷放在同一个新目录中，先按实际文件名设置 `BASE`，再合并和校验：
 
 ```sh
-cat liuqin-fedora-45-gnome-20261107-base.tar.part-* > liuqin-fedora-45-gnome-20261107-base.tar
+BASE="$(ls *.tar.part-* | sed 's/\.part-.*$//' | sort -u | head -n 1)"
+[ -n "$BASE" ] && [ "$(ls *.tar.part-* | sed 's/\.part-.*$//' | sort -u | wc -l)" = 1 ] \
+  || { echo "expected exactly one base archive"; exit 1; }
+cat "$BASE".part-* > "$BASE"
 sha256sum -c BASE.SHA256
 mkdir image
-tar -xf liuqin-fedora-45-gnome-20261107-base.tar -C image
+tar -xf "$BASE" -C image
 ```
 
 校验应全部显示 `OK`。若缺少分卷或文件损坏，重新下载相应文件后再继续。

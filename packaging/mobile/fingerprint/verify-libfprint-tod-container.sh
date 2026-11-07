@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
-# TN0034 offline verification of the libfprint-tod / liuqin-fpc1264-tod RPMs.
+# Offline verification of the libfprint-tod / liuqin-fpc1264-tod RPMs.
 # Runs INSIDE the arm64 Fedora 45 container (workspace mounted at /work).
 # Host wrapper: packaging/mobile/fingerprint/verify-libfprint-tod.sh
 # No device access; the fake /dev/fpc1020 enumeration test lives in the host

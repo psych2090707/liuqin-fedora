@@ -6,7 +6,7 @@
 # validation (policy relabel on root.img, no blocking denials, plasmalogin/
 # sensors/fingerprint PAM paths verified).
 #
-# Switch conditions to enforcing (all required, see docs/build/rootfs-build.md §8):
+# Switch conditions to enforcing (all required):
 #   1. root.img assembly performs a full `setfiles` relabel (xattr preserved);
 #   2. device boot with permissive collects no blocking AVCs for the critical
 #      stack (systemd, plasmalogin, NetworkManager, PipeWire, iio-sensor-proxy);

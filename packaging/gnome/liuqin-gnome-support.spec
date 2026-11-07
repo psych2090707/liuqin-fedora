@@ -53,11 +53,11 @@ cp -a payload/. %{buildroot}/
 
 %changelog
 * Wed Oct 28 2026 liuqin project <liuqin@localhost> - 1.0-3
-- Keep GNOME's native power-button action at 'nothing' for the TN0086 custom
+- Keep GNOME's native power-button action at 'nothing' for the custom
   power-key/lid policy app and services
 
 * Wed Oct 28 2026 liuqin project <liuqin@localhost> - 1.0-2
-- Restore the native GNOME power-button action (suspend) after the TN0085
+- Restore the native GNOME power-button action (suspend) after the
   Chassis/VM fix; keep the custom liuqin-power-keyd service disabled
 
 * Wed Oct 28 2026 liuqin project <liuqin@localhost> - 1.0-1

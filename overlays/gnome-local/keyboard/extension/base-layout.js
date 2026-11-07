@@ -1,6 +1,6 @@
 /* liuqin-osk-layout@liuqin — tablet on-screen-keyboard layout for GNOME Shell 51.
  *
- * Installed system-wide by TN0078 (task-3) on the Xiaomi Pad 6 Pro (liuqin).
+ * Installed system-wide on the Xiaomi Pad 6 Pro (liuqin).
  * It does two independent, reversible things while enabled:
  *
  * 1. Layout/size: registers a small GResource that overrides

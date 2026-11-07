@@ -79,7 +79,7 @@ ConditionPathExists=/usr/libexec/liuqin-fingerprint/tod/libfprint-tod-fpc1264-oe
 
 [Service]
 # Kept disabled by default: enable only after the device-side fingerprint
-# acceptance procedure in docs/maintenance/mobile-stack-packages.md.
+# acceptance procedure described in this directory.
 UMask=0077
 Type=simple
 ExecStart=/usr/libexec/liuqin-fingerprint/fprintd --no-timeout
@@ -120,7 +120,7 @@ shutil.copyfile(Path(__file__).with_name('configure.py'), install_bin / 'liuqin-
 (install_bin / 'liuqin-fingerprint-configure').chmod(0o755)
 
 # KDE lock screen: same flow as authselect's fingerprint-auth, without the
-# 30 s pam_fprintd timeout that kscreenlocker treats as permanent (TN0064).
+# 30 s pam_fprintd timeout that kscreenlocker treats as permanent.
 (DEST / 'payload/etc/pam.d/liuqin-kde-fingerprint-auth').write_text(
     '# liuqin KDE lock screen fingerprint stack (liuqin-fingerprint-lockscreen).\n'
     '# Mirrors authselect fingerprint-auth; pam_fprintd waits without a timeout\n'

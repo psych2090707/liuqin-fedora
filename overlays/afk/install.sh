@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — device-side overlay installer.
+# AFK channel — device-side overlay installer.
 #
 # Runs ON THE TABLET as root (normally: tools/afk/install-overlay.sh pushes this
 # tarball over SSH and executes it through sudo).  Idempotent, backs up every
@@ -16,7 +16,7 @@
 #   sshd reload, and NetworkManager last (activating the static usb0 profile can
 #   briefly interrupt the very SSH session this script runs in).
 #
-# Docs: docs/maintenance/afk-channel.md
+# Docs: tools/afk/README.md
 set -euo pipefail
 
 VERSION_DEFAULT="1"
@@ -55,7 +55,7 @@ usage() {
     cat <<'EOF'
 usage: install.sh [options]
 
-Device-side installer for the AFK channel overlay (TN0048). Must run as root.
+Device-side installer for the AFK channel overlay. Must run as root.
 
 Options:
   --rpms DIR              install missing RPMs from DIR (offline bundle, one rpm -Uvh transaction)
@@ -543,7 +543,7 @@ if [ "$DRY_RUN" != 1 ]; then
     : >"$MANIFEST.new"
 fi
 
-# Order matters (see docs/maintenance/afk-channel.md §2.2 and the Lead's requirement):
+# Order matters (network-first, so a failed later step cannot strand the channel):
 #   files -> RELIABLE USB NETWORK -> packages -> user/config -> services -> sshd.
 # If anything after step 2 fails, the operator can still SSH in and rerun the
 # installer (it is idempotent).

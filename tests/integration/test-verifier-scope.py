@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regression: a selected bundle must not borrow another build's rootfs tree.
 
-TN0045 found that verify-bundle.sh --bundle X fell back to the newest
+An earlier review found that verify-bundle.sh --bundle X fell back to the newest
 out/image-build tree when X had no tree of its own (e.g. custom --work), which
 would attribute dev-v3's rootfs checks to a different bundle.  A bundle without
 its own assembled tree must SKIP rootfs checks instead.

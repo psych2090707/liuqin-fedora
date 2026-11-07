@@ -11,7 +11,7 @@
 # only systemd/loginctl primitives.
 #
 # KDE's powerdevil also handles the power key; the liuqin-power-keyd unit is
-# therefore installed but NOT enabled by default (see docs/maintenance/device-packages.md).
+# therefore installed but NOT enabled by default.
 # If enabled, a short press locks the active seat0 session; a long press is a
 # deliberate no-op so powerdevil/the desktop own the chooser and the daemon can
 # never power the tablet off on its own.

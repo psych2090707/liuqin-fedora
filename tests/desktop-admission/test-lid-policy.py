@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the TN0097 lid/re-suspend state machine without D-Bus or devices."""
+"""Exercise the lid/re-suspend state machine without D-Bus or devices."""
 import runpy
 from pathlib import Path
 from unittest.mock import patch
@@ -219,7 +219,7 @@ with patch.object(module['time'], 'clock_gettime_ns', side_effect=clock.read), \
     now = module['now_ms']
     policy = Policy(now(), 'blank', True)
     policy.initial(True, True, now())
-    # TN0098: three real 7.5 minute sleeps, with only ~5 s awake during each
+    # Three real 7.5 minute sleeps, with only ~5 s awake during each
     # suspend transition. Old now_ms() counts those as three quick returns.
     for sleep_ms in (455285, 454650, 454669):
         policy.note_resuspend_issued(now())

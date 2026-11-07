@@ -1,4 +1,4 @@
-# TN0086: GNOME's native power-button action is intentionally 'nothing'.
+# GNOME's native power-button action is intentionally 'nothing'.
 #
 # The liuqin power-key daemon (liuqin-power-keyd) handles short and long presses
 # through /usr/local/libexec/liuqin-power-key-policy; keeping gsd-media-keys at

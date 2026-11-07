@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # SPDX-License-Identifier: MIT
-# TN0097: UPower lid watcher with closed-lid resume protection and optional
+# UPower lid watcher with closed-lid resume protection and optional
 # conditional re-suspend.
 #
 # LID_ACTION=blank   -> display off on close, on on open; after a resume with
@@ -12,7 +12,7 @@
 # LID_ACTION=nothing -> do nothing.
 #
 # LID_RESUSPEND=1 additionally re-suspends once after a resume when all of the
-# conditions in TN0096 §8.3 hold. It applies to blank and suspend, not nothing.
+# documented conditions hold. It applies to blank and suspend, not nothing.
 # An abnormal short wake with the lid open gets one retry after 10 s; a long
 # sleep returns to the normal GNOME idle policy instead. The default is 0; the
 # display protection does not need it.
@@ -69,7 +69,7 @@ def rtc_alarm_is_set():
 
 LOG_PREFIX = "liuqin-lid-policy"
 
-# TN0096 §8.3 initial policy values; not yet tuned on the device.
+# Initial policy values; tune only with device evidence.
 FIX_INTERVAL_MS = 1000
 RESUME_CONFIRM_MS = 3000
 RESUSPEND_DELAY_MS = 20000
@@ -97,7 +97,7 @@ def log(message):
 
 def now_ms():
     # CLOCK_MONOTONIC stops during suspend: minutes asleep would look like a
-    # quick resume and eventually trip the retry limit (TN0098). Use one
+    # quick resume and eventually trip the retry limit. Use one
     # suspend-aware clock for policy deadlines, input ages and retry history.
     return time.clock_gettime_ns(time.CLOCK_BOOTTIME) // 1000000
 

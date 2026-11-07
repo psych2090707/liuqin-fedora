@@ -18,7 +18,7 @@ This package carries the Fedora adaptation of the liuqin sensor overlay from
 |---|---|
 | `/usr/local/sbin/liuqin-*` | `/usr/libexec/liuqin/*` |
 | `/usr/libexec/iio-sensor-proxy` drop-in `ExecStart=/usr/local/libexec/liuqin-iio-sensor-proxy` | `ExecStart=/usr/libexec/iio-sensor-proxy` (we ship the patched iio-sensor-proxy as a replacement RPM) |
-| session refresh waits for `org.gnome.Shell` | waits for `org.kde.KWin` (KDE target; unverified on liuqin, see docs/maintenance/mobile-stack-packages.md) |
+| session refresh waits for `org.gnome.Shell` | waits for `org.kde.KWin` (KDE target; unverified on liuqin) |
 | ROM sensor registry copied at image build | **operator action**: `liuqin-sensor-registry-import <dir>`; per-device data never packaged |
 
 ## Enablement (do not auto-enable units that need hardware)

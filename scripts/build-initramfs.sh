@@ -592,7 +592,7 @@ firmware_absent() {
 		# Must be 0: every caller is `[ -d ... ] || { firmware_absent ...; return; }`
 		# under `set -eu`, so returning non-zero here aborted the whole build at
 		# the first absent category — `--allow-missing-firmware` never produced a
-		# partial-pool image (found while building TN0054's DSP-only pool).
+		# partial-pool image (found while building a DSP-only pool).
 		return 0
 	fi
 	die "firmware category '$1' is missing: $2 (pass --allow-missing-firmware only for dev structure images)"

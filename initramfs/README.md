@@ -23,20 +23,22 @@
    契约头为 `LIUQIN_FEDORA_ROOT_CONTRACT_V2`，契约文件
    `/etc/liuqin-fedora-root.contract` 由 `tools/build-root-contract.py --profile fedora`
    从 rootfs manifest 生成后嵌入。
-2. **按明确指定的桌面生成拓扑门禁**：默认仍为 KDE，GNOME 必须显式 `--desktop gnome`。下面列的是旧 KDE 清单，不是当前设备依赖：
+2. **按明确指定的桌面生成拓扑门禁**：发布镜像显式使用 `--desktop gnome`；脚本为兼容上游历史
+   仍保留 KDE 默认。下面同时说明两套清单。
+   KDE 清单：
    - 可执行：`/usr/lib/systemd/systemd`、`/usr/bin/plasmalogin`、`/usr/bin/plasmashell`、
      `/usr/bin/kwin_wayland`、`/usr/libexec/kscreenlocker_greet`（至少一个可执行位）；
    - 常规文件：`/usr/lib/systemd/system/plasmalogin.service`、`/usr/share/liuqin/kernel.release`、
      `/usr/share/liuqin/kernel-modules.manifest`；
    - 符号链接：`/usr/sbin/init → ../lib/systemd/systemd`、
      `default.target → /usr/lib/systemd/system/graphical.target`、
-     **`display-manager.service → /usr/lib/systemd/system/plasmalogin.service`**（保留断言，目标为 plasmalogin）；
+     **`display-manager.service → /usr/lib/systemd/system/plasmalogin.service`**。
+   GNOME 使用对应的 `/usr/bin/gdm`、`gnome-shell`、`gnome-session` 和 `gdm.service` 清单。
    - `chroot … /usr/lib/systemd/systemd --version` 必须可执行；
    - kernel 身份：`/usr/share/liuqin/kernel.release` 与 `/proc/sys/kernel/osrelease`
      不同时只警告；严格一致性由更新工具核对，不拦截正常 RPM 更新窗口。
-   - TN0083 新增可选的 Fedora GNOME 完整清单（v2 语法）与过渡标记；标记存在时，
+   - 可选的 Fedora GNOME 完整清单（v2 语法）与过渡标记；标记存在时，
      按唯一启用的 KDE/GDM 入口选择清单，双入口或所选清单不完整即拒绝。
-      接口与当前过渡/GNOME-only 边界见 启动文档。
 3. **switch_root 前的 stage-1 守护进程清理**不再要求真实 root 内有
    `/usr/local/bin/busybox`：有则沿用上游 chroot 方式，否则扫描已迁移的
    `/proc` 结束 `telnetd/udhcpd`。
@@ -59,11 +61,13 @@ diff -u upstream/xiaomipad-6pro-mainline/initramfs/init initramfs/init \
 # BusyBox（固定版本源码交叉编译，见 tools/build-busybox.sh）
 tools/build-busybox.sh
 
-# 契约 + initramfs（示例 manifest 用于离线结构验证；真实对接见 docs/maintenance/boot-initramfs.md）
+# 契约 + initramfs（示例 manifest 用于离线结构验证）
 scripts/build-initramfs.sh \
   --rootfs-manifest tools/examples/fedora-root.manifest.example \
   --allow-missing-firmware \
   --out out/boot
 ```
 
-详细流程、输入矩阵、风险与后续接口见 docs/maintenance/boot-initramfs.md。
+## 边界
+
+构建输入、root 契约和启动镜像必须互相配套；本目录不包含刷写或切槽命令。发布镜像的构建参数见仓库根目录的构建说明。

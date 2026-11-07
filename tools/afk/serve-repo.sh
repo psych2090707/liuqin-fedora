@@ -1,5 +1,5 @@
 #!/bin/bash
-# AFK channel (TN0048) — serve the offline aarch64 repo over the USB link.
+# AFK channel — serve the offline aarch64 repo over the USB link.
 #
 # The tablet has no Wi-Fi; it reaches the host at $AFK_HOST_IP over the USB NCM
 # cable.  This starts a plain HTTP server bound to that address so the device can:

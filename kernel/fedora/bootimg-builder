@@ -31,7 +31,7 @@ if [ -z "$SCRIPT" ] || [ ! -f "$SCRIPT" ]; then
 	printf 'bootimg-builder: no boot.img builder configured.\n' >&2
 	printf 'bootimg-builder: set LIUQIN_BUILD_BOOTIMG_SCRIPT in /etc/liuqin/bootimg.conf\n' >&2
 	printf 'bootimg-builder: expected interface: scripts/build-bootimg.sh --kernel-out ... --strict-kernel\n' >&2
-	printf 'bootimg-builder: see docs/maintenance/kernel-rpm.md and docs/maintenance/boot-initramfs.md §7.2\n' >&2
+	printf 'bootimg-builder: see kernel/fedora/README.kernel-liuqin\n' >&2
 	exit 2
 fi
 exec /bin/sh "$SCRIPT" "$@"
