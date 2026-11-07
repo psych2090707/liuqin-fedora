@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 15:52:05 +0800
+Subject: [PATCH] remoteproc: qcom: allow userspace to own SLPI startup
+
+
+diff --git a/drivers/remoteproc/qcom_q6v5_pas.c b/drivers/remoteproc/qcom_q6v5_pas.c
+index 02e29171c..1ab7056c6 100644
+--- a/drivers/remoteproc/qcom_q6v5_pas.c
++++ b/drivers/remoteproc/qcom_q6v5_pas.c
+@@ -35,6 +35,10 @@
+ 
+ #define MAX_ASSIGN_COUNT 3
+ 
++static bool slpi_auto_boot = true;
++module_param(slpi_auto_boot, bool, 0444);
++MODULE_PARM_DESC(slpi_auto_boot, "Boot SLPI automatically before userspace is ready");
++
+ struct qcom_pas_data {
+ 	int crash_reason_smem;
+ 	const char *firmware_name;
+@@ -714,6 +718,8 @@ static int qcom_pas_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	rproc->auto_boot = desc->auto_boot;
++	if (desc->ssr_name && !strcmp(desc->ssr_name, "slpi"))
++		rproc->auto_boot = rproc->auto_boot && slpi_auto_boot;
+ 	rproc_coredump_set_elf_info(rproc, ELFCLASS32, EM_NONE);
+ 
+ 	pas = rproc->priv;

@@ -1,0 +1,53 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+set -eu
+
+state_dir=/run/liuqin-sensors
+ready=$state_dir/accelerometer-ready
+log=$state_dir/ssccli-accelerometer.log
+attempt_log=$state_dir/ssccli-attempt.log
+
+mkdir -p "$state_dir"
+rm -f "$ready" "$log" "$attempt_log"
+
+[ -c /dev/fastrpc-sdsp ] || {
+	printf '%s\n' 'no /dev/fastrpc-sdsp character device' >&2
+	exit 1
+}
+[ -x /usr/bin/ssccli ] || {
+	printf '%s\n' 'ssccli is not installed' >&2
+	exit 1
+}
+[ -d /usr/share/qcom/sm8450/Xiaomi/liuqin/sensors/config ] || {
+	printf '%s\n' 'liuqin SSC config directory is missing' >&2
+	exit 1
+}
+
+# libssc's own --timeout starts only after sensor construction/opening.  An
+# absent QMI service can therefore block before that timer exists.  The outer
+# timeout is the authoritative bound; four attempts distinguish slow SSC
+# publication from a permanently missing service without stalling boot.
+attempt=1
+while [ "$attempt" -le 4 ]; do
+	printf 'attempt=%s utc=%s\n' "$attempt" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$attempt_log"
+	if timeout --signal=TERM --kill-after=2s 8s \
+		/usr/bin/ssccli --sensor=accelerometer --timeout=3 >"$log.tmp" 2>&1; then
+		cat "$log.tmp" >>"$log"
+		if grep -q '^Accelerometer sensor measurement: X=' "$log.tmp"; then
+			measurements=$(grep -c '^Accelerometer sensor measurement: X=' "$log.tmp")
+			printf 'measurements=%s\n' "$measurements" >"$ready"
+			rm -f "$log.tmp"
+			exit 0
+		fi
+	else
+		status=$?
+		printf 'exit=%s\n' "$status" >>"$attempt_log"
+		cat "$log.tmp" >>"$log" 2>/dev/null || true
+	fi
+	rm -f "$log.tmp"
+	attempt=$((attempt + 1))
+	[ "$attempt" -gt 4 ] || sleep 1
+done
+
+printf '%s\n' 'no real accelerometer measurement after four bounded attempts' >&2
+exit 1

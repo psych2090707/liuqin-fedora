@@ -1,0 +1,51 @@
+{
+  "artifact": "liuqin-firstboot.cpio.gz",
+  "artifact_path": "/home/laplus/Agent Studio/Fedora/out/boot/initramfs/liuqin-firstboot.cpio.gz",
+  "artifact_sha256": "d51c7bbe359c442ac2172cf31dab117f8745f92b3f015d3d6ada05db4941dbc3",
+  "artifact_bytes": 1998639,
+  "format": "newc cpio, gzip -n -9",
+  "source_date_epoch": 0,
+  "profile": "fedora",
+  "storage_mode": "persistent",
+  "pid1": "/init (BusyBox ash)",
+  "init_sha256": "89c403b0700bf781f0f51aef638d5d0b5632a4b56b02cf925d3dcad8b5d69fce",
+  "upstream_init_sha256": "935517a5332365cbbd4f9ae8afe4edbc2f6f5f152d5e30b5bfe71e0e10fc89d8",
+  "init_is_fork_of_upstream": true,
+  "busybox": {
+    "path": "/home/laplus/Agent Studio/Fedora/out/boot/toolchain/busybox-1.36.1-aarch64-static",
+    "sha256": "ef5ffc6c553a2a855f410db102179f9f18b76d57b8c9ae4b1c693ae62b40d1f7",
+    "pinned_reference_sha256": "ef5ffc6c553a2a855f410db102179f9f18b76d57b8c9ae4b1c693ae62b40d1f7",
+    "matches_reference": true
+  },
+  "root_contract": {
+    "path": "/home/laplus/Agent Studio/Fedora/out/boot/initramfs/liuqin-fedora-root.contract",
+    "sha256": "4aedf7c62cac03895e952e4f2001b4a995a827ed4905beccd682a53dee59f420",
+    "lines": 60,
+    "bytes": 6614,
+    "header": "LIUQIN_FEDORA_ROOT_CONTRACT_V1",
+    "generated_from_synthetic_example_manifest": true
+  },
+  "firmware_staged": [],
+  "firmware_skipped": [
+    "touch",
+    "bluetooth",
+    "wlan",
+    "regulatory",
+    "gpu",
+    "dsp",
+    "wlan-hsp2",
+    "audio-topology"
+  ],
+  "firmware_complete": false,
+  "kernel_release_expected": "6.17.0-rc1-gfe81794b5e1b",
+  "device_ready": false,
+  "notes": [
+    "Static helpers are compiled from upstream liuqin C sources at build time.",
+    "Charger-mode hold is always enabled for the fedora profile.",
+    "A firmware-free contract-synthetic image is for offline structure validation only."
+  ],
+  "_provenance": {
+    "recorded_from": "out/boot/initramfs/initramfs-info.json (scripts/build-initramfs.sh, 2026-10-20 offline build)",
+    "note": "verbatim real initramfs document; tests only use its field structure."
+  }
+}

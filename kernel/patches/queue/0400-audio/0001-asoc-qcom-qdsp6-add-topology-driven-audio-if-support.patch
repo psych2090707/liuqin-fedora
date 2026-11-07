@@ -1,0 +1,455 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Prasad Kumpatla <prasad.kumpatla@oss.qualcomm.com>
+Date: Tue, 4 Aug 2026 12:33:01 +0530
+Subject: [PATCH] ASoC: qcom: qdsp6: add topology-driven Audio IF support
+
+Backport of upstream 67605cbf8dfe79f10fc189f6e794d2843e249918 to the product/6.17-liuqin AudioReach API. Keep the 6.17 explicit packet lifetime instead of importing newer cleanup helpers.
+
+diff --git a/include/uapi/sound/snd_ar_tokens.h b/include/uapi/sound/snd_ar_tokens.h
+index b9b9093b4..015efa376 100644
+--- a/include/uapi/sound/snd_ar_tokens.h
++++ b/include/uapi/sound/snd_ar_tokens.h
+@@ -160,6 +160,60 @@ enum ar_event_types {
+  *						LOG_WAIT = 0,
+  *						LOG_IMMEDIATELY = 1
+  *
++ * %AR_TKN_U16_MODULE_SYNC_SRC:			Frame sync source
++ *						AR_AUDIO_IF_SYNC_SRC_EXTERNAL = 0,
++ *						AR_AUDIO_IF_SYNC_SRC_INTERNAL = 1
++ *
++ * %AR_TKN_U16_MODULE_CTRL_DATA_OUT_ENABLE:	Enable data-out tri-state control
++ *						AR_AUDIO_IF_CTRL_DATA_OE_DISABLE = 0,
++ *						AR_AUDIO_IF_CTRL_DATA_OE_ENABLE = 1
++ *
++ * %AR_TKN_U32_MODULE_SLOT_MASK:			Active TDM slot bitmask
++ *
++ * %AR_TKN_U16_MODULE_NSLOTS_PER_FRAME:		Number of slots per TDM frame
++ *
++ * %AR_TKN_U16_MODULE_SLOT_WIDTH:		Slot width in bits (16 or 32)
++ *
++ * %AR_TKN_U16_MODULE_SYNC_MODE:			Frame sync mode
++ *						AR_AUDIO_IF_FRAME_SYNC_MODE_SHORT = 0,
++ *						AR_AUDIO_IF_FRAME_SYNC_MODE_ONE_SLOT = 1,
++ *						AR_AUDIO_IF_FRAME_SYNC_MODE_LONG = 2
++ *
++ * %AR_TKN_U16_MODULE_CTRL_INVERT_SYNC_PULSE:	Invert frame sync pulse polarity
++ *						AR_AUDIO_IF_SYNC_NORMAL = 0,
++ *						AR_AUDIO_IF_SYNC_INVERTED = 1
++ *
++ * %AR_TKN_U16_MODULE_CTRL_SYNC_DATA_DELAY:	Data delay relative to frame sync
++ *						AR_AUDIO_IF_DATA_DELAY_NONE = 0,
++ *						AR_AUDIO_IF_DATA_DELAY_1_CYCLE = 1,
++ *						AR_AUDIO_IF_DATA_DELAY_2_CYCLE = 2
++ *
++ * %AR_TKN_U16_MODULE_INTF_MODE:			Audio IF interface mode
++ *						AR_AUDIO_IF_INTF_MODE_TDM = 0,
++ *						AR_AUDIO_IF_INTF_MODE_PCM = 1,
++ *						AR_AUDIO_IF_INTF_MODE_I2S = 2
++ *
++ * %AR_TKN_U16_MODULE_QAIF_TYPE:			QAIF hardware port type index
++ *						AR_AUDIO_IF_QAIF = 0,
++ *						AR_AUDIO_IF_QAIF_VA = 1
++ *
++ * %AR_TKN_U32_MODULE_ACTIVE_LANE_MASK:		Active lane bitmask for multi-lane
++ *
++ * %AR_TKN_U32_MODULE_FRAME_SYNC_RATE:		Frame sync rate in Hz
++ *
++ * %AR_TKN_U16_MODULE_BIT_CLK_TYPE:		Bit clock type
++ *						AR_AUDIO_IF_BIT_CLK_INTERNAL = 0,
++ *						AR_AUDIO_IF_BIT_CLK_EXTERNAL = 1,
++ *						AR_AUDIO_IF_BIT_CLK_SKIP = 2
++ *
++ * %AR_TKN_U8_MODULE_INV_INT_BIT_CLK:		Invert internal bit clock
++ *						AR_AUDIO_IF_CLK_NORMAL = 0,
++ *						AR_AUDIO_IF_CLK_INVERTED = 1
++ *
++ * %AR_TKN_U8_MODULE_INV_EXT_BIT_CLK:		Invert external bit clock
++ *						AR_AUDIO_IF_CLK_NORMAL = 0,
++ *						AR_AUDIO_IF_CLK_INVERTED = 1
++ *
+  * %AR_TKN_DAI_INDEX:				dai index
+  *
+  */
+@@ -232,4 +286,43 @@ enum ar_event_types {
+ #define AR_TKN_U32_MODULE_LOG_TAP_POINT_ID	260
+ #define AR_TKN_U32_MODULE_LOG_MODE		261
+ 
++#define AR_TKN_U16_MODULE_SYNC_SRC		262
++#define AR_TKN_U16_MODULE_CTRL_DATA_OUT_ENABLE	263
++#define AR_TKN_U32_MODULE_SLOT_MASK		264
++#define AR_TKN_U16_MODULE_NSLOTS_PER_FRAME	265
++#define AR_TKN_U16_MODULE_SLOT_WIDTH		266
++#define AR_TKN_U16_MODULE_SYNC_MODE		267
++#define AR_TKN_U16_MODULE_CTRL_INVERT_SYNC_PULSE	268
++#define AR_TKN_U16_MODULE_CTRL_SYNC_DATA_DELAY	269
++#define AR_TKN_U16_MODULE_INTF_MODE		270
++#define AR_TKN_U16_MODULE_QAIF_TYPE		271
++#define AR_TKN_U32_MODULE_ACTIVE_LANE_MASK	272
++#define AR_TKN_U32_MODULE_FRAME_SYNC_RATE	273
++#define AR_TKN_U16_MODULE_BIT_CLK_TYPE		274
++#define AR_TKN_U8_MODULE_INV_INT_BIT_CLK	275
++#define AR_TKN_U8_MODULE_INV_EXT_BIT_CLK	276
++
++#define AR_AUDIO_IF_SYNC_SRC_EXTERNAL		0
++#define AR_AUDIO_IF_SYNC_SRC_INTERNAL		1
++#define AR_AUDIO_IF_CTRL_DATA_OE_DISABLE	0
++#define AR_AUDIO_IF_CTRL_DATA_OE_ENABLE		1
++#define AR_AUDIO_IF_INTF_MODE_TDM		0
++#define AR_AUDIO_IF_INTF_MODE_PCM		1
++#define AR_AUDIO_IF_INTF_MODE_I2S		2
++#define AR_AUDIO_IF_QAIF			0
++#define AR_AUDIO_IF_QAIF_VA			1
++#define AR_AUDIO_IF_FRAME_SYNC_MODE_SHORT	0
++#define AR_AUDIO_IF_FRAME_SYNC_MODE_ONE_SLOT	1
++#define AR_AUDIO_IF_FRAME_SYNC_MODE_LONG	2
++#define AR_AUDIO_IF_SYNC_NORMAL			0
++#define AR_AUDIO_IF_SYNC_INVERTED		1
++#define AR_AUDIO_IF_DATA_DELAY_NONE		0
++#define AR_AUDIO_IF_DATA_DELAY_1_CYCLE		1
++#define AR_AUDIO_IF_DATA_DELAY_2_CYCLE		2
++#define AR_AUDIO_IF_BIT_CLK_INTERNAL		0
++#define AR_AUDIO_IF_BIT_CLK_EXTERNAL		1
++#define AR_AUDIO_IF_BIT_CLK_SKIP		2
++#define AR_AUDIO_IF_CLK_NORMAL			0
++#define AR_AUDIO_IF_CLK_INVERTED		1
++
+ #endif /* __SND_AR_TOKENS_H__ */
+diff --git a/sound/soc/qcom/qdsp6/audioreach.c b/sound/soc/qcom/qdsp6/audioreach.c
+index 4ebaaf736..1302af672 100644
+--- a/sound/soc/qcom/qdsp6/audioreach.c
++++ b/sound/soc/qcom/qdsp6/audioreach.c
+@@ -152,6 +152,13 @@ struct apm_i2s_module_intf_cfg {
+ 
+ #define APM_I2S_INTF_CFG_PSIZE ALIGN(sizeof(struct apm_i2s_module_intf_cfg), 8)
+ 
++struct apm_audio_if_module_intf_cfg {
++	struct apm_module_param_data param_data;
++	struct param_id_audio_if_intf_cfg cfg;
++} __packed;
++
++#define APM_AUDIO_IF_INTF_CFG_PSIZE ALIGN(sizeof(struct apm_audio_if_module_intf_cfg), 8)
++
+ struct apm_module_hw_ep_mf_cfg {
+ 	struct apm_module_param_data param_data;
+ 	struct param_id_hw_ep_mf mf;
+@@ -168,6 +175,13 @@ struct apm_module_frame_size_factor_cfg {
+ 
+ #define APM_FS_CFG_PSIZE ALIGN(sizeof(struct apm_module_frame_size_factor_cfg), 8)
+ 
++struct apm_module_hw_ep_frame_duration_cfg {
++	struct apm_module_param_data param_data;
++	struct param_id_hw_ep_frame_duration frame_duration;
++} __packed;
++
++#define APM_HW_EP_FRAME_DURATION_PSIZE ALIGN(sizeof(struct apm_module_hw_ep_frame_duration_cfg), 8)
++
+ struct apm_module_hw_ep_power_mode_cfg {
+ 	struct apm_module_param_data param_data;
+ 	struct param_id_hw_ep_power_mode_cfg power_mode;
+@@ -1015,6 +1029,87 @@ static int audioreach_i2s_set_media_format(struct q6apm_graph *graph,
+ 	return rc;
+ }
+ 
++static int audioreach_audio_if_set_media_format(struct q6apm_graph *graph,
++						struct audioreach_module *module,
++						struct audioreach_module_config *cfg)
++{
++	struct apm_module_hw_ep_frame_duration_cfg *fd_cfg;
++	struct apm_module_param_data *param_data;
++	struct apm_audio_if_module_intf_cfg *intf_cfg;
++	struct apm_module_hw_ep_mf_cfg *hw_cfg;
++	u32 slot_mask = cfg->slot_mask ? cfg->slot_mask : module->slot_mask;
++	u16 nslots_per_frame = cfg->nslots_per_frame ?
++				 (u16)cfg->nslots_per_frame : module->nslots_per_frame;
++	u16 slot_width = cfg->slot_width ? (u16)cfg->slot_width : module->slot_width;
++	int ic_sz = APM_AUDIO_IF_INTF_CFG_PSIZE;
++	int ep_sz = APM_HW_EP_CFG_PSIZE;
++	int fd_sz = APM_HW_EP_FRAME_DURATION_PSIZE;
++	int payload_size = ic_sz + ep_sz + fd_sz;
++	struct gpr_pkt *pkt;
++	int rc;
++	void *p;
++
++	pkt = audioreach_alloc_apm_cmd_pkt(payload_size, APM_CMD_SET_CFG, 0);
++	if (IS_ERR(pkt))
++		return PTR_ERR(pkt);
++
++	p = (void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE;
++	intf_cfg = p;
++	param_data = &intf_cfg->param_data;
++	param_data->module_instance_id = module->instance_id;
++	param_data->error_code = 0;
++	param_data->param_id = PARAM_ID_AUDIO_IF_INTF_CFG;
++	param_data->param_size = ic_sz - APM_MODULE_PARAM_DATA_SIZE;
++	intf_cfg->cfg.qaif_type = module->qaif_type;
++	intf_cfg->cfg.intf_idx = (u16)module->hw_interface_idx;
++	intf_cfg->cfg.intf_mode = module->intf_mode;
++	intf_cfg->cfg.ctrl_data_out_enable = module->ctrl_data_out_enable;
++	intf_cfg->cfg.active_slot_mask = slot_mask;
++	intf_cfg->cfg.nslots_per_frame = nslots_per_frame;
++	intf_cfg->cfg.slot_width = slot_width;
++	intf_cfg->cfg.active_lane_mask = module->active_lane_mask;
++	intf_cfg->cfg.frame_sync_rate = module->frame_sync_rate;
++	intf_cfg->cfg.frame_sync_src = module->sync_src;
++	intf_cfg->cfg.frame_sync_mode = module->sync_mode;
++	intf_cfg->cfg.invert_frame_sync_pulse = module->ctrl_invert_sync_pulse;
++	intf_cfg->cfg.frame_sync_data_delay = module->ctrl_sync_data_delay;
++	intf_cfg->cfg.bit_clk_type = module->bit_clk_type;
++	intf_cfg->cfg.inv_int_bit_clk = module->inv_int_bit_clk;
++	intf_cfg->cfg.inv_ext_bit_clk = module->inv_ext_bit_clk;
++
++	p += ic_sz;
++	hw_cfg = p;
++	param_data = &hw_cfg->param_data;
++	param_data->module_instance_id = module->instance_id;
++	param_data->error_code = 0;
++	param_data->param_id = PARAM_ID_HW_EP_MF_CFG;
++	param_data->param_size = ep_sz - APM_MODULE_PARAM_DATA_SIZE;
++	hw_cfg->mf.sample_rate = cfg->sample_rate;
++	hw_cfg->mf.bit_width = cfg->bit_width;
++	hw_cfg->mf.num_channels = cfg->num_channels;
++	hw_cfg->mf.data_format = module->data_format;
++
++	p += ep_sz;
++	fd_cfg = p;
++	param_data = &fd_cfg->param_data;
++	param_data->module_instance_id = module->instance_id;
++	param_data->error_code = 0;
++	param_data->param_id = PARAM_ID_HW_EP_FRAME_DURATION;
++	param_data->param_size = fd_sz - APM_MODULE_PARAM_DATA_SIZE;
++	fd_cfg->frame_duration.frame_duration_in_us = AUDIO_IF_FRAME_DURATION_US;
++	fd_cfg->frame_duration.allow_frame_duration_normalization =
++		AUDIO_IF_FRAME_DURATION_NORMALIZATION_ENABLE;
++	fd_cfg->frame_duration.min_normalized_frame_dur_us =
++		AUDIO_IF_FRAME_DURATION_MIN_US;
++	fd_cfg->frame_duration.max_normalized_frame_dur_us =
++		AUDIO_IF_FRAME_DURATION_MAX_US;
++
++	rc = q6apm_send_cmd_sync(graph->apm, pkt, 0);
++	kfree(pkt);
++
++	return rc;
++}
++
+ static int audioreach_logging_set_media_format(struct q6apm_graph *graph,
+ 					       struct audioreach_module *module)
+ {
+@@ -1251,6 +1346,10 @@ int audioreach_set_media_format(struct q6apm_graph *graph, struct audioreach_mod
+ 	case MODULE_ID_I2S_SINK:
+ 		rc = audioreach_i2s_set_media_format(graph, module, cfg);
+ 		break;
++	case MODULE_ID_AUDIO_IF_SOURCE:
++	case MODULE_ID_AUDIO_IF_SINK:
++		rc = audioreach_audio_if_set_media_format(graph, module, cfg);
++		break;
+ 	case MODULE_ID_WR_SHARED_MEM_EP:
+ 		rc = audioreach_shmem_set_media_format(graph, module, cfg);
+ 		break;
+diff --git a/sound/soc/qcom/qdsp6/audioreach.h b/sound/soc/qcom/qdsp6/audioreach.h
+index 61a69df4f..0aeaa3fb5 100644
+--- a/sound/soc/qcom/qdsp6/audioreach.h
++++ b/sound/soc/qcom/qdsp6/audioreach.h
+@@ -29,6 +29,8 @@ struct q6apm_graph;
+ #define MODULE_ID_MP3_DECODE		0x0700103B
+ #define MODULE_ID_GAPLESS		0x0700104D
+ #define MODULE_ID_DISPLAY_PORT_SINK	0x07001069
++#define MODULE_ID_AUDIO_IF_SINK		0x0700117C
++#define MODULE_ID_AUDIO_IF_SOURCE	0x0700117D
+ 
+ #define APM_CMD_GET_SPF_STATE		0x01001021
+ #define APM_CMD_RSP_GET_SPF_STATE	0x02001007
+@@ -474,6 +476,40 @@ struct param_id_i2s_intf_cfg {
+ #define PORT_ID_I2S_OUPUT		1
+ #define I2S_STACK_SIZE			2048
+ 
++#define PARAM_ID_AUDIO_IF_INTF_CFG	0x08001B11
++
++struct param_id_audio_if_intf_cfg {
++	uint16_t qaif_type;
++	uint16_t intf_idx;
++	uint16_t intf_mode;
++	uint16_t ctrl_data_out_enable;
++	uint32_t active_slot_mask;
++	uint16_t nslots_per_frame;
++	uint16_t slot_width;
++	uint32_t active_lane_mask;
++	uint32_t frame_sync_rate;
++	uint16_t frame_sync_src;
++	uint16_t frame_sync_mode;
++	uint16_t invert_frame_sync_pulse;
++	uint16_t frame_sync_data_delay;
++	uint16_t bit_clk_type;
++	uint8_t inv_int_bit_clk;
++	uint8_t inv_ext_bit_clk;
++} __packed;
++
++#define PARAM_ID_HW_EP_FRAME_DURATION	0x08001B2F
++#define AUDIO_IF_FRAME_DURATION_US			1000
++#define AUDIO_IF_FRAME_DURATION_NORMALIZATION_ENABLE	1
++#define AUDIO_IF_FRAME_DURATION_MIN_US			1
++#define AUDIO_IF_FRAME_DURATION_MAX_US			100000
++
++struct param_id_hw_ep_frame_duration {
++	uint32_t frame_duration_in_us;
++	uint32_t allow_frame_duration_normalization;
++	uint32_t min_normalized_frame_dur_us;
++	uint32_t max_normalized_frame_dur_us;
++} __packed;
++
+ #define PARAM_ID_DISPLAY_PORT_INTF_CFG		0x08001154
+ 
+ struct param_id_display_port_intf_cfg {
+@@ -730,6 +766,23 @@ struct audioreach_module {
+ 	uint32_t data_format;
+ 	uint32_t hw_interface_type;
+ 
++	/* Audio IF module (TDM/PCM/I2S) */
++	u32 slot_mask;
++	u32 active_lane_mask;
++	u32 frame_sync_rate;
++	u16 qaif_type;
++	u16 sync_src;
++	u16 ctrl_data_out_enable;
++	u16 nslots_per_frame;
++	u16 slot_width;
++	u16 intf_mode;
++	u16 sync_mode;
++	u16 ctrl_invert_sync_pulse;
++	u16 ctrl_sync_data_delay;
++	u16 bit_clk_type;
++	u8 inv_int_bit_clk;
++	u8 inv_ext_bit_clk;
++
+ 	/* PCM module specific */
+ 	uint32_t interleave_type;
+ 
+@@ -759,6 +812,9 @@ struct audioreach_module_config {
+ 	u32	channel_allocation;
+ 	u32	sd_line_mask;
+ 	int	fmt;
++	u32	slot_mask;
++	u16	nslots_per_frame;
++	u16	slot_width;
+ 	struct snd_codec codec;
+ 	u8 channel_map[AR_PCM_MAX_NUM_CHANNEL];
+ };
+diff --git a/sound/soc/qcom/qdsp6/topology.c b/sound/soc/qcom/qdsp6/topology.c
+index 83319a928..9d68842ba 100644
+--- a/sound/soc/qcom/qdsp6/topology.c
++++ b/sound/soc/qcom/qdsp6/topology.c
+@@ -731,6 +731,102 @@ static int audioreach_widget_i2s_module_load(struct audioreach_module *mod,
+ 	return 0;
+ }
+ 
++static int audioreach_widget_audio_if_module_load(struct audioreach_module *mod,
++						  struct snd_soc_tplg_vendor_array *mod_array)
++{
++	struct snd_soc_tplg_vendor_value_elem *mod_elem;
++	int tkn_count = 0;
++	u32 val;
++
++	mod_elem = mod_array->value;
++	while (tkn_count <= (le32_to_cpu(mod_array->num_elems) - 1)) {
++		val = le32_to_cpu(mod_elem->value);
++		switch (le32_to_cpu(mod_elem->token)) {
++		case AR_TKN_U32_MODULE_HW_IF_IDX:
++			mod->hw_interface_idx = val;
++			break;
++		case AR_TKN_U32_MODULE_FMT_DATA:
++			mod->data_format = val;
++			break;
++		case AR_TKN_U16_MODULE_SYNC_SRC:
++			if (val > U16_MAX)
++				return -EINVAL;
++			mod->sync_src = (u16)val;
++			break;
++		case AR_TKN_U16_MODULE_CTRL_DATA_OUT_ENABLE:
++			if (val > U16_MAX)
++				return -EINVAL;
++			mod->ctrl_data_out_enable = (u16)val;
++			break;
++		case AR_TKN_U32_MODULE_SLOT_MASK:
++			mod->slot_mask = val;
++			break;
++		case AR_TKN_U16_MODULE_NSLOTS_PER_FRAME:
++			if (val > U16_MAX)
++				return -EINVAL;
++			mod->nslots_per_frame = (u16)val;
++			break;
++		case AR_TKN_U16_MODULE_SLOT_WIDTH:
++			if (val > U16_MAX)
++				return -EINVAL;
++			mod->slot_width = (u16)val;
++			break;
++		case AR_TKN_U16_MODULE_INTF_MODE:
++			if (val > U16_MAX)
++				return -EINVAL;
++			mod->intf_mode = (u16)val;
++			break;
++		case AR_TKN_U16_MODULE_SYNC_MODE:
++			if (val > U16_MAX)
++				return -EINVAL;
++			mod->sync_mode = (u16)val;
++			break;
++		case AR_TKN_U16_MODULE_CTRL_INVERT_SYNC_PULSE:
++			if (val > U16_MAX)
++				return -EINVAL;
++			mod->ctrl_invert_sync_pulse = (u16)val;
++			break;
++		case AR_TKN_U16_MODULE_CTRL_SYNC_DATA_DELAY:
++			if (val > U16_MAX)
++				return -EINVAL;
++			mod->ctrl_sync_data_delay = (u16)val;
++			break;
++		case AR_TKN_U16_MODULE_QAIF_TYPE:
++			if (val > U16_MAX)
++				return -EINVAL;
++			mod->qaif_type = (u16)val;
++			break;
++		case AR_TKN_U32_MODULE_ACTIVE_LANE_MASK:
++			mod->active_lane_mask = val;
++			break;
++		case AR_TKN_U32_MODULE_FRAME_SYNC_RATE:
++			mod->frame_sync_rate = val;
++			break;
++		case AR_TKN_U16_MODULE_BIT_CLK_TYPE:
++			if (val > U16_MAX)
++				return -EINVAL;
++			mod->bit_clk_type = (u16)val;
++			break;
++		case AR_TKN_U8_MODULE_INV_INT_BIT_CLK:
++			if (val > U8_MAX)
++				return -EINVAL;
++			mod->inv_int_bit_clk = (u8)val;
++			break;
++		case AR_TKN_U8_MODULE_INV_EXT_BIT_CLK:
++			if (val > U8_MAX)
++				return -EINVAL;
++			mod->inv_ext_bit_clk = (u8)val;
++			break;
++		default:
++			break;
++		}
++		tkn_count++;
++		mod_elem++;
++	}
++
++	return 0;
++}
++
+ static int audioreach_widget_dp_module_load(struct audioreach_module *mod,
+ 					struct snd_soc_tplg_vendor_array *mod_array)
+ {
+@@ -784,6 +880,12 @@ static int audioreach_widget_load_buffer(struct snd_soc_component *component,
+ 	case MODULE_ID_I2S_SOURCE:
+ 		audioreach_widget_i2s_module_load(mod, mod_array);
+ 		break;
++	case MODULE_ID_AUDIO_IF_SINK:
++	case MODULE_ID_AUDIO_IF_SOURCE:
++		ret = audioreach_widget_audio_if_module_load(mod, mod_array);
++		if (ret)
++			return ret;
++		break;
+ 	case MODULE_ID_DISPLAY_PORT_SINK:
+ 		audioreach_widget_dp_module_load(mod, mod_array);
+ 		break;

@@ -1,0 +1,6 @@
+liuqin Fedora first-boot diagnostic initramfs
+
+This stage-1 image is built from the upstream liuqin boot chain, Fedora-fied.
+It never mounts UFS until the root admission contract has passed twice.
+The telnet shell on the USB network port 2323 has no authentication and must
+never be exposed to an untrusted network.

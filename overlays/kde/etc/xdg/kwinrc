@@ -1,0 +1,34 @@
+# liuqin KDE tablet defaults (system-wide KConfig fallback; merged under
+# XDG_CONFIG_DIRS=/etc/xdg:/usr/share/kde-settings/kde-profile/default/xdg).
+#
+# Sources (all keys verified against KWin 6.7.5 / upstream source):
+#   VirtualKeyboardMode:
+#     kwin/src/inputmethod.cpp InputMethod::InputMethod() reads
+#     [Wayland] VirtualKeyboardMode (int) with enum VirtualKeyboardVisibility
+#     {Never=0, NonMouseInput=1, AnyInput=2} (kwin/src/inputmethod.h).
+#     Default when the key is absent is NonMouseInput; set explicitly so the
+#     tablet OSK policy is auditable and does not depend on KDE defaults.
+#   Touchpad defaults:
+#     kwin/src/backends/libinput/connection.cpp applyDeviceConfig() reads
+#     [Libinput][Defaults] and selects the [Touchpad] subgroup for touchpads;
+#     kwin/src/backends/libinput/device.h defaultValue() consults that group
+#     before compiled defaults. Keys below are the verified names from
+#     kwin/src/backends/libinput/device.cpp s_configData (bool entries).
+#
+# OSK server: [Wayland] InputMethod comes from Fedora kde-settings
+# (/usr/share/kde-settings/kde-profile/default/xdg/kwinrc, value
+# /usr/share/applications/org.kde.plasma.keyboard.desktop) and is intentionally
+# not duplicated here; kwin/src/main_wayland.cpp resolves it as a .desktop path.
+
+[Wayland]
+# 1 = NonMouseInput: auto-show the Plasma Keyboard for touch/stylus focus only,
+# never for mouse/trackpad. Change to 2 only if a mouse-driven setup is wanted.
+VirtualKeyboardMode=1
+
+[Libinput][Defaults][Touchpad]
+# No physical touchpad buttons on the magnetic keyboard cover: tapping must click.
+TapToClick=true
+# Same direction as touchscreen content scrolling.
+NaturalScroll=true
+# Palm/touchpad rejection while typing on the pogo keyboard.
+DisableWhileTyping=true

@@ -1,0 +1,16 @@
+# AFK channel (TN0048) — keep the Plasma session unlockable-by-nobody.
+#
+# The AFK session is started by plasmalogin autologin on a dev-only image; a
+# lock screen would block both the RDP view and the screenshot helper, and
+# nobody is physically present to type the password.  The screen is not
+# exposed to any network except the USB cable (see docs/maintenance/afk-channel.md).
+#
+# This is the system-wide default (/etc/xdg); a ~/.config file would override it.
+[Daemon]
+Autolock=false
+LockOnStart=false
+LockOnResume=false
+Timeout=0
+
+[Authenticators]
+Fingerprint=true

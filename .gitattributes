@@ -1,0 +1,3 @@
+*.patch -whitespace
+*.diff -whitespace
+*.tsv -whitespace

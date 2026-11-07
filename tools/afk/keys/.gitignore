@@ -1,0 +1,5 @@
+# AFK channel (TN0048) host keys: the private key must never be committed.
+# The matching public key (id_ed25519_afk.pub) IS committed for reference; the
+# overlay tarball carries it to the device.
+id_ed25519_afk
+*.pem

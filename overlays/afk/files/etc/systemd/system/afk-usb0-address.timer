@@ -1,0 +1,15 @@
+[Unit]
+Description=AFK: periodically re-assert the usb0 address (safety net)
+Documentation=file:/usr/local/sbin/afk-usb0-up
+
+[Timer]
+# First check quickly after boot, then keep checking: if anything (a stray
+# `ip addr flush`, an NM reload, a future interface manager) removes the pinned
+# address, SSH over USB comes back within ~2 minutes without a human.
+OnBootSec=10s
+OnUnitActiveSec=120s
+AccuracySec=5s
+Unit=afk-usb0-address.service
+
+[Install]
+WantedBy=timers.target

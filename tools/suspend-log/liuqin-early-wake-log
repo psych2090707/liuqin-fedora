@@ -1,0 +1,223 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: MIT
+"""One-shot kernel recorder bridge: preserve sealed evidence BEFORE rearming.
+
+Called synchronously by liuqin-suspend-log, not a daemon/timer. No power-policy,
+IRQ or firmware operations: only the recorder's debugfs arm/status/events.
+"""
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+import re
+from pathlib import Path
+
+DEBUGFS = Path("/sys/kernel/debug/liuqin_early_wake")
+ID_RE = re.compile(r"[0-9a-f]{8}-\d{10}(?:-\d+)?\Z")
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def bounded_read(path, limit):
+    with Path(path).open("rb") as stream:
+        data = stream.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("recorder file exceeds bound")
+    return data
+
+
+def atomic_json(path, value):
+    path = Path(path)
+    tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write((json.dumps(value, sort_keys=True) + "\n").encode())
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+        fsync_dir(path.parent)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def fsync_dir(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+class Interface:
+    def read(self, name):
+        return bounded_read(DEBUGFS / name, 2 * 1024**2 if name == "events" else 16384)
+
+    def arm(self):
+        with (DEBUGFS / "arm").open("w") as stream:
+            stream.write("1\n")
+
+
+class Recorder:
+    def __init__(self, state, event_dir, boot_id, build_id, interface=None):
+        self.state = Path(state)
+        self.event_dir = Path(event_dir)
+        self.boot_id, self.build_id = boot_id, build_id
+        self.interface = interface or Interface()
+        self.pointer = self.state / "early-wake-last-saved.json"
+
+    def status(self):
+        raw = self.interface.read("status")
+        values = {}
+        for line in raw.decode("ascii").splitlines():
+            key, sep, value = line.partition("=")
+            if not sep or key in values:
+                raise ValueError("malformed status")
+            values[key] = value
+        if values.get("version") != "1" or values.get("build_id") != self.build_id:
+            # At idle, the kernel has not copied its Build ID into the buffer.
+            if not (values.get("version") == "1" and values.get("state") == "idle"
+                    and values.get("build_id") == "0" * 40):
+                raise ValueError("unknown version/recording Build ID")
+        for name in ("cycle", "attempt", "buffer_bytes", "phase_count", "phase_dropped", "cpu_dropped"):
+            if not values.get(name, "").isdigit():
+                raise ValueError("invalid status counter: " + name)
+        if int(values["buffer_bytes"]) > 128 * 1024:
+            raise ValueError("recorder buffer exceeds contract")
+        return values, raw
+
+    def archived(self, status_raw, cycle):
+        try:
+            pointer = json.loads(bounded_read(self.pointer, 8192))
+            if (pointer.get("boot_id"), pointer.get("build_id"), pointer.get("cycle")) != \
+                    (self.boot_id, self.build_id, cycle):
+                return False
+            parts = Path(pointer["path"]).parts
+            if (len(parts) != 3 or parts[0] != "events" or not ID_RE.fullmatch(parts[1])
+                    or parts[2] not in ("early-wake", "early-wake-previous")):
+                return False
+            root = self.state.joinpath(*parts)
+            if root.resolve().parent.parent.parent != self.state.resolve():
+                return False
+            manifest = json.loads(bounded_read(root / "capture.json", 8192))
+            if manifest != {k: v for k, v in pointer.items() if k != "path"}:
+                return False
+            return (pointer["status_sha256"] == digest(status_raw) == digest(bounded_read(root / "status.txt", 16384))
+                    and pointer["events_sha256"] == digest(bounded_read(root / "events.jsonl", 2 * 1024**2)))
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    def capture(self, destination, expected_cycle=None):
+        status, before = self.status()
+        cycle = int(status["cycle"])
+        if status.get("state") != "sealed" or (expected_cycle is not None and cycle != expected_cycle):
+            raise ValueError("not the expected sealed cycle; preserve buffer")
+        raw = self.interface.read("events")
+        repeated = self.interface.read("events")
+        after_status, after = self.status()
+        if before != after or raw != repeated or status != after_status:
+            raise ValueError("sealed recording changed during export")
+        rows = [json.loads(line) for line in raw.splitlines()]
+        if len(rows) < 3 or len(rows) > 1218 or any(not isinstance(row, dict) for row in rows):
+            raise ValueError("incomplete/oversized recording")
+        header, footer = rows[0], rows[-1]
+        if (header.get("kind"), header.get("version"), header.get("state"),
+                header.get("cycle"), header.get("build_id")) != \
+                ("header", 1, "sealed", cycle, self.build_id) or footer.get("kind") != "footer":
+            raise ValueError("recording header/footer mismatch")
+        body = rows[1:-1]
+        if any(row.get("kind") not in ("phase", "event") or row.get("cycle") != cycle for row in body):
+            raise ValueError("invalid recording identity")
+        seqs = [row.get("seq") for row in body]
+        if any(type(seq) is not int or seq < 1 for seq in seqs) or len(set(seqs)) != len(seqs):
+            raise ValueError("invalid/duplicate recording sequences")
+        for key in ("phase_count", "phase_dropped", "cpu_dropped"):
+            if footer.get(key) != int(status[key]):
+                raise ValueError("recording footer/status mismatch")
+        if sum(row.get("kind") == "phase" for row in body) != int(status["phase_count"]):
+            raise ValueError("recording phase count mismatch")
+        destination = Path(destination)
+        destination.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if destination.is_symlink():
+            raise ValueError("archive destination is a symlink")
+        # Complete a partial, byte-identical archive after a killed hook; never
+        # replace conflicting evidence. Manifest/pointer are committed last.
+        for name, data in (("status.txt", before), ("events.jsonl", raw)):
+            path = destination / name
+            if path.exists():
+                if path.is_symlink() or bounded_read(path, 2 * 1024**2) != data:
+                    raise ValueError("archive exists with different evidence")
+            else:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+        manifest = dict(version=1, boot_id=self.boot_id, build_id=self.build_id,
+                        cycle=cycle, status_sha256=digest(before), events_sha256=digest(raw))
+        existing = destination / "capture.json"
+        if existing.exists() and json.loads(bounded_read(existing, 8192)) != manifest:
+            raise ValueError("conflicting archive manifest")
+        atomic_json(existing, manifest)
+        fsync_dir(destination)
+        fsync_dir(destination.parent)
+        relative = str(destination.relative_to(self.state))
+        atomic_json(self.pointer, dict(manifest, path=relative))
+        return dict(state="saved", cycle=cycle, path=relative, events_sha256=digest(raw))
+
+    def pre(self):
+        status, raw = self.status()
+        previous = None
+        if status.get("state") == "sealed":
+            if not self.archived(raw, int(status["cycle"])):
+                previous = self.capture(self.event_dir / "early-wake-previous")
+        elif status.get("state") == "armed":
+            return dict(state="armed", cycle=int(status["cycle"]), adopted=True)
+        elif status.get("state") != "idle":
+            raise ValueError("recorder busy/unknown; do not clear")
+        self.interface.arm()
+        armed, _ = self.status()
+        if armed.get("state") != "armed" or int(armed["cycle"]) != int(status["cycle"]) + 1:
+            raise ValueError("arm readback mismatch")
+        return dict(state="armed", cycle=int(armed["cycle"]), recovered_previous=previous)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("phase", choices=("pre", "post"))
+    parser.add_argument("--state", type=Path, required=True)
+    parser.add_argument("--event-id", required=True)
+    parser.add_argument("--boot-id", required=True)
+    parser.add_argument("--build-id", required=True)
+    parser.add_argument("--cycle", type=int)
+    args = parser.parse_args()
+    try:
+        if not ID_RE.fullmatch(args.event_id) or not re.fullmatch(r"[0-9a-f]{40}", args.build_id):
+            raise ValueError("invalid event/Build ID")
+        if Path("/proc/sys/kernel/random/boot_id").read_text().strip() != args.boot_id:
+            raise ValueError("boot changed; do not touch recorder")
+        if args.phase == "pre" and "[deep]" not in Path("/sys/power/mem_sleep").read_text():
+            raise ValueError("not deep; do not arm")
+        event_dir = args.state / "events" / args.event_id
+        with (args.state / "early-wake.lock").open("a") as lock:
+            os.fchmod(lock.fileno(), 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            recorder = Recorder(args.state, event_dir, args.boot_id, args.build_id)
+            if args.phase == "pre":
+                result = recorder.pre()
+            elif args.cycle is None or args.cycle < 1:
+                raise ValueError("no armed cycle in pre record")
+            else:
+                result = recorder.capture(event_dir / "early-wake", args.cycle)
+        print(json.dumps(result, sort_keys=True))
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        # Diagnostics must not turn a recorder failure into a failed suspend.
+        print(json.dumps(dict(state="error", error=f"{type(exc).__name__}: {exc}")))
+
+
+if __name__ == "__main__":
+    main()

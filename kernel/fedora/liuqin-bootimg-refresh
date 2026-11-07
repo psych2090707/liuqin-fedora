@@ -1,0 +1,269 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# liuqin-bootimg-refresh — on-device pipeline that rebuilds, for a *new* kernel
+# version: root admission contract -> stage-1 initramfs -> Android boot.img.
+# Invoked by /usr/lib/kernel/install.d/99-liuqin-android-boot.install (add).
+#
+# This closes task-15 P0-1: the hook must never reuse the previous ramdisk or
+# the previous bootstrap contract after a kernel update. Everything is rebuilt
+# from the installed kernel + current rootfs hash manifest + on-device assets.
+#
+# Installed path: /usr/libexec/liuqin/liuqin-bootimg-refresh
+#
+# =========================== ASSETS CONTRACT ==============================
+# The `liuqin-boot-tools` / boot-assets package must provide a self-contained
+# asset root (default /usr/libexec/liuqin/boot-assets) with:
+#
+#   bin/build-initramfs.sh   wrapper around scripts/build-initramfs.sh that
+#                            accepts:
+#                              --out DIR --kernel-out DIR --rootfs-manifest FILE
+#                              --firmware-pool DIR --wlan-hsp2-tuple DIR
+#                              --audio-topology FILE --busybox PATH
+#                            and writes <out>/initramfs/liuqin-firstboot.cpio.gz
+#                            + initramfs-info.json (device_ready true) and the
+#                            regenerated contract (liuqin-fedora-root.contract).
+#                            Exit 0/1/2 as documented in docs/maintenance/boot-initramfs.md.
+#   bin/build-bootimg.sh     wrapper around scripts/build-bootimg.sh accepting
+#                            --kernel-out --ramdisk --out --dtb-source
+#                            --stock-rom-dir --mkbootimg-dir --cmdline-file
+#                            --header-cmdline '' --strict-kernel; writes
+#                            <out>/boot-liuqin-dev.img + build-info.json
+#                            (device_ready true; no published-kernel fallback).
+#   bin/busybox              pinned static aarch64 BusyBox
+#   bin/dtc, bin/fdtoverlay  optional (otherwise /usr/bin from Fedora dtc pkg)
+#   firmware-pool/           touch/BT/WLAN/regulatory/GPU/DSP firmware pool
+#   wlan-hsp2-tuple/         reviewed hw2.0/ + hw2.1/ WLAN tuple
+#   audio/Xiaomi-Pad-6-Pro-tplg.bin
+#
+# The refresh tool fails closed (exit 2) when required assets are missing; the
+# kernel-install hook then refuses to stage anything and keeps the old image.
+#
+# Outputs in --out:
+#   boot-liuqin-dev.img
+#   build-info.json   schema v2 boot metadata (liuqin_boot_metadata.py, the single
+#                     producer/consumer implementation): schema_version=2,
+#                     payload.{artifact,kernel,ramdisk,dtb}, contract.*,
+#                     + flat projections (kernel_release, bootimg_sha256,
+#                     artifact_sha256, kernel_image_sha256, dtb_source,
+#                     dtb_sha256, board_dtb_sha256, ramdisk_sha256,
+#                     contract_sha256).  See docs/maintenance/boot-update.md §5.1.
+# Exit: 0 success; 1 build/verification failure; 2 missing input/asset.
+set -eu
+umask 022
+
+die() { printf 'liuqin-bootimg-refresh: %s\n' "$*" >&2; exit "${2:-1}"; }
+die_input() { die "$*" 2; }
+
+KVER=
+KERNEL_OUT=
+OUT=
+ASSETS=/usr/libexec/liuqin/boot-assets
+METADATA=${LIUQIN_BOOT_METADATA_TOOL:-/usr/lib/liuqin/liuqin_boot_metadata.py}
+ROOTFS_MANIFEST=
+FIRMWARE_POOL=
+WLAN_TUPLE=
+AUDIO_TOPOLOGY=
+STOCK_DIR=
+DTB_SOURCE=stock-rom
+MKBOOTIMG_DIR=
+CMDLINE_FILE=
+
+usage() {
+	cat <<'EOF'
+usage: liuqin-bootimg-refresh --kver KVER --kernel-out DIR --out DIR [options]
+
+  --kver KVER              kernel release (e.g. 6.17.0-rc1-gfe81794b5e1b)
+  --kernel-out DIR         staging kernel-out (arch/arm64/boot/Image, DTB,
+                           include/config/kernel.release)
+  --out DIR                output dir for boot.img + build-info.json
+  --assets-dir DIR         boot-assets root (default /usr/libexec/liuqin/boot-assets)
+  --rootfs-manifest FILE   current rootfs hash manifest (contract input)
+  --firmware-pool DIR      firmware pool
+  --wlan-hsp2-tuple DIR    WLAN HSP2 tuple
+  --audio-topology FILE    AudioReach topology
+  --stock-rom-dir DIR      stock ROM analysis tree (canonical DTB)
+  --dtb-source MODE        stock-rom (only supported production mode)
+  --mkbootimg-dir DIR      AOSP mkbootimg checkout
+  --cmdline-file FILE      DT /chosen bootargs source
+  -h, --help               this help
+EOF
+}
+
+while [ $# -gt 0 ]; do
+	case $1 in
+	--kver) KVER=${2:-}; shift 2 ;;
+	--kernel-out) KERNEL_OUT=${2:-}; shift 2 ;;
+	--out) OUT=${2:-}; shift 2 ;;
+	--assets-dir) ASSETS=${2:-}; shift 2 ;;
+	--rootfs-manifest) ROOTFS_MANIFEST=${2:-}; shift 2 ;;
+	--firmware-pool) FIRMWARE_POOL=${2:-}; shift 2 ;;
+	--wlan-hsp2-tuple) WLAN_TUPLE=${2:-}; shift 2 ;;
+	--audio-topology) AUDIO_TOPOLOGY=${2:-}; shift 2 ;;
+	--stock-rom-dir) STOCK_DIR=${2:-}; shift 2 ;;
+	--dtb-source) DTB_SOURCE=${2:-}; shift 2 ;;
+	--mkbootimg-dir) MKBOOTIMG_DIR=${2:-}; shift 2 ;;
+	--cmdline-file) CMDLINE_FILE=${2:-}; shift 2 ;;
+	-h|--help) usage; exit 0 ;;
+	*) die_input "unknown argument: $1 (see --help)" ;;
+	esac
+done
+
+[ -n "$KVER" ] || die_input "--kver is required"
+[ -n "$KERNEL_OUT" ] || die_input "--kernel-out is required"
+[ -n "$OUT" ] || die_input "--out is required"
+[ -n "$ROOTFS_MANIFEST" ] || die_input "--rootfs-manifest is required (P0: contract must be regenerated)"
+[ -n "$FIRMWARE_POOL" ] || die_input "--firmware-pool is required"
+[ -n "$WLAN_TUPLE" ] || die_input "--wlan-hsp2-tuple is required"
+[ -n "$AUDIO_TOPOLOGY" ] || die_input "--audio-topology is required"
+[ -n "$MKBOOTIMG_DIR" ] || die_input "--mkbootimg-dir is required"
+[ -n "$CMDLINE_FILE" ] || die_input "--cmdline-file is required"
+case $DTB_SOURCE in
+stock-rom) ;;
+*) die_input "only --dtb-source stock-rom is supported for release boot.img (got: $DTB_SOURCE)" ;;
+esac
+[ -n "$STOCK_DIR" ] || die_input "--stock-rom-dir is required for the canonical DTB path"
+
+INITRAMFS_TOOL=$ASSETS/bin/build-initramfs.sh
+BOOTIMG_TOOL=$ASSETS/bin/build-bootimg.sh
+[ -x "$INITRAMFS_TOOL" ] || die_input "missing asset: $INITRAMFS_TOOL (install liuqin-boot-tools/boot-assets)"
+[ -x "$BOOTIMG_TOOL" ] || die_input "missing asset: $BOOTIMG_TOOL (install liuqin-boot-tools/boot-assets)"
+[ -d "$ASSETS/firmware-pool" ] || [ -d "$FIRMWARE_POOL" ] || die_input "missing firmware pool: $FIRMWARE_POOL"
+[ -f "$ROOTFS_MANIFEST" ] || die_input "missing rootfs manifest: $ROOTFS_MANIFEST"
+[ -d "$STOCK_DIR" ] || die_input "missing stock ROM analysis tree: $STOCK_DIR"
+[ -d "$MKBOOTIMG_DIR" ] || die_input "missing mkbootimg dir: $MKBOOTIMG_DIR"
+[ -f "$CMDLINE_FILE" ] || die_input "missing cmdline file: $CMDLINE_FILE"
+command -v python3 >/dev/null 2>&1 || die_input "python3 is required (boot metadata schema v2)"
+[ -f "$METADATA" ] || die_input "missing boot metadata tool: $METADATA (kernel-liuqin RPM provides /usr/lib/liuqin/liuqin_boot_metadata.py; override with LIUQIN_BOOT_METADATA_TOOL)"
+
+BUSYBOX=$ASSETS/bin/busybox
+[ -x "$BUSYBOX" ] || BUSYBOX=$ASSETS/busybox
+[ -x "$BUSYBOX" ] || die_input "missing static BusyBox: $ASSETS/bin/busybox"
+
+mkdir -p "$OUT"
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/liuqin-refresh.XXXXXX") || die "cannot create temp dir"
+trap 'rm -rf "$WORK"' EXIT
+
+echo "liuqin-bootimg-refresh: kver=$KVER" >&2
+echo "liuqin-bootimg-refresh: rebuilding root contract + initramfs from $ROOTFS_MANIFEST" >&2
+
+# task-15 P0-1: the root admission contract must NOT fail-closed pin the kernel
+# identity files. The rootfs hash manifest was produced at image build time, so
+# after a kernel update its kernel.release/kernel-modules.manifest (and
+# /usr/lib/modules/*) hashes are stale; rebuilding a contract from them would
+# pin the OLD identity and the next boot would be rejected. We therefore filter
+# the kernel-identity paths out of the manifest copy used for contract
+# generation; kernel identity is checked dynamically by initramfs/init
+# (running release vs /usr/share/liuqin/kernel.release, warn only). All other
+# rootfs pins stay fail-closed.
+FILTERED_MANIFEST=$WORK/rootfs.files.sha256.no-kernel-identity
+python3 - "$ROOTFS_MANIFEST" "$FILTERED_MANIFEST" <<'PYFILTER' || die "cannot filter kernel identity pins out of the rootfs manifest" 1
+import re, sys
+
+src, dst = sys.argv[1:3]
+KERNEL_IDENTITY = ("/usr/share/liuqin/kernel.release",
+                     "/usr/share/liuqin/kernel-modules.manifest")
+dropped = []
+kept = []
+for line in open(src, errors="replace"):
+    match = re.match(r"^([0-9a-f]{64})\s+(\S+)\s*$", line)
+    if match and (match.group(2) in KERNEL_IDENTITY or match.group(2).startswith("/usr/lib/modules/")):
+        dropped.append(match.group(2))
+        continue
+    kept.append(line)
+with open(dst, "w") as handle:
+    handle.writelines(kept)
+print("liuqin-bootimg-refresh: kernel-identity pins excluded from contract: %d" % len(dropped))
+if not kept:
+    sys.exit("empty manifest after filtering")
+PYFILTER
+
+"$INITRAMFS_TOOL" \
+	--out "$WORK/boot" \
+	--kernel-out "$KERNEL_OUT" \
+	--rootfs-manifest "$FILTERED_MANIFEST" \
+	--firmware-pool "$FIRMWARE_POOL" \
+	--wlan-hsp2-tuple "$WLAN_TUPLE" \
+	--audio-topology "$AUDIO_TOPOLOGY" \
+	--busybox "$BUSYBOX" ||
+	die "initramfs/contract rebuild failed (exit $?)" 1
+
+# Enforce the P0-1 contract invariant: no fail-closed kernel identity pins may
+# survive into the rebuilt contract (the boot-tools contract generator must be
+# kernel-identity-policy=warn aware; see docs/maintenance/kernel-rpm.md §4.3).
+for contract in "$WORK/boot/initramfs"/*.contract; do
+	[ -f "$contract" ] || continue
+	if grep -qE '/usr/(share/liuqin/(kernel\.release|kernel-modules\.manifest)|lib/modules/)' "$contract"; then
+		die "P0-1 violation: rebuilt contract still pins kernel identity paths: $contract (boot-tools contract generator must drop kernel-identity pins; see docs/maintenance/kernel-rpm.md §4.3)" 1
+	fi
+done
+
+RAMDISK=$WORK/boot/initramfs/liuqin-firstboot.cpio.gz
+[ -s "$RAMDISK" ] || die "initramfs rebuild produced no ramdisk: $RAMDISK" 1
+IFINFO=$WORK/boot/initramfs/initramfs-info.json
+[ -f "$IFINFO" ] || die "initramfs-info.json missing; cannot verify device_ready" 1
+python3 - "$IFINFO" <<'PY' || die "refusing to continue: initramfs is not device_ready (missing firmware or synthetic contract)" 1
+import json, sys
+info = json.load(open(sys.argv[1]))
+problems = []
+if info.get("device_ready") is not True:
+    problems.append("initramfs device_ready=%r" % (info.get("device_ready"),))
+if info.get("generated_from_synthetic_example_manifest") is True:
+    problems.append("contract was generated from the synthetic example manifest")
+for problem in problems:
+    print("initramfs-gate: " + problem)
+sys.exit(1 if problems else 0)
+PY
+
+echo "liuqin-bootimg-refresh: assembling boot.img (canonical stock-rom DTB, strict kernel)" >&2
+"$BOOTIMG_TOOL" \
+	--kernel-out "$KERNEL_OUT" \
+	--ramdisk "$RAMDISK" \
+	--out "$WORK/bootimg" \
+	--dtb-source "$DTB_SOURCE" \
+	--stock-rom-dir "$STOCK_DIR" \
+	--mkbootimg-dir "$MKBOOTIMG_DIR" \
+	--cmdline-file "$CMDLINE_FILE" \
+	--header-cmdline "" \
+	--strict-kernel ||
+	die "boot.img assembly failed (exit $?)" 1
+
+IMAGE=$WORK/bootimg/boot-liuqin-dev.img
+[ -s "$IMAGE" ] || die "boot.img assembly produced no image" 1
+BINFO=$WORK/bootimg/build-info.json
+[ -f "$BINFO" ] || die "boot.img build-info.json missing" 1
+
+CONTRACT=
+for candidate in "$WORK/boot/initramfs/liuqin-fedora-root.contract" \
+	"$WORK/boot/liuqin-fedora-root.contract"; do
+	if [ -f "$candidate" ]; then
+		CONTRACT=$candidate
+		break
+	fi
+done
+[ -n "$CONTRACT" ] || die "contract-gate: rebuilt contract file not found" 1
+
+cp -f "$IMAGE" "$OUT/boot-liuqin-dev.img"
+
+# Single producer implementation of the boot metadata schema (v2): the tool
+# cross-checks the boot-builder document against the real boot.img sections,
+# the kernel-out Image/board DTB, the ramdisk and the contract before writing
+# $OUT/build-info.json.  Consumers (kernel-install hook, liuqin-apply-boot)
+# read exactly this schema; see docs/maintenance/boot-update.md §5.
+python3 "$METADATA" merge \
+	--build-info "$BINFO" \
+	--initramfs-info "$IFINFO" \
+	--kernel-out "$KERNEL_OUT" \
+	--image "$OUT/boot-liuqin-dev.img" \
+	--ramdisk "$RAMDISK" \
+	--contract "$CONTRACT" \
+	--kver "$KVER" \
+	--dtb-source "$DTB_SOURCE" \
+	--kernel-build-info /usr/share/liuqin/kernel-build-info.json \
+	--generated-by liuqin-bootimg-refresh \
+	--generated-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+	--out "$OUT/build-info.json" ||
+	die "merged boot identity verification failed (schema v2 metadata: $METADATA)" 1
+
+echo "liuqin-bootimg-refresh: OK -> $OUT/boot-liuqin-dev.img" >&2
+exit 0

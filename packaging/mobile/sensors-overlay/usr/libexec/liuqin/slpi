@@ -1,0 +1,28 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+set -eu
+
+case ${1:-} in
+start|stop) ;;
+*) echo 'Usage: liuqin-slpi start|stop' >&2; exit 2 ;;
+esac
+
+for remote in /sys/class/remoteproc/remoteproc*; do
+    [ "$(cat "$remote/name")" = slpi ] || continue
+    if [ "$1" = start ]; then
+        # The import manifest is written after all per-device files are copied.
+        runuser -u fastrpc -- test -r /var/lib/liuqin-sensors/registry/SHA256SUMS
+        state=$(cat "$remote/state")
+        echo "SLPI startup: state=$state, registry readable"
+        [ "$state" != running ] || exit 0
+        [ "$state" = offline ] || exit 1
+        echo start > "$remote/state"
+    else
+        [ "$(cat "$remote/state")" != offline ] || exit 0
+        echo stop > "$remote/state"
+    fi
+    exit 0
+done
+
+echo 'SLPI remote processor is unavailable' >&2
+exit 1

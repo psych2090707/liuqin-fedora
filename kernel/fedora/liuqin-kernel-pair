@@ -1,0 +1,709 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+#
+# liuqin-kernel-pair — preserve / verify / restore a whole kernel pair
+# (the kernel Image + its complete /usr/lib/modules/<kver> tree + identity
+# files) so that a boot.img rollback can restore matching kernel modules.
+#
+# Installed path: /usr/sbin/liuqin-kernel-pair (kernel-liuqin RPM).
+#
+# ============================ WHY THIS EXISTS ==============================
+# The liuqin kernelrelease is deliberately fixed (6.17.0-rc1-gfe81794b5e1b), so
+# every kernel-liuqin upgrade overwrites the SAME /usr/lib/modules/<kver> path.
+# A boot.img rollback that only restores the boot partition would leave the
+# old kernel Image running against the new modules tree (and, with
+# CONFIG_MODVERSIONS, modules that do not load).  The RPM %pre scriptlet calls
+# `liuqin-kernel-pair archive` BEFORE rpm replaces the files, recording:
+#
+#   pair_id = sha256 of the uncompressed kernel Image (= sha256(vmlinuz))
+#
+# together with a byte-for-byte copy of the modules tree and identity files
+# and a sha256 index of every archived file.  `verify` re-checks the archive
+# and `restore` puts a recorded pair back (archiving the current pair first),
+# after which the tool asserts sha256(vmlinuz) == pair_id.
+#
+# A boot image carries the same kernel Image (gzipped) in its kernel section,
+# so liuqin-apply-boot can compute the pair identity of a boot.img backup and
+# request the matching modules tree — that is the "boot + modules pair" gate.
+#
+# ============================== SAFETY MODEL ===============================
+# * archive/verify/list never touch the boot partition; restore never touches a
+#   block device at all (it only replaces files under the modules dir and the
+#   identity files) — it is always paired with liuqin-apply-boot's own
+#   boot_a write, read-back and backup in that order.
+# * restore is dry-run by default; a real restore needs --yes-write, root (or
+#   the test hook), and LIUQIN_EXPERIMENTAL_DEVICE_WRITE=1 (same Phase-6
+#   arming gate as the boot writer).
+# * before restoring, the currently installed pair is archived (so a rollback
+#   can be undone); if that is impossible the restore is refused unless
+#   --no-preserve-current is given explicitly.
+# * the archive is verified (sha256 of every file) before a restore starts and
+#   the restored tree is verified again after the copy; a failed restore leaves
+#   the previous tree recoverable in <store>/.replaced-* and prints the manual
+#   recovery path.
+#
+# Subcommands: archive | verify | restore | find | list | status
+#
+# Exit codes: 0 success; 1 validation/verify failure; 2 refused (write gate,
+# missing pair, no preserve, ...); 3 I/O or unexpected error.
+#
+# Retention / size: the store keeps LIUQIN_KERNEL_PAIR_RETAIN pairs (default 1:
+# only the immediately previous kernel, enough for a one-step rollback) and
+# prunes older ones oldest-first.  One real aarch64 pair is ~73 MB (47.6 MB
+# Image + ~25 MB modules tree + identity files); with the default of one pair
+# the store is bounded at roughly that size.  Raise the value if you want more
+# rollback depth, and budget rootfs space accordingly.
+#
+# Test-only environment hooks (never set on a device):
+#   LIUQIN_KERNEL_PAIR_ALLOW_NONROOT=1   skip the euid-0 requirement
+#   LIUQIN_KERNEL_PAIR_STORE, LIUQIN_MODULES_DIR, LIUQIN_KERNEL_RELEASE_FILE,
+#   LIUQIN_KERNEL_BUILD_INFO, LIUQIN_KERNEL_MODULES_MANIFEST,
+#   LIUQIN_KERNEL_IDENTITY_DIR           path overrides (also used for the
+#                                        offline regular-file tests)
+
+import argparse
+import datetime
+import hashlib
+import json
+import os
+import re
+import shutil
+import sys
+from pathlib import Path
+
+TOOL = "liuqin-kernel-pair"
+TOOL_VERSION = "1.0.0"
+PAIR_SCHEMA = "liuqin-kernel-pair"
+PAIR_SCHEMA_VERSION = 1
+CHUNK = 4 * 1024 * 1024
+BOARD_DTB_REL = "device-tree/qcom/sm8475-xiaomi-liuqin.dtb"
+IDENTITY_FILES = ("kernel.release", "kernel-build-info.json",
+                  "kernel-modules.manifest", "kernel-config", "Module.symvers")
+
+
+class PairError(Exception):
+    """Validation/verify failure (exit 1)."""
+
+
+class Refused(Exception):
+    """Precondition not met / write gate (exit 2)."""
+
+
+def log(message: str) -> None:
+    print(f"{TOOL}: {message}", file=sys.stderr)
+
+
+def now() -> str:
+    # Microsecond resolution: archive + prune happen inside one second during an
+    # upgrade, and a second-resolution timestamp made pruning ambiguous (it once
+    # deleted the pair that had just been created).
+    return datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def atomic_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    os.replace(tmp, path)
+
+
+# ---------------------------------------------------------------------------
+# paths / environment
+# ---------------------------------------------------------------------------
+
+
+class Paths:
+    def __init__(self):
+        self.store = Path(os.environ.get("LIUQIN_KERNEL_PAIR_STORE",
+                                         "/var/lib/liuqin/kernel-pairs"))
+        self.modules_dir = Path(os.environ.get("LIUQIN_MODULES_DIR", "/usr/lib/modules"))
+        self.release_file = Path(os.environ.get(
+            "LIUQIN_KERNEL_RELEASE_FILE", "/usr/share/liuqin/kernel.release"))
+        self.build_info = Path(os.environ.get(
+            "LIUQIN_KERNEL_BUILD_INFO", "/usr/share/liuqin/kernel-build-info.json"))
+        self.modules_manifest = Path(os.environ.get(
+            "LIUQIN_KERNEL_MODULES_MANIFEST",
+            "/usr/share/liuqin/kernel-modules.manifest"))
+        self.identity_dir = Path(os.environ.get(
+            "LIUQIN_KERNEL_IDENTITY_DIR", "/usr/share/liuqin"))
+
+    @property
+    def pairs_dir(self) -> Path:
+        return self.store / "pairs"
+
+
+def kernel_release(paths: Paths) -> str | None:
+    try:
+        lines = paths.release_file.read_text().splitlines()
+    except OSError:
+        return None
+    return lines[0].strip() if lines and lines[0].strip() else None
+
+
+def installed_pair(paths: Paths) -> dict | None:
+    """Describe the currently installed kernel pair, or None when absent."""
+    release = kernel_release(paths)
+    if not release:
+        return None
+    modules = paths.modules_dir / release
+    if not modules.is_dir():
+        return None
+    vmlinuz = modules / "vmlinuz"
+    if not vmlinuz.is_file():
+        return None
+    vmlinuz_sha = sha256_file(vmlinuz)
+    image_sha = None
+    try:
+        info = json.loads(paths.build_info.read_text())
+        image_sha = ((info.get("artifacts") or {}).get("dist/Image") or {}).get("sha256")
+    except (OSError, json.JSONDecodeError):
+        image_sha = None
+    if image_sha and image_sha != vmlinuz_sha:
+        raise PairError(
+            f"installed kernel identity is inconsistent: {paths.build_info} records "
+            f"Image {image_sha} but {vmlinuz} is {vmlinuz_sha}")
+    board_dtb = modules / BOARD_DTB_REL
+    identity = {}
+    for name in IDENTITY_FILES:
+        candidate = paths.identity_dir / name
+        if candidate.is_file():
+            identity[name] = {"path": str(candidate), "sha256": sha256_file(candidate)}
+    module_manifest_sha = None
+    module_manifest_entries = 0
+    try:
+        module_manifest_sha = sha256_file(paths.modules_manifest)
+        module_manifest_entries = sum(
+            1 for line in paths.modules_manifest.read_text(errors="replace").splitlines()
+            if line.strip() and not line.lstrip().startswith("#"))
+    except OSError:
+        module_manifest_sha = None
+    return {
+        "pair_id": image_sha or vmlinuz_sha,
+        "kernel_release": release,
+        "kernel_image_sha256": image_sha or vmlinuz_sha,
+        "vmlinuz_sha256": vmlinuz_sha,
+        "vmlinuz_bytes": vmlinuz.stat().st_size,
+        "board_dtb_sha256": sha256_file(board_dtb) if board_dtb.is_file() else None,
+        "modules_dir": str(modules),
+        "modules_manifest_sha256": module_manifest_sha,
+        "modules_manifest_entries": module_manifest_entries,
+        "identity_files": identity,
+    }
+
+
+# ---------------------------------------------------------------------------
+# archive
+# ---------------------------------------------------------------------------
+
+
+def _sha256_index(root: Path) -> dict:
+    index = {}
+    for base, _dirs, files in os.walk(root):
+        for name in sorted(files):
+            path = Path(base) / name
+            rel = path.relative_to(root).as_posix()
+            index[rel] = sha256_file(path)
+    return index
+
+
+def _write_index(path: Path, index: dict) -> None:
+    lines = [f"{index[rel]}  {rel}\n" for rel in sorted(index)]
+    path.write_text("".join(lines))
+
+
+INDEX_LINE = re.compile(r"^([0-9a-f]{64})  (.+)$")
+
+
+def _read_index(path: Path) -> dict:
+    """Parse `sha256sum`-style lines; the path may contain single spaces."""
+    index = {}
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        match = INDEX_LINE.match(line)
+        if not match:
+            raise PairError(f"malformed file index line: {line!r}")
+        index[match.group(2)] = match.group(1)
+    return index
+
+
+def verify_pair(pair_dir: Path) -> dict:
+    """Verify an archived pair against its recorded file index.  Raises PairError."""
+    pair_dir = Path(pair_dir)
+    meta_path = pair_dir / "pair.json"
+    if not meta_path.is_file():
+        raise PairError(f"pair metadata missing: {meta_path}")
+    try:
+        meta = json.loads(meta_path.read_text())
+    except json.JSONDecodeError as error:
+        raise PairError(f"cannot parse {meta_path}: {error}") from error
+    tree = pair_dir / "tree"
+    index_path = pair_dir / "files.sha256"
+    if not tree.is_dir() or not index_path.is_file():
+        raise PairError(f"pair archive is incomplete: {pair_dir}")
+    recorded = _read_index(index_path)
+    actual = _sha256_index(tree)
+    problems = []
+    for rel in sorted(set(recorded) - set(actual)):
+        problems.append(f"missing archived file: {rel}")
+    for rel in sorted(set(actual) - set(recorded)):
+        problems.append(f"unexpected archived file: {rel}")
+    for rel in sorted(set(recorded) & set(actual)):
+        if recorded[rel] != actual[rel]:
+            problems.append(f"archived file sha256 mismatch: {rel}")
+    modules_dir = (meta.get("modules_dir") or "").lstrip("/")
+    vmlinuz_rel = f"{modules_dir}/vmlinuz" if modules_dir else None
+    if vmlinuz_rel and vmlinuz_rel in actual:
+        if actual[vmlinuz_rel] != meta.get("vmlinuz_sha256"):
+            problems.append("archived vmlinuz does not match pair.json")
+        if meta.get("pair_id") != meta.get("kernel_image_sha256"):
+            problems.append("pair.json pair_id != kernel_image_sha256")
+        if meta.get("vmlinuz_sha256") != meta.get("kernel_image_sha256"):
+            problems.append("pair.json vmlinuz_sha256 != kernel_image_sha256")
+    else:
+        problems.append("archived modules tree does not contain vmlinuz")
+    # Deep module check: every path in the archived kernel-modules.manifest.
+    manifest_path = meta.get("modules_manifest_path")
+    archive_manifest = (pair_dir / "tree" / Path(manifest_path).relative_to("/")
+                        if manifest_path and str(manifest_path).startswith("/")
+                        else Path("/nonexistent"))
+    if archive_manifest.is_file():
+        entries = 0
+        for line in archive_manifest.read_text(errors="replace").splitlines():
+            match = INDEX_LINE.match(line)
+            if not match:
+                continue
+            expected, abs_path = match.group(1), match.group(2)
+            rel = abs_path.lstrip("/")
+            if rel not in actual:
+                problems.append(f"module listed in kernel-modules.manifest is missing: {abs_path}")
+            elif actual[rel] != expected:
+                problems.append(f"module sha256 mismatch: {abs_path}")
+            entries += 1
+        if meta.get("modules_manifest_entries") and entries != meta["modules_manifest_entries"]:
+            problems.append(
+                f"kernel-modules.manifest entry count {entries} != recorded "
+                f"{meta['modules_manifest_entries']}")
+    if problems:
+        raise PairError("archived pair failed verification:\n  - " + "\n  - ".join(problems))
+    return meta
+
+
+def _prune(paths: Paths, retain: int) -> list:
+    pairs = []
+    if not paths.pairs_dir.is_dir():
+        return []
+    for entry in paths.pairs_dir.iterdir():
+        meta_path = entry / "pair.json"
+        if not entry.is_dir() or entry.name.startswith(".") or not meta_path.is_file():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        stamp = meta.get("created_at") or ""
+        try:
+            mtime = entry.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        pairs.append(((stamp, mtime), entry))
+    pairs.sort(key=lambda item: (item[0][0], item[0][1]))
+    removed = []
+    doomed = pairs[:-retain] if retain > 0 else pairs
+    for _stamp, entry in doomed:
+        removed.append(entry.name)
+        shutil.rmtree(entry, ignore_errors=True)
+    return removed
+
+
+def cmd_archive(args) -> int:
+    paths = Paths()
+    current = installed_pair(paths)
+    if current is None:
+        print(f"{TOOL}: no installed kernel pair to archive "
+              f"(nothing at {paths.modules_dir}/<release>/vmlinuz)")
+        return 0
+    pair_id = current["pair_id"]
+    dest = paths.pairs_dir / pair_id
+    if (dest / "pair.json").is_file():
+        try:
+            existing = verify_pair(dest)
+        except PairError as error:
+            log(f"existing archive is damaged, rebuilding: {error}")
+            shutil.rmtree(dest, ignore_errors=True)
+        else:
+            if existing.get("kernel_image_sha256") == current["kernel_image_sha256"]:
+                print(f"{TOOL}: pair {pair_id} already archived (verified): {dest}")
+                return 0
+            shutil.rmtree(dest, ignore_errors=True)
+    paths.pairs_dir.mkdir(parents=True, exist_ok=True)
+    work = paths.pairs_dir / f".tmp-archive-{os.getpid()}"
+    shutil.rmtree(work, ignore_errors=True)
+    tree = work / "tree"
+    try:
+        modules_dest = tree / current["modules_dir"].lstrip("/")
+        modules_dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(current["modules_dir"], modules_dest, symlinks=True)
+        for name, record in current["identity_files"].items():
+            target = tree / Path(record["path"]).relative_to("/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(record["path"], target)
+        index = _sha256_index(tree)
+        _write_index(work / "files.sha256", index)
+        modules_bytes = sum(
+            (tree / rel).stat().st_size for rel in index
+            if rel.startswith(current["modules_dir"].lstrip("/") + "/"))
+        archive_bytes = sum((tree / rel).stat().st_size for rel in index)
+        meta = {
+            "schema": PAIR_SCHEMA,
+            "schema_version": PAIR_SCHEMA_VERSION,
+            "pair_id": pair_id,
+            "kernel_release": current["kernel_release"],
+            "kernel_image_sha256": current["kernel_image_sha256"],
+            "vmlinuz_sha256": current["vmlinuz_sha256"],
+            "vmlinuz_bytes": current["vmlinuz_bytes"],
+            "board_dtb_sha256": current["board_dtb_sha256"],
+            "modules_dir": current["modules_dir"],
+            "modules_tree_files": len(index),
+            "modules_tree_bytes": modules_bytes,
+            "archive_bytes": archive_bytes,
+            "modules_manifest_path": str(paths.modules_manifest),
+            "modules_manifest_sha256": current["modules_manifest_sha256"],
+            "modules_manifest_entries": current["modules_manifest_entries"],
+            "identity_files": {
+                name: {"path": record["path"],
+                       "rel": str(Path(record["path"]).relative_to("/")),
+                       "sha256": record["sha256"]}
+                for name, record in current["identity_files"].items()},
+            "files_index_sha256": sha256_file(work / "files.sha256"),
+            "created_at": now(),
+            "reason": args.reason or "manual",
+            "tool_version": TOOL_VERSION,
+        }
+        atomic_json(work / "pair.json", meta)
+        verify_pair(work)  # never publish an archive that does not verify
+        if dest.exists():
+            shutil.rmtree(dest)
+        os.replace(work, dest)
+    except (OSError, PairError) as error:
+        shutil.rmtree(work, ignore_errors=True)
+        log(f"archive failed: {error}")
+        return 1
+    dir_fd = os.open(paths.pairs_dir, os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+    pruned = [] if args.no_prune else _prune(paths, args.retain)
+    if pruned:
+        log(f"pruned older pairs: {', '.join(pruned)}")
+    print(f"{TOOL}: archived kernel pair {pair_id} "
+          f"({meta['modules_tree_files']} files, {meta['archive_bytes']} bytes total: "
+          f"Image + modules tree + identity files) -> {dest}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# find / verify / list / status
+# ---------------------------------------------------------------------------
+
+
+def _iter_pairs(paths: Paths):
+    if not paths.pairs_dir.is_dir():
+        return
+    for entry in sorted(paths.pairs_dir.iterdir()):
+        meta_path = entry / "pair.json"
+        if entry.is_dir() and not entry.name.startswith(".") and meta_path.is_file():
+            try:
+                yield entry, json.loads(meta_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+
+
+def cmd_find(args) -> int:
+    paths = Paths()
+    wanted = args.kernel_image_sha.lower()
+    for entry, meta in _iter_pairs(paths):
+        candidates = {
+            (meta.get("pair_id") or "").lower(),
+            (meta.get("kernel_image_sha256") or "").lower(),
+            (meta.get("vmlinuz_sha256") or "").lower(),
+        }
+        if wanted in candidates:
+            if args.json:
+                print(json.dumps({"pair_id": meta.get("pair_id"),
+                                  "path": str(entry), "metadata": meta}, indent=2))
+            else:
+                print(entry)
+            return 0
+    if args.json:
+        print(json.dumps({"pair_id": None, "kernel_image_sha256": args.kernel_image_sha}))
+    return 1
+
+
+def cmd_verify(args) -> int:
+    paths = Paths()
+    if args.pair_id:
+        targets = [(paths.pairs_dir / args.pair_id, None)]
+    elif args.all:
+        targets = [(entry, meta) for entry, meta in _iter_pairs(paths)]
+    else:
+        raise Refused("verify needs --pair-id PAIR_ID or --all")
+    if not targets:
+        print(f"{TOOL}: no archived kernel pairs under {paths.pairs_dir}", file=sys.stderr)
+        return 1
+    failures = 0
+    for pair_dir, _meta in targets:
+        try:
+            meta = verify_pair(pair_dir)
+        except PairError as error:
+            failures += 1
+            print(f"FAIL  {pair_dir}: {error}")
+        else:
+            print(f"PASS  {meta.get('pair_id')}  release={meta.get('kernel_release')}  "
+                  f"files={meta.get('modules_tree_files')}  dir={pair_dir}")
+    return 1 if failures else 0
+
+
+def cmd_list(args) -> int:
+    paths = Paths()
+    entries = []
+    for entry, meta in _iter_pairs(paths):
+        entries.append({
+            "pair_id": meta.get("pair_id"),
+            "kernel_release": meta.get("kernel_release"),
+            "kernel_image_sha256": meta.get("kernel_image_sha256"),
+            "created_at": meta.get("created_at"),
+            "reason": meta.get("reason"),
+            "modules_tree_files": meta.get("modules_tree_files"),
+            "modules_tree_bytes": meta.get("modules_tree_bytes"),
+            "path": str(entry),
+        })
+    if args.json:
+        print(json.dumps({"tool": TOOL, "version": TOOL_VERSION,
+                          "store": str(paths.pairs_dir), "pairs": entries}, indent=2))
+        return 0
+    print(f"{TOOL} {TOOL_VERSION}: store {paths.pairs_dir}")
+    if not entries:
+        print("  (no archived kernel pairs)")
+    for entry in entries:
+        print(f"  {entry['pair_id']}  {entry['kernel_release']}  "
+              f"{entry['created_at']}  {entry['reason']}  {entry['path']}")
+    return 0
+
+
+def cmd_status(args) -> int:
+    paths = Paths()
+    try:
+        current = installed_pair(paths)
+    except PairError as error:
+        print(json.dumps({"tool": TOOL, "version": TOOL_VERSION, "error": str(error)}))
+        return 1
+    report = {
+        "tool": TOOL, "version": TOOL_VERSION,
+        "store": str(paths.pairs_dir),
+        "installed_pair": current,
+        "pairs": [],
+        "write_gates": {
+            "root": os.geteuid() == 0,
+            "experimental_device_write":
+                os.environ.get("LIUQIN_EXPERIMENTAL_DEVICE_WRITE") == "1",
+        },
+    }
+    for entry, meta in _iter_pairs(paths):
+        report["pairs"].append({"pair_id": meta.get("pair_id"),
+                                "path": str(entry),
+                                "created_at": meta.get("created_at")})
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# restore
+# ---------------------------------------------------------------------------
+
+
+def _check_write_permission() -> None:
+    if os.geteuid() != 0 and os.environ.get("LIUQIN_KERNEL_PAIR_ALLOW_NONROOT") != "1":
+        raise Refused("restore requires root (test hook: LIUQIN_KERNEL_PAIR_ALLOW_NONROOT=1)")
+    if os.environ.get("LIUQIN_EXPERIMENTAL_DEVICE_WRITE") != "1":
+        raise Refused(
+            "restore is gated: arm with LIUQIN_EXPERIMENTAL_DEVICE_WRITE=1 after "
+            "Phase 6 device authorization")
+
+
+def cmd_restore(args) -> int:
+    paths = Paths()
+    pair_dir = paths.pairs_dir / args.pair_id
+    if not pair_dir.is_dir():
+        raise Refused(f"archived kernel pair not found: {pair_dir}")
+    meta = verify_pair(pair_dir)  # preflight, raises PairError (exit 1)
+    try:
+        current = installed_pair(paths)
+    except PairError as error:
+        raise Refused(f"refusing to restore over an inconsistent install: {error}") from error
+    if current and current["kernel_image_sha256"] == meta["kernel_image_sha256"]:
+        print(f"{TOOL}: installed pair already matches {meta['pair_id']}; nothing to restore")
+        return 0
+    release = meta["kernel_release"]
+    modules_target = paths.modules_dir / release
+    print(f"{TOOL}: restore plan (dry-run unless --yes-write)")
+    print(f"  pair:        {meta['pair_id']} ({meta['kernel_release']})")
+    print(f"  archive:     {pair_dir} ({meta['modules_tree_files']} files verified)")
+    print(f"  installed:   {current['pair_id'] if current else 'none'}")
+    print(f"  modules dir: {modules_target}")
+    for name, record in (meta.get("identity_files") or {}).items():
+        print(f"  identity:    {record['path']}")
+    if not args.yes_write:
+        print(f"{TOOL}: DRY-RUN: nothing was written. Re-run with --yes-write "
+              "(root + LIUQIN_EXPERIMENTAL_DEVICE_WRITE=1).")
+        return 0
+    _check_write_permission()
+    preserved = None
+    if current is not None and not args.no_preserve_current:
+        rc = cmd_archive(argparse.Namespace(reason=f"pre-restore:{args.pair_id}",
+                                            retain=args.retain, no_prune=True))
+        if rc != 0:
+            raise Refused(
+                "could not archive the currently installed kernel pair; refusing to "
+                "restore without a way back (override: --no-preserve-current)")
+        preserved = current["pair_id"]
+    # stage the archived files inside the store, then swap them into place.
+    work = paths.store / f".restore-{os.getpid()}"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
+    # Keep the current identity files so a failed restore can put them back.
+    previous_identity = {}
+    for name in IDENTITY_FILES:
+        candidate = paths.identity_dir / name
+        if candidate.is_file():
+            saved = work / "previous-identity" / name
+            saved.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(candidate, saved)
+            previous_identity[name] = saved
+    replaced = None
+    try:
+        staged_modules = work / "modules"
+        shutil.copytree(pair_dir / "tree" / modules_target.as_posix().lstrip("/"),
+                        staged_modules, symlinks=True)
+        if modules_target.exists():
+            replaced = work / "replaced-modules"
+            os.replace(modules_target, replaced)
+        staged_modules.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(staged_modules, modules_target)
+        for name, record in (meta.get("identity_files") or {}).items():
+            source = pair_dir / "tree" / record["rel"]
+            target = Path(record["path"])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        after = installed_pair(paths)
+        if after is None or after["kernel_image_sha256"] != meta["kernel_image_sha256"]:
+            raise PairError(
+                f"post-restore verification failed: installed pair is "
+                f"{after['kernel_image_sha256'] if after else None}, expected "
+                f"{meta['kernel_image_sha256']}")
+    except (OSError, PairError) as error:
+        log(f"restore failed: {error}")
+        if replaced is not None and replaced.exists():
+            shutil.rmtree(modules_target, ignore_errors=True)
+            os.replace(replaced, modules_target)
+            log("restored the previous modules tree from the rollback copy")
+        for name, saved in previous_identity.items():
+            shutil.copy2(saved, paths.identity_dir / name)
+        log("previous identity files restored")
+        shutil.rmtree(work, ignore_errors=True)
+        return 1
+    shutil.rmtree(work, ignore_errors=True)
+    if replaced is not None:
+        shutil.rmtree(replaced, ignore_errors=True)
+    atomic_json(paths.store / "state.json",
+                {"schema": "liuqin-kernel-pair-state", "schema_version": 1,
+                 "last_restore": {"pair_id": meta["pair_id"],
+                                  "kernel_release": release,
+                                  "from_pair": preserved,
+                                  "restored_at": now()}})
+    pruned = [] if args.no_prune else _prune(paths, args.retain)
+    if pruned:
+        log(f"pruned older pairs: {', '.join(pruned)}")
+    print(f"{TOOL}: restored kernel pair {meta['pair_id']} ({release}); "
+          f"sha256(vmlinuz) verified")
+    print(json.dumps({"pair_id": meta["pair_id"],
+                      "kernel_image_sha256": meta["kernel_image_sha256"],
+                      "vmlinuz_sha256": sha256_file(modules_target / "vmlinuz"),
+                      "modules_dir": str(modules_target),
+                      "preserved_pair": preserved}, indent=2))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    retain_default = int(os.environ.get("LIUQIN_KERNEL_PAIR_RETAIN", "1"))
+    parser = argparse.ArgumentParser(
+        prog=TOOL,
+        description="archive/verify/restore the liuqin kernel pair (Image + modules tree)")
+    parser.add_argument("--version", action="version", version=f"{TOOL} {TOOL_VERSION}")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    archive = sub.add_parser("archive", help="archive the installed kernel pair (RPM %%pre)")
+    archive.add_argument("--reason", default="manual")
+    archive.add_argument("--retain", type=int, default=retain_default)
+    archive.add_argument("--no-prune", action="store_true")
+    archive.set_defaults(func=cmd_archive)
+
+    find = sub.add_parser("find", help="find an archived pair by kernel Image sha256")
+    find.add_argument("--kernel-image-sha", required=True)
+    find.add_argument("--json", action="store_true")
+    find.set_defaults(func=cmd_find)
+
+    verify = sub.add_parser("verify", help="verify archived pairs against their file index")
+    verify.add_argument("--pair-id", default="")
+    verify.add_argument("--all", action="store_true")
+    verify.set_defaults(func=cmd_verify)
+
+    listing = sub.add_parser("list", help="list archived kernel pairs")
+    listing.add_argument("--json", action="store_true")
+    listing.set_defaults(func=cmd_list)
+
+    status = sub.add_parser("status", help="machine-readable status (installed pair + archive)")
+    status.set_defaults(func=cmd_status)
+
+    restore = sub.add_parser("restore", help="restore an archived kernel pair (dry-run default)")
+    restore.add_argument("--pair-id", required=True)
+    restore.add_argument("--yes-write", action="store_true")
+    restore.add_argument("--no-preserve-current", action="store_true")
+    restore.add_argument("--retain", type=int, default=retain_default)
+    restore.add_argument("--no-prune", action="store_true")
+    restore.set_defaults(func=cmd_restore)
+    return parser
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        return args.func(args)
+    except Refused as error:
+        log(f"refused: {error}")
+        return 2
+    except PairError as error:
+        log(f"validation failed: {error}")
+        return 1
+    except OSError as error:
+        log(f"I/O error: {error}")
+        return 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

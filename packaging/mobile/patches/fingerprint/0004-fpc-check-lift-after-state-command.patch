@@ -1,0 +1,17 @@
+--- a/src/oem/fpc_build_info.c
++++ b/src/oem/fpc_build_info.c
+@@ -734,10 +734,10 @@
+ 		status = query(fd, session, SENSOR_CHECK_FINGER_STATE);
+ 		if (status < 0)
+ 			return -1;
+-		if (!status) {
+-			usleep(50000);
+-			continue;
+-		}
++		/* CHECK_FINGER_STATE returning zero means the command completed.
++		 * It must not suppress the HAL's following CHECK_FINGER_LOST.
++		 * Otherwise every IRQ loops here without ever checking for lift.
++		 */
+ 		status = query(fd, session, SENSOR_CHECK_FINGER_LOST);
+ 		if (status < 0)
+ 			return -1;

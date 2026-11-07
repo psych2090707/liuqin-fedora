@@ -1,0 +1,505 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: MIT
+"""Record GNOME notification calls and screen/power state changes.
+
+Runs as the desktop user (systemd --user service).  Two outputs in
+~/.local/state/liuqin-notify-log/ (0700 dir, 0600 files):
+
+* notifications.jsonl - one row per complete Notify/AddNotification call,
+  written immediately, with the clocks sampled at receipt.  Only app name and
+  summary are stored, never the body.  FDO calls are observed with
+  ``busctl monitor --json=short`` (typed, one JSON object per message, so a
+  message is never left waiting for the next one); GTK AddNotification is
+  covered as well.
+* screen-events.jsonl - event-driven rows for UPower OnBattery/LidIsClosed,
+  UPower device Online/State/Percentage/IsPresent, Mutter PowerSaveMode,
+  ScreenSaver ActiveChanged/WakeUpScreen, plus an initial snapshot.  Only the
+  listed properties are stored; nothing is polled and no message is sent.
+
+Coverage limits: GNOME Shell notifications created internally (MessageTray
+sources without an FDO/GTK call) are not visible here, and permission is
+needed for other users' session buses.  A missing row therefore is not proof
+that nothing happened.
+"""
+import json
+import os
+import signal
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+try:  # the tablet has python3-gobject; tests import this module without it
+    from gi.repository import Gio, GLib
+except ImportError:  # pragma: no cover - exercised only on non-GNOME hosts
+    Gio = None
+    GLib = None
+
+MAX_BYTES = 1024 * 1024
+MAX_LINES = 2000
+DEDUP_WINDOW_NS = 1_000_000_000
+BUSCTL = "/usr/bin/busctl"
+RESTART_DELAY_S = 3
+RESUBSCRIBE_DELAY_S = 15
+
+FDO_IFACE = "org.freedesktop.Notifications"
+GTK_IFACE = "org.gtk.Notifications"
+
+# Only these properties are ever stored, so an unexpected property or a
+# device-unique identifier cannot end up in the log.
+SCREEN_KEYS = {
+    "org.freedesktop.UPower": ("OnBattery", "LidIsClosed"),
+    "org.freedesktop.UPower.Device": ("Online", "State", "Percentage",
+                                      "IsPresent"),
+    "org.gnome.Mutter.DisplayConfig": ("PowerSaveMode",),
+    "org.gnome.ScreenSaver": ("Active",),
+}
+
+
+def state_dir():
+    override = os.environ.get("LIUQIN_NOTIFY_LOG_DIR")
+    if override:
+        return Path(override)
+    return Path.home() / ".local" / "state" / "liuqin-notify-log"
+
+
+def read_boot_id():
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    except OSError:
+        return "unavailable"
+
+
+def clocks():
+    """Sample all three clocks at one receipt, not at flush time."""
+    return {
+        "realtime_ns": time.time_ns(),
+        "boottime_ns": time.clock_gettime_ns(time.CLOCK_BOOTTIME),
+        "monotonic_ns": time.monotonic_ns(),
+    }
+
+
+def plain(value):
+    """Turn GVariant values into JSON-friendly scalars/lists/maps."""
+    if hasattr(value, "unpack"):
+        try:
+            value = value.unpack()
+        except Exception:  # a variant we cannot unpack is recorded as text
+            value = str(value)
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [plain(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): plain(item) for key, item in value.items()}
+    return str(value)
+
+
+def pick(interface, changed):
+    allowed = SCREEN_KEYS.get(interface, ())
+    if not isinstance(changed, dict):
+        return {}
+    return {key: plain(changed[key]) for key in allowed if key in changed}
+
+
+def rotate(path):
+    try:
+        if path.stat().st_size <= MAX_BYTES:
+            return
+        lines = path.read_text(errors="replace").splitlines()[-MAX_LINES:]
+        tmp = path.with_name(path.name + ".tmp")
+        with open(tmp, "w") as stream:
+            stream.write("\n".join(lines) + ("\n" if lines else ""))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def append(path, row):
+    line = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+    with open(path, "a") as stream:
+        stream.write(line + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    rotate(path)
+
+
+class Recorder:
+    """Writes one JSON row per event; clock and boot id are injected for tests."""
+
+    def __init__(self, directory=None, clock=None, boot_id=None):
+        self.dir = Path(directory) if directory is not None else state_dir()
+        self.dir.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(self.dir, 0o700)
+        except OSError:
+            pass
+        self.clock = clock or clocks
+        self.boot_id = boot_id if boot_id is not None else read_boot_id()
+        self.notify_path = self.dir / "notifications.jsonl"
+        self.screen_path = self.dir / "screen-events.jsonl"
+        self.recent = []  # (boottime_ns, key) for forward/dedup suppression
+
+    def _row(self, base):
+        row = {"boot_id": self.boot_id}
+        row.update(self.clock())
+        row.update(base)
+        return row
+
+    def _duplicate(self, key, boottime_ns, window_ns=DEDUP_WINDOW_NS):
+        cutoff = boottime_ns - window_ns
+        self.recent = [item for item in self.recent if item[0] >= cutoff]
+        if any(item[1] == key for item in self.recent):
+            return True
+        self.recent.append((boottime_ns, key))
+        return False
+
+    def notify(self, protocol, app, summary, bus_realtime_ns=None, hints=None):
+        """Save one notification; Shell's forwarded copy is suppressed.
+
+        GNOME Shell re-sends each FDO Notify to its own process, so the same
+        logical notification appears twice on the session bus (the forwarded
+        copy carries an x-shell-sender hint).  A same-content row inside one
+        second is also dropped so the two copies cannot double-count.
+        """
+        app = str(app or "")[:120]
+        summary = str(summary or "")[:240]
+        stamp = self.clock()
+        if isinstance(hints, dict) and "x-shell-sender" in hints:
+            return None
+        if self._duplicate((protocol, app, summary), stamp["boottime_ns"]):
+            return None
+        row = {"kind": "notification", "protocol": protocol, "app": app,
+               "summary": summary, "boot_id": self.boot_id}
+        row.update(stamp)
+        if bus_realtime_ns:
+            row["bus_realtime_ns"] = int(bus_realtime_ns)
+        append(self.notify_path, row)
+        return row
+
+    def screen(self, source, interface, props, bus, path="", kind="change",
+               bus_realtime_ns=None):
+        row = self._row({
+            "kind": kind,
+            "source": source,
+            "interface": interface,
+            "bus": bus,
+            "path": str(path or ""),
+            "props": {key: plain(value) for key, value in props.items()},
+        })
+        if bus_realtime_ns:
+            row["bus_realtime_ns"] = int(bus_realtime_ns)
+        append(self.screen_path, row)
+        return row
+
+
+def fdo_fields(args):
+    """app_name, summary and hints from Notify args."""
+    if not isinstance(args, (list, tuple)) or len(args) < 4:
+        raise ValueError("Notify without app_name/summary")
+    hints = args[6] if len(args) > 6 and isinstance(args[6], dict) else {}
+    return str(args[0]), str(args[3]), hints
+
+
+def gtk_fields(args):
+    """app id and title from org.gtk.Notifications.AddNotification args."""
+    if not isinstance(args, (list, tuple)) or len(args) < 3:
+        raise ValueError("AddNotification without app_id/notification")
+    note = args[2]
+    if hasattr(note, "unpack"):
+        note = note.unpack()
+    if not isinstance(note, dict):
+        raise ValueError("AddNotification payload is not a mapping")
+    return str(args[0]), str(note.get("title", ""))
+
+
+def handle_fdo(recorder, args, bus_realtime_ns=None):
+    app, summary, hints = fdo_fields(args)
+    return recorder.notify("fdo", app, summary, bus_realtime_ns, hints)
+
+
+def handle_gtk(recorder, args, bus_realtime_ns=None):
+    app, summary = gtk_fields(args)
+    return recorder.notify("gtk", app, summary, bus_realtime_ns)
+
+
+class Monitor(threading.Thread):
+    """Follow method calls with busctl; one JSON object per message."""
+
+    def __init__(self, label, match, handler):
+        super().__init__(name=f"monitor-{label}", daemon=True)
+        self.label = label
+        self.match = match
+        self.handler = handler
+        self.stopping = threading.Event()
+        self.proc = None
+
+    def run(self):
+        while not self.stopping.is_set():
+            argv = [BUSCTL, "--user", "monitor", "--json=short",
+                    f"--match={self.match}"]
+            try:
+                self.proc = subprocess.Popen(
+                    argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    text=True, bufsize=1,
+                )
+            except OSError as exc:
+                print(f"liuqin-notify-log: cannot start busctl: {exc}",
+                      file=sys.stderr, flush=True)
+                time.sleep(RESTART_DELAY_S)
+                continue
+            try:
+                for line in self.proc.stdout:
+                    self._feed(line)
+            finally:
+                self._terminate()
+                self.stopping.wait(RESTART_DELAY_S)
+
+    def _feed(self, line):
+        line = line.strip()
+        if not line:
+            return
+        try:
+            message = json.loads(line)
+            payload = message.get("payload") or {}
+            args = payload.get("data")
+            if not isinstance(args, list):
+                return
+            bus_ns = None
+            stamp = message.get("timestamp-realtime")
+            if isinstance(stamp, int):
+                bus_ns = stamp * 1000  # busctl reports microseconds
+            self.handler(args, bus_ns)
+        except Exception as exc:  # never let one bad message stop the logger
+            print(f"liuqin-notify-log: {self.label}: "
+                  f"{exc.__class__.__name__}: {exc}",
+                  file=sys.stderr, flush=True)
+
+    def _terminate(self):
+        if self.proc is None:
+            return
+        try:
+            self.proc.terminate()
+            self.proc.wait(timeout=3)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                self.proc.kill()
+            except OSError:
+                pass
+        self.proc = None
+
+    def close(self):
+        self.stopping.set()
+        self._terminate()
+
+
+def properties_changed_props(params):
+    """(interface, changed, invalidated) -> interface, changed dict."""
+    unpacked = params.unpack()
+    if len(unpacked) < 2:
+        raise ValueError("PropertiesChanged without payload")
+    return str(unpacked[0]), unpacked[1]
+
+
+def make_signal_handler(recorder, source, interface, bus, path_prefix=None):
+    def handler(conn, sender, path, iface, member, params, _data=None):
+        try:
+            changed_iface, changed = properties_changed_props(params)
+        except Exception as exc:
+            print(f"liuqin-notify-log: {source}: {exc}", file=sys.stderr,
+                  flush=True)
+            return
+        if changed_iface != interface:
+            return
+        if path_prefix and not str(path).startswith(path_prefix):
+            return
+        props = pick(interface, changed)
+        if not props:
+            return
+        recorder.screen(source, interface, props, bus, path)
+    return handler
+
+
+def setup_signals(recorder):
+    session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    system = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+    flags = Gio.DBusSignalFlags.NONE
+
+    # UPower lives on the system bus; only these property-change signals are
+    # read, and no method that could request firmware work is called.
+    system.signal_subscribe(
+        "org.freedesktop.UPower", "org.freedesktop.DBus.Properties",
+        "PropertiesChanged", None, None, flags,
+        make_signal_handler(recorder, "org.freedesktop.UPower",
+                           "org.freedesktop.UPower", "system"),
+    )
+    system.signal_subscribe(
+        "org.freedesktop.UPower", "org.freedesktop.DBus.Properties",
+        "PropertiesChanged", None, None, flags,
+        make_signal_handler(recorder, "org.freedesktop.UPower.Device",
+                           "org.freedesktop.UPower.Device", "system",
+                           "/org/freedesktop/UPower/devices/"),
+    )
+    session.signal_subscribe(
+        "org.gnome.Mutter.DisplayConfig", "org.freedesktop.DBus.Properties",
+        "PropertiesChanged", None, None, flags,
+        make_signal_handler(recorder, "org.gnome.Mutter.DisplayConfig",
+                           "org.gnome.Mutter.DisplayConfig", "session"),
+    )
+
+    def active_changed(conn, sender, path, iface, member, params, _data=None):
+        value = params.unpack()[0]
+        recorder.screen("org.gnome.ScreenSaver", "org.gnome.ScreenSaver",
+                        {"Active": bool(value)}, "session", path, "signal")
+
+    def wake_up_screen(conn, sender, path, iface, member, params, _data=None):
+        recorder.screen("org.gnome.ScreenSaver", "org.gnome.ScreenSaver",
+                        {}, "session", path, "signal")
+
+    session.signal_subscribe(
+        "org.gnome.ScreenSaver", "org.gnome.ScreenSaver", "ActiveChanged",
+        None, None, flags, active_changed,
+    )
+    session.signal_subscribe(
+        "org.gnome.ScreenSaver", "org.gnome.ScreenSaver", "WakeUpScreen",
+        None, None, flags, wake_up_screen,
+    )
+    return session, system
+
+
+def call(system, bus_name, path, interface, method, signature=None, args=None):
+    params = GLib.Variant(signature, args) if signature else None
+    reply = system.call_sync(bus_name, path, interface, method, params,
+                             None, Gio.DBusCallFlags.NONE, 2000, None)
+    return reply.unpack()
+
+
+def take_snapshot(recorder, session, system):
+    """Initial state rows so an event can be compared with its starting point."""
+    try:
+        props = call(system, "org.freedesktop.UPower",
+                     "/org/freedesktop/UPower",
+                     "org.freedesktop.DBus.Properties", "GetAll",
+                     "(s)", ("org.freedesktop.UPower",))[0]
+        picked = pick("org.freedesktop.UPower", props)
+        if picked:
+            recorder.screen("org.freedesktop.UPower", "org.freedesktop.UPower",
+                            picked, "system", "/org/freedesktop/UPower",
+                            "snapshot")
+    except Exception as exc:
+        print(f"liuqin-notify-log: UPower snapshot: {exc}", file=sys.stderr,
+              flush=True)
+
+    try:
+        devices = call(system, "org.freedesktop.UPower",
+                       "/org/freedesktop/UPower", "org.freedesktop.UPower",
+                       "EnumerateDevices")
+        for path in devices[0]:
+            try:
+                props = call(system, "org.freedesktop.UPower", path,
+                             "org.freedesktop.DBus.Properties", "GetAll",
+                             "(s)", ("org.freedesktop.UPower.Device",))[0]
+            except Exception as exc:
+                print(f"liuqin-notify-log: {path}: {exc}", file=sys.stderr,
+                      flush=True)
+                continue
+            picked = pick("org.freedesktop.UPower.Device", props)
+            if picked:
+                recorder.screen("org.freedesktop.UPower.Device",
+                                "org.freedesktop.UPower.Device", picked,
+                                "system", path, "snapshot")
+    except Exception as exc:
+        print(f"liuqin-notify-log: UPower devices: {exc}", file=sys.stderr,
+              flush=True)
+
+    try:
+        props = call(session, "org.gnome.Mutter.DisplayConfig",
+                     "/org/gnome/Mutter/DisplayConfig",
+                     "org.freedesktop.DBus.Properties", "GetAll",
+                     "(s)", ("org.gnome.Mutter.DisplayConfig",))[0]
+        picked = pick("org.gnome.Mutter.DisplayConfig", props)
+        if picked:
+            recorder.screen("org.gnome.Mutter.DisplayConfig",
+                            "org.gnome.Mutter.DisplayConfig", picked,
+                            "session", "/org/gnome/Mutter/DisplayConfig",
+                            "snapshot")
+    except Exception as exc:
+        print(f"liuqin-notify-log: DisplayConfig snapshot: {exc}",
+              file=sys.stderr, flush=True)
+
+    try:
+        active = call(session, "org.gnome.ScreenSaver",
+                      "/org/gnome/ScreenSaver", "org.gnome.ScreenSaver",
+                      "GetActive")[0]
+        recorder.screen("org.gnome.ScreenSaver", "org.gnome.ScreenSaver",
+                        {"Active": bool(active)}, "session",
+                        "/org/gnome/ScreenSaver", "snapshot")
+    except Exception as exc:
+        print(f"liuqin-notify-log: ScreenSaver snapshot: {exc}",
+              file=sys.stderr, flush=True)
+
+
+def main():
+    if Gio is None or GLib is None:
+        print("liuqin-notify-log: python3-gobject (gi) is required",
+              file=sys.stderr)
+        return 1
+    recorder = Recorder()
+    print(f"liuqin-notify-log: notifications -> {recorder.notify_path}",
+          file=sys.stderr, flush=True)
+    print(f"liuqin-notify-log: screen events -> {recorder.screen_path}",
+          file=sys.stderr, flush=True)
+
+    monitors = [
+        Monitor("fdo",
+                f"type=method_call,interface={FDO_IFACE},member=Notify",
+                lambda args, bus_ns: handle_fdo(recorder, args, bus_ns)),
+        Monitor("gtk",
+                f"type=method_call,interface={GTK_IFACE},"
+                "member=AddNotification",
+                lambda args, bus_ns: handle_gtk(recorder, args, bus_ns)),
+    ]
+    for monitor in monitors:
+        monitor.start()
+
+    loop = GLib.MainLoop()
+    connections = []
+
+    def ensure_subscribed():
+        if connections:
+            return False  # one-shot retry chain ends
+        try:
+            session, system = setup_signals(recorder)
+        except Exception as exc:
+            print(f"liuqin-notify-log: bus subscribe failed ({exc}); "
+                  f"retrying in {RESUBSCRIBE_DELAY_S}s", file=sys.stderr,
+                  flush=True)
+            return True
+        connections.extend([session, system])
+        take_snapshot(recorder, session, system)
+        return False
+
+    ensure_subscribed()
+    if not connections:
+        GLib.timeout_add_seconds(RESUBSCRIBE_DELAY_S, ensure_subscribed)
+
+    def shutdown(_signum=None, _frame=None):
+        for monitor in monitors:
+            monitor.close()
+        loop.quit()
+
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
+    try:
+        loop.run()
+    finally:
+        for monitor in monitors:
+            monitor.close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

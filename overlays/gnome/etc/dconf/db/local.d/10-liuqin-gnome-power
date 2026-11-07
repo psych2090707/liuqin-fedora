@@ -1,0 +1,13 @@
+# TN0086: GNOME's native power-button action is intentionally 'nothing'.
+#
+# The liuqin power-key daemon (liuqin-power-keyd) handles short and long presses
+# through /usr/local/libexec/liuqin-power-key-policy; keeping gsd-media-keys at
+# 'nothing' prevents it from acting on the same key press. Configure the actual
+# behaviour in the "电源键与合盖" app (/usr/local/bin/liuqin-power-settings).
+#
+# Revert (back to plain GNOME): set 'suspend' here and in 00-liuqin-gnome, run
+# `sudo dconf update`, disable liuqin-power-keyd and liuqin-lid-policy, and set
+# the user's power-button-action back to 'suspend'.
+
+[org/gnome/settings-daemon/plugins/power]
+power-button-action='nothing'

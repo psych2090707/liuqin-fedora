@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Keyboard cover input
+Name[zh_CN]=键盘套输入（Fcitx 中文）
+Comment=Use Fcitx for hardware keyboard input without an on-screen keyboard
+Comment[zh_CN]=使用实体键盘和 Fcitx 中文输入，不弹出屏幕键盘
+Exec=/usr/libexec/liuqin/input-mode cover
+Icon=input-keyboard
+Terminal=false
+Categories=Settings;Accessibility;
+StartupNotify=false

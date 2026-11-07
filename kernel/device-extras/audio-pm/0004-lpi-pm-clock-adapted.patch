@@ -1,0 +1,539 @@
+From: Ajay Kumar Nandam <ajay.nandam@oss.qualcomm.com>
+Subject: [PATCH] pinctrl: qcom: lpass-lpi: Switch to PM clock framework for runtime PM
+
+Convert the LPASS LPI pinctrl driver to use the PM clock framework for
+runtime power management.
+
+This allows the LPASS LPI pinctrl driver to drop clock votes when idle,
+improves power efficiency on platforms using LPASS LPI island mode, and
+aligns the driver with common runtime PM patterns used across Qualcomm
+LPASS subsystems.
+
+Guard GPIO register read/write helpers and slew-rate register programming
+with synchronous runtime PM calls so the device is active during MMIO
+operations whenever autosuspend is enabled.
+
+Make PINCTRL_LPASS_LPI depend on PM_CLK, since this patch introduces
+direct PM clock API use in the shared core.
+
+Suggested-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
+Signed-off-by: Ajay Kumar Nandam <ajay.nandam@oss.qualcomm.com>
+Signed-off-by: Linus Walleij <linusw@kernel.org>
+
+Upstream: https://github.com/torvalds/linux/commit/b719ede389d8a6b3fb24d3a6641fec2e46d8ff36
+Local adaptation: fe81794b baseline; see ../RESULT.md. Pending device validation.
+
+diff --git a/drivers/pinctrl/qcom/Kconfig b/drivers/pinctrl/qcom/Kconfig
+--- a/drivers/pinctrl/qcom/Kconfig
++++ b/drivers/pinctrl/qcom/Kconfig
+@@ -53,6 +53,7 @@
+ 	select PINCONF
+ 	select GENERIC_PINCONF
+ 	select GENERIC_PINCTRL_GROUPS
++	depends on PM_CLK
+ 	depends on GPIOLIB
+ 	help
+ 	  This is the pinctrl, pinmux, pinconf and gpiolib driver for the
+diff --git a/drivers/pinctrl/qcom/pinctrl-lpass-lpi.c b/drivers/pinctrl/qcom/pinctrl-lpass-lpi.c
+--- a/drivers/pinctrl/qcom/pinctrl-lpass-lpi.c
++++ b/drivers/pinctrl/qcom/pinctrl-lpass-lpi.c
+@@ -15,6 +15,8 @@
+ #include <linux/pinctrl/pinconf-generic.h>
+ #include <linux/pinctrl/pinconf.h>
+ #include <linux/pinctrl/pinmux.h>
++#include <linux/pm_clock.h>
++#include <linux/pm_runtime.h>
+ 
+ #include "../pinctrl-utils.h"
+ 
+@@ -22,7 +24,6 @@
+ 
+ #define MAX_NR_GPIO		32
+ #define GPIO_FUNC		0
+-#define MAX_LPI_NUM_CLKS	2
+ 
+ struct lpi_pinctrl {
+ 	struct device *dev;
+@@ -31,7 +32,6 @@
+ 	struct pinctrl_desc desc;
+ 	char __iomem *tlmm_base;
+ 	char __iomem *slew_base;
+-	struct clk_bulk_data clks[MAX_LPI_NUM_CLKS];
+ 	/* Protects from concurrent register updates */
+ 	struct mutex lock;
+ 	DECLARE_BITMAP(ever_gpio, MAX_NR_GPIO);
+@@ -88,8 +88,8 @@
+ 	return 0;
+ }
+ 
+-static int lpi_gpio_set_mux(struct pinctrl_dev *pctldev, unsigned int function,
+-			    unsigned int group)
++static int __lpi_gpio_set_mux(struct pinctrl_dev *pctldev, unsigned int function,
++			      unsigned int group)
+ {
+ 	struct lpi_pinctrl *pctrl = pinctrl_dev_get_drvdata(pctldev);
+ 	const struct lpi_pingroup *g = &pctrl->data->groups[group];
+@@ -135,6 +135,23 @@
+ 	return 0;
+ }
+ 
++static int lpi_gpio_set_mux(struct pinctrl_dev *pctldev, unsigned int function,
++			    unsigned int group)
++{
++	struct lpi_pinctrl *pctrl = pinctrl_dev_get_drvdata(pctldev);
++	int ret;
++
++	ret = pm_runtime_resume_and_get(pctrl->dev);
++	if (ret < 0)
++		return ret;
++
++	ret = __lpi_gpio_set_mux(pctldev, function, group);
++
++	pm_runtime_put_autosuspend(pctrl->dev);
++
++	return ret;
++}
++
+ static const struct pinmux_ops lpi_gpio_pinmux_ops = {
+ 	.get_functions_count	= lpi_gpio_get_functions_count,
+ 	.get_function_name	= lpi_gpio_get_function_name,
+@@ -142,8 +159,8 @@
+ 	.set_mux		= lpi_gpio_set_mux,
+ };
+ 
+-static int lpi_config_get(struct pinctrl_dev *pctldev,
+-			  unsigned int pin, unsigned long *config)
++static int __lpi_config_get(struct pinctrl_dev *pctldev,
++			    unsigned int pin, unsigned long *config)
+ {
+ 	unsigned int param = pinconf_to_config_param(*config);
+ 	struct lpi_pinctrl *state = dev_get_drvdata(pctldev->dev);
+@@ -186,13 +203,30 @@
+ 	return 0;
+ }
+ 
++static int lpi_config_get(struct pinctrl_dev *pctldev,
++			  unsigned int pin, unsigned long *config)
++{
++	struct lpi_pinctrl *state = dev_get_drvdata(pctldev->dev);
++	int ret;
++
++	ret = pm_runtime_resume_and_get(state->dev);
++	if (ret < 0)
++		return ret;
++
++	ret = __lpi_config_get(pctldev, pin, config);
++
++	pm_runtime_put_autosuspend(state->dev);
++
++	return ret;
++}
++
+ static int lpi_config_set_slew_rate(struct lpi_pinctrl *pctrl,
+ 				    const struct lpi_pingroup *g,
+ 				    unsigned int group, unsigned int slew)
+ {
+ 	unsigned long sval;
+ 	void __iomem *reg;
+-	int slew_offset;
++	int slew_offset, ret;
+ 
+ 	if (slew > LPI_SLEW_RATE_MAX) {
+ 		dev_err(pctrl->dev, "invalid slew rate %u for pin: %d\n",
+@@ -209,6 +243,10 @@
+ 	else
+ 		reg = pctrl->slew_base + LPI_SLEW_RATE_CTL_REG;
+ 
++	ret = pm_runtime_resume_and_get(pctrl->dev);
++	if (ret < 0)
++		return ret;
++
+ 	mutex_lock(&pctrl->lock);
+ 
+ 	sval = ioread32(reg);
+@@ -217,12 +255,13 @@
+ 	iowrite32(sval, reg);
+ 
+ 	mutex_unlock(&pctrl->lock);
+-
+-	return 0;
+-}
+-
+-static int lpi_config_set(struct pinctrl_dev *pctldev, unsigned int group,
+-			  unsigned long *configs, unsigned int nconfs)
++	pm_runtime_put_autosuspend(pctrl->dev);
++
++	return 0;
++}
++
++static int __lpi_config_set(struct pinctrl_dev *pctldev, unsigned int group,
++			    unsigned long *configs, unsigned int nconfs)
+ {
+ 	struct lpi_pinctrl *pctrl = dev_get_drvdata(pctldev->dev);
+ 	unsigned int param, arg, pullup = LPI_GPIO_BIAS_DISABLE, strength = 2;
+@@ -292,6 +331,23 @@
+ 	return 0;
+ }
+ 
++static int lpi_config_set(struct pinctrl_dev *pctldev, unsigned int group,
++			  unsigned long *configs, unsigned int nconfs)
++{
++	struct lpi_pinctrl *pctrl = dev_get_drvdata(pctldev->dev);
++	int ret;
++
++	ret = pm_runtime_resume_and_get(pctrl->dev);
++	if (ret < 0)
++		return ret;
++
++	ret = __lpi_config_set(pctldev, group, configs, nconfs);
++
++	pm_runtime_put_autosuspend(pctrl->dev);
++
++	return ret;
++}
++
+ static const struct pinconf_ops lpi_gpio_pinconf_ops = {
+ 	.is_generic			= true,
+ 	.pin_config_group_get		= lpi_config_get,
+@@ -322,9 +378,18 @@
+ static int lpi_gpio_get(struct gpio_chip *chip, unsigned int pin)
+ {
+ 	struct lpi_pinctrl *state = gpiochip_get_data(chip);
+-
+-	return lpi_gpio_read(state, pin, LPI_GPIO_VALUE_REG) &
++	int ret, val;
++
++	ret = pm_runtime_resume_and_get(state->dev);
++	if (ret < 0)
++		return ret;
++
++	val = lpi_gpio_read(state, pin, LPI_GPIO_VALUE_REG) &
+ 		LPI_GPIO_VALUE_IN_MASK;
++
++	pm_runtime_put_autosuspend(state->dev);
++
++	return val;
+ }
+ 
+ static int lpi_gpio_set(struct gpio_chip *chip, unsigned int pin, int value)
+@@ -367,7 +432,10 @@
+ 
+ 	pctldev = pctldev ? : state->ctrl;
+ 	pindesc = pctldev->desc->pins[offset];
++	if (pm_runtime_resume_and_get(state->dev) < 0)
++		return;
+ 	ctl_reg = lpi_gpio_read(state, offset, LPI_GPIO_CFG_REG);
++	pm_runtime_put_autosuspend(state->dev);
+ 	is_out = ctl_reg & LPI_GPIO_OE_MASK;
+ 
+ 	func = FIELD_GET(LPI_GPIO_FUNCTION_MASK, ctl_reg);
+@@ -449,9 +517,6 @@
+ 	pctrl->data = data;
+ 	pctrl->dev = &pdev->dev;
+ 
+-	pctrl->clks[0].id = "core";
+-	pctrl->clks[1].id = "audio";
+-
+ 	pctrl->tlmm_base = devm_platform_ioremap_resource(pdev, 0);
+ 	if (IS_ERR(pctrl->tlmm_base))
+ 		return dev_err_probe(dev, PTR_ERR(pctrl->tlmm_base),
+@@ -464,13 +529,19 @@
+ 					     "Slew resource not provided\n");
+ 	}
+ 
+-	ret = devm_clk_bulk_get_optional(dev, MAX_LPI_NUM_CLKS, pctrl->clks);
++	ret = devm_pm_clk_create(dev);
+ 	if (ret)
+ 		return ret;
+ 
+-	ret = clk_bulk_prepare_enable(MAX_LPI_NUM_CLKS, pctrl->clks);
++	ret = of_pm_clk_add_clks(dev);
++	if (ret < 0 && ret != -ENODEV)
++		return ret;
++
++	pm_runtime_set_autosuspend_delay(dev, 100);
++	pm_runtime_use_autosuspend(dev);
++	ret = devm_pm_runtime_enable(dev);
+ 	if (ret)
+-		return dev_err_probe(dev, ret, "Can't enable clocks\n");
++		return ret;
+ 
+ 	pctrl->desc.pctlops = &lpi_gpio_pinctrl_ops;
+ 	pctrl->desc.pmxops = &lpi_gpio_pinmux_ops;
+@@ -484,7 +555,7 @@
+ 	pctrl->chip.base = -1;
+ 	pctrl->chip.ngpio = data->npins;
+ 	pctrl->chip.label = dev_name(dev);
+-	pctrl->chip.can_sleep = false;
++	pctrl->chip.can_sleep = true;
+ 
+ 	mutex_init(&pctrl->lock);
+ 
+@@ -509,7 +580,6 @@
+ 
+ err_pinctrl:
+ 	mutex_destroy(&pctrl->lock);
+-	clk_bulk_disable_unprepare(MAX_LPI_NUM_CLKS, pctrl->clks);
+ 
+ 	return ret;
+ }
+@@ -521,7 +591,6 @@
+ 	int i;
+ 
+ 	mutex_destroy(&pctrl->lock);
+-	clk_bulk_disable_unprepare(MAX_LPI_NUM_CLKS, pctrl->clks);
+ 
+ 	for (i = 0; i < pctrl->data->npins; i++)
+ 		pinctrl_generic_remove_group(pctrl->ctrl, i);
+diff --git a/drivers/pinctrl/qcom/pinctrl-sc7280-lpass-lpi.c b/drivers/pinctrl/qcom/pinctrl-sc7280-lpass-lpi.c
+--- a/drivers/pinctrl/qcom/pinctrl-sc7280-lpass-lpi.c
++++ b/drivers/pinctrl/qcom/pinctrl-sc7280-lpass-lpi.c
+@@ -7,6 +7,8 @@
+ #include <linux/gpio/driver.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_clock.h>
++#include <linux/pm_runtime.h>
+ 
+ #include "pinctrl-lpass-lpi.h"
+ 
+@@ -136,10 +138,15 @@
+ };
+ MODULE_DEVICE_TABLE(of, lpi_pinctrl_of_match);
+ 
++static const struct dev_pm_ops lpi_pinctrl_pm_ops = {
++	RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
++};
++
+ static struct platform_driver lpi_pinctrl_driver = {
+ 	.driver = {
+ 		   .name = "qcom-sc7280-lpass-lpi-pinctrl",
+ 		   .of_match_table = lpi_pinctrl_of_match,
++		   .pm = pm_ptr(&lpi_pinctrl_pm_ops),
+ 	},
+ 	.probe = lpi_pinctrl_probe,
+ 	.remove = lpi_pinctrl_remove,
+diff --git a/drivers/pinctrl/qcom/pinctrl-sc8280xp-lpass-lpi.c b/drivers/pinctrl/qcom/pinctrl-sc8280xp-lpass-lpi.c
+--- a/drivers/pinctrl/qcom/pinctrl-sc8280xp-lpass-lpi.c
++++ b/drivers/pinctrl/qcom/pinctrl-sc8280xp-lpass-lpi.c
+@@ -6,6 +6,8 @@
+ #include <linux/gpio/driver.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_clock.h>
++#include <linux/pm_runtime.h>
+ 
+ #include "pinctrl-lpass-lpi.h"
+ 
+@@ -173,10 +175,15 @@
+ };
+ MODULE_DEVICE_TABLE(of, lpi_pinctrl_of_match);
+ 
++static const struct dev_pm_ops lpi_pinctrl_pm_ops = {
++	RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
++};
++
+ static struct platform_driver lpi_pinctrl_driver = {
+ 	.driver = {
+ 		   .name = "qcom-sc8280xp-lpass-lpi-pinctrl",
+ 		   .of_match_table = lpi_pinctrl_of_match,
++		   .pm = pm_ptr(&lpi_pinctrl_pm_ops),
+ 	},
+ 	.probe = lpi_pinctrl_probe,
+ 	.remove = lpi_pinctrl_remove,
+diff --git a/drivers/pinctrl/qcom/pinctrl-sm4250-lpass-lpi.c b/drivers/pinctrl/qcom/pinctrl-sm4250-lpass-lpi.c
+--- a/drivers/pinctrl/qcom/pinctrl-sm4250-lpass-lpi.c
++++ b/drivers/pinctrl/qcom/pinctrl-sm4250-lpass-lpi.c
+@@ -7,6 +7,8 @@
+ #include <linux/gpio/driver.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_clock.h>
++#include <linux/pm_runtime.h>
+ 
+ #include "pinctrl-lpass-lpi.h"
+ 
+@@ -221,10 +223,15 @@
+ };
+ MODULE_DEVICE_TABLE(of, lpi_pinctrl_of_match);
+ 
++static const struct dev_pm_ops lpi_pinctrl_pm_ops = {
++	RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
++};
++
+ static struct platform_driver lpi_pinctrl_driver = {
+ 	.driver = {
+ 		.name = "qcom-sm4250-lpass-lpi-pinctrl",
+ 		.of_match_table = lpi_pinctrl_of_match,
++		.pm = pm_ptr(&lpi_pinctrl_pm_ops),
+ 	},
+ 	.probe = lpi_pinctrl_probe,
+ 	.remove = lpi_pinctrl_remove,
+diff --git a/drivers/pinctrl/qcom/pinctrl-sm6115-lpass-lpi.c b/drivers/pinctrl/qcom/pinctrl-sm6115-lpass-lpi.c
+--- a/drivers/pinctrl/qcom/pinctrl-sm6115-lpass-lpi.c
++++ b/drivers/pinctrl/qcom/pinctrl-sm6115-lpass-lpi.c
+@@ -7,6 +7,8 @@
+ #include <linux/gpio/driver.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_clock.h>
++#include <linux/pm_runtime.h>
+ 
+ #include "pinctrl-lpass-lpi.h"
+ 
+@@ -141,10 +143,15 @@
+ };
+ MODULE_DEVICE_TABLE(of, lpi_pinctrl_of_match);
+ 
++static const struct dev_pm_ops lpi_pinctrl_pm_ops = {
++	RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
++};
++
+ static struct platform_driver lpi_pinctrl_driver = {
+ 	.driver = {
+ 		.name = "qcom-sm6115-lpass-lpi-pinctrl",
+ 		.of_match_table = lpi_pinctrl_of_match,
++		.pm = pm_ptr(&lpi_pinctrl_pm_ops),
+ 	},
+ 	.probe = lpi_pinctrl_probe,
+ 	.remove = lpi_pinctrl_remove,
+diff --git a/drivers/pinctrl/qcom/pinctrl-sm8250-lpass-lpi.c b/drivers/pinctrl/qcom/pinctrl-sm8250-lpass-lpi.c
+--- a/drivers/pinctrl/qcom/pinctrl-sm8250-lpass-lpi.c
++++ b/drivers/pinctrl/qcom/pinctrl-sm8250-lpass-lpi.c
+@@ -7,6 +7,8 @@
+ #include <linux/gpio/driver.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_clock.h>
++#include <linux/pm_runtime.h>
+ 
+ #include "pinctrl-lpass-lpi.h"
+ 
+@@ -134,10 +136,15 @@
+ };
+ MODULE_DEVICE_TABLE(of, lpi_pinctrl_of_match);
+ 
++static const struct dev_pm_ops lpi_pinctrl_pm_ops = {
++	RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
++};
++
+ static struct platform_driver lpi_pinctrl_driver = {
+ 	.driver = {
+ 		   .name = "qcom-sm8250-lpass-lpi-pinctrl",
+ 		   .of_match_table = lpi_pinctrl_of_match,
++		   .pm = pm_ptr(&lpi_pinctrl_pm_ops),
+ 	},
+ 	.probe = lpi_pinctrl_probe,
+ 	.remove = lpi_pinctrl_remove,
+diff --git a/drivers/pinctrl/qcom/pinctrl-sm8350-lpass-lpi.c b/drivers/pinctrl/qcom/pinctrl-sm8350-lpass-lpi.c
+--- a/drivers/pinctrl/qcom/pinctrl-sm8350-lpass-lpi.c
++++ b/drivers/pinctrl/qcom/pinctrl-sm8350-lpass-lpi.c
+@@ -7,6 +7,8 @@
+ #include <linux/gpio/driver.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_clock.h>
++#include <linux/pm_runtime.h>
+ 
+ #include "pinctrl-lpass-lpi.h"
+ 
+@@ -136,10 +138,15 @@
+ };
+ MODULE_DEVICE_TABLE(of, lpi_pinctrl_of_match);
+ 
++static const struct dev_pm_ops lpi_pinctrl_pm_ops = {
++	RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
++};
++
+ static struct platform_driver lpi_pinctrl_driver = {
+ 	.driver = {
+ 		   .name = "qcom-sm8350-lpass-lpi-pinctrl",
+ 		   .of_match_table = lpi_pinctrl_of_match,
++		   .pm = pm_ptr(&lpi_pinctrl_pm_ops),
+ 	},
+ 	.probe = lpi_pinctrl_probe,
+ 	.remove = lpi_pinctrl_remove,
+diff --git a/drivers/pinctrl/qcom/pinctrl-sm8450-lpass-lpi.c b/drivers/pinctrl/qcom/pinctrl-sm8450-lpass-lpi.c
+--- a/drivers/pinctrl/qcom/pinctrl-sm8450-lpass-lpi.c
++++ b/drivers/pinctrl/qcom/pinctrl-sm8450-lpass-lpi.c
+@@ -6,6 +6,8 @@
+ #include <linux/gpio/driver.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_clock.h>
++#include <linux/pm_runtime.h>
+ 
+ #include "pinctrl-lpass-lpi.h"
+ 
+@@ -202,10 +204,15 @@
+ };
+ MODULE_DEVICE_TABLE(of, lpi_pinctrl_of_match);
+ 
++static const struct dev_pm_ops lpi_pinctrl_pm_ops = {
++	RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
++};
++
+ static struct platform_driver lpi_pinctrl_driver = {
+ 	.driver = {
+ 		   .name = "qcom-sm8450-lpass-lpi-pinctrl",
+ 		   .of_match_table = lpi_pinctrl_of_match,
++		   .pm = pm_ptr(&lpi_pinctrl_pm_ops),
+ 	},
+ 	.probe = lpi_pinctrl_probe,
+ 	.remove = lpi_pinctrl_remove,
+diff --git a/drivers/pinctrl/qcom/pinctrl-sm8550-lpass-lpi.c b/drivers/pinctrl/qcom/pinctrl-sm8550-lpass-lpi.c
+--- a/drivers/pinctrl/qcom/pinctrl-sm8550-lpass-lpi.c
++++ b/drivers/pinctrl/qcom/pinctrl-sm8550-lpass-lpi.c
+@@ -6,6 +6,8 @@
+ #include <linux/gpio/driver.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_clock.h>
++#include <linux/pm_runtime.h>
+ 
+ #include "pinctrl-lpass-lpi.h"
+ 
+@@ -210,10 +212,15 @@
+ };
+ MODULE_DEVICE_TABLE(of, lpi_pinctrl_of_match);
+ 
++static const struct dev_pm_ops lpi_pinctrl_pm_ops = {
++	RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
++};
++
+ static struct platform_driver lpi_pinctrl_driver = {
+ 	.driver = {
+ 		   .name = "qcom-sm8550-lpass-lpi-pinctrl",
+ 		   .of_match_table = lpi_pinctrl_of_match,
++		   .pm = pm_ptr(&lpi_pinctrl_pm_ops),
+ 	},
+ 	.probe = lpi_pinctrl_probe,
+ 	.remove = lpi_pinctrl_remove,
+diff --git a/drivers/pinctrl/qcom/pinctrl-sm8650-lpass-lpi.c b/drivers/pinctrl/qcom/pinctrl-sm8650-lpass-lpi.c
+--- a/drivers/pinctrl/qcom/pinctrl-sm8650-lpass-lpi.c
++++ b/drivers/pinctrl/qcom/pinctrl-sm8650-lpass-lpi.c
+@@ -6,6 +6,8 @@
+ #include <linux/gpio/driver.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_clock.h>
++#include <linux/pm_runtime.h>
+ 
+ #include "pinctrl-lpass-lpi.h"
+ 
+@@ -217,10 +219,15 @@
+ };
+ MODULE_DEVICE_TABLE(of, lpi_pinctrl_of_match);
+ 
++static const struct dev_pm_ops lpi_pinctrl_pm_ops = {
++	RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
++};
++
+ static struct platform_driver lpi_pinctrl_driver = {
+ 	.driver = {
+ 		   .name = "qcom-sm8650-lpass-lpi-pinctrl",
+ 		   .of_match_table = lpi_pinctrl_of_match,
++		   .pm = pm_ptr(&lpi_pinctrl_pm_ops),
+ 	},
+ 	.probe = lpi_pinctrl_probe,
+ 	.remove = lpi_pinctrl_remove,

@@ -1,0 +1,37 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Explicit native backend selection; do not infer cover state from static nodes.
+set -euo pipefail
+case "${1:-}" in
+    cover) desktop=/usr/share/applications/org.fcitx.Fcitx5.desktop ;;
+    touch) desktop=/usr/share/applications/com.github.maliit.keyboard.desktop ;;
+    *) echo 'usage: input-mode cover|touch' >&2; exit 2 ;;
+esac
+test -f "$desktop"
+test "${XDG_SESSION_TYPE:-wayland}" = wayland
+config_dir=${XDG_CONFIG_HOME:-$HOME/.config}
+runtime_dir=${XDG_RUNTIME_DIR:?Wayland session runtime directory required}
+mkdir -p "$config_dir"
+backup=$(mktemp "$runtime_dir/liuqin-input-mode.XXXXXXXX")
+existed=0
+if test -f "$config_dir/kwinrc"; then
+    cp -p "$config_dir/kwinrc" "$backup"
+    existed=1
+fi
+restore() {
+    if test "$existed" = 1; then cp -p "$backup" "$config_dir/kwinrc";
+    else rm -f -- "$config_dir/kwinrc"; fi
+    busctl --user call org.kde.KWin /KWin org.kde.KWin reconfigure >/dev/null || true
+}
+trap 'rm -f -- "$backup"' EXIT
+trap 'restore' ERR
+# Native Wayland clients must go through KWin to request its keyboard panel.
+# Existing processes keep their inherited environment until reopened.
+dbus-update-activation-environment --systemd QT_IM_MODULE= GTK_IM_MODULE= \
+    'QT_IM_MODULES=wayland;fcitx;ibus' XMODIFIERS=@im=fcitx
+kwriteconfig6 --file kwinrc --group Wayland --key InputMethod "$desktop" --notify
+kwriteconfig6 --file kwinrc --group Wayland --key VirtualKeyboardMode 1 --notify
+busctl --user call org.kde.KWin /KWin org.kde.KWin reconfigure >/dev/null
+busctl --user set-property org.kde.KWin /VirtualKeyboard org.kde.kwin.VirtualKeyboard mode i 1
+trap - ERR
+echo "input mode: $1"

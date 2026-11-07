@@ -1,0 +1,37 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# /usr/libexec/liuqin/bootimg-builder — on-device boot.img builder entry point.
+#
+# EXIT/INTERFACE PLACEHOLDER (task-11): the real boot image assembly lives in the
+# project's scripts/build-bootimg.sh (owned by boot-builder). This wrapper keeps
+# the kernel-install hook decoupled from that script's location and version:
+#
+#   bootimg-builder  --kernel-out DIR --ramdisk FILE --out DIR \
+#                    --dtb-source MODE --stock-rom-dir DIR \
+#                    --mkbootimg-dir DIR --cmdline-file FILE \
+#                    --header-cmdline '' --strict-kernel
+#
+# It must:
+#   * exit 0 on success and write <out>/boot-liuqin-dev.img + build-info.json
+#     ("device_ready": true; boot-initramfs.md §7.2);
+#   * exit 1 on build/verification failure, 2 on usage/environment error;
+#   * only write below --out; never write a device/boot partition.
+#
+# Until a target-side builder package exists (Phase 3+), point this wrapper at a
+# real builder via LIUQIN_BUILD_BOOTIMG_SCRIPT (dev hosts use the project script):
+#
+#   LIUQIN_BUILD_BOOTIMG_SCRIPT="/path/to/repo/scripts/build-bootimg.sh"
+#
+# The hook fails closed when the target is missing, so a kernel update can never
+# silently produce a bad boot.img.
+set -eu
+SCRIPT=${LIUQIN_BUILD_BOOTIMG_SCRIPT:-}
+if [ -z "$SCRIPT" ] || [ ! -f "$SCRIPT" ]; then
+	printf 'bootimg-builder: no boot.img builder configured.\n' >&2
+	printf 'bootimg-builder: set LIUQIN_BUILD_BOOTIMG_SCRIPT in /etc/liuqin/bootimg.conf\n' >&2
+	printf 'bootimg-builder: expected interface: scripts/build-bootimg.sh --kernel-out ... --strict-kernel\n' >&2
+	printf 'bootimg-builder: see docs/maintenance/kernel-rpm.md and docs/maintenance/boot-initramfs.md §7.2\n' >&2
+	exit 2
+fi
+exec /bin/sh "$SCRIPT" "$@"

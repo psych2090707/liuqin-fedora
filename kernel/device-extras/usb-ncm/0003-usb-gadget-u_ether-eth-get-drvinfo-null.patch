@@ -1,0 +1,29 @@
+From: Kuen-Han Tsai <khtsai@google.com>
+Subject: [PATCH] usb: gadget: u_ether: Fix NULL pointer deref in eth_get_drvinfo
+Date: Mon, 16 Mar 2026 15:49:09 +0800
+Link: https://github.com/torvalds/linux/commit/e002e92e88e12457373ed096b18716d97e7bbb20
+
+After device_move() detaches the net_device, dev->gadget is NULL.  Skip
+the fw_version/bus_info strings in that window instead of dereferencing
+a NULL gadget.
+
+Fixes: ec35c1969650 ("usb: gadget: f_ncm: Fix net_device lifecycle with device_move")
+Cc: stable@kernel.org
+---
+diff --git a/drivers/usb/gadget/function/u_ether.c b/drivers/usb/gadget/function/u_ether.c
+index da07b9f..2b824db 100644
+--- a/drivers/usb/gadget/function/u_ether.c
++++ b/drivers/usb/gadget/function/u_ether.c
+@@ -112,8 +112,10 @@ static void eth_get_drvinfo(struct net_device *net, struct ethtool_drvinfo *p)
+ 
+ 	strscpy(p->driver, "g_ether", sizeof(p->driver));
+ 	strscpy(p->version, UETH__VERSION, sizeof(p->version));
+-	strscpy(p->fw_version, dev->gadget->name, sizeof(p->fw_version));
+-	strscpy(p->bus_info, dev_name(&dev->gadget->dev), sizeof(p->bus_info));
++	if (dev->gadget) {
++		strscpy(p->fw_version, dev->gadget->name, sizeof(p->fw_version));
++		strscpy(p->bus_info, dev_name(&dev->gadget->dev), sizeof(p->bus_info));
++	}
+ }
+ 
+ /* REVISIT can also support:

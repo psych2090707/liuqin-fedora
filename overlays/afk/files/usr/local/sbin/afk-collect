@@ -1,0 +1,94 @@
+#!/bin/bash
+# AFK channel (TN0048) — bundle device diagnostics to stdout as a tar.gz.
+#
+# Host side:  tools/afk/afk.sh logs   (ssh + extract into out/afk/logs/<ts>/)
+#
+# Works both unprivileged (journal via the systemd-journal group, systemctl
+# read-only queries) and as root (sudo): root-only pieces (full dmesg, pstore,
+# /var/log/afk snapshots) are added when available.  Diagnostics go to stderr;
+# stdout carries ONLY the tarball.
+set -u
+
+# Any chatty helper output must not leak into the tarball stream.
+exec 3>&1 1>&2
+
+die() { printf 'afk-collect: %s\n' "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+tmp="$(mktemp -d /tmp/afk-collect.XXXXXX)" || die "mktemp failed"
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/meta" "$tmp/logs"
+
+is_root=0
+[ "$(id -u)" = 0 ] && is_root=1
+
+# ------------------------------------------------------------------- identity ---
+{
+    date -u +%Y-%m-%dT%H:%M:%SZ
+    uname -a
+    echo "boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"
+    echo "uptime_sec=$(cut -d' ' -f1 /proc/uptime 2>/dev/null)"
+    echo "cmdline=$(cat /proc/cmdline 2>/dev/null)"
+    echo "collector_uid=$(id -u) ($(id -un))"
+    echo "root=$is_root"
+} >"$tmp/meta/identity.txt" 2>&1
+cp /etc/os-release "$tmp/meta/os-release.txt" 2>/dev/null || true
+
+# ---------------------------------------------------------------- journald ------
+if have journalctl; then
+    journalctl --disk-usage >"$tmp/meta/journal-disk-usage.txt" 2>&1 || true
+    journalctl --list-boots --no-pager >"$tmp/meta/journal-boots.txt" 2>&1 || true
+    journalctl -b 0 --no-pager -o short-precise >"$tmp/logs/journal-current.log" 2>&1 || true
+    journalctl -b 0 -p warning --no-pager -o short-precise >"$tmp/logs/journal-current-warning.log" 2>&1 || true
+    journalctl -b -1 --no-pager -o short-precise >"$tmp/logs/journal-previous.log" 2>&1 || true
+    journalctl -b -1 -p warning --no-pager -o short-precise >"$tmp/logs/journal-previous-warning.log" 2>&1 || true
+fi
+
+# --------------------------------------------------------------- unit/dmesg -----
+{
+    systemctl --failed --no-pager
+    echo
+    systemctl list-units --failed --no-pager
+} >"$tmp/logs/failed-units.txt" 2>&1 || true
+systemctl list-units --no-pager >"$tmp/logs/units.txt" 2>&1 || true
+if have coredumpctl; then
+    coredumpctl --no-pager list >"$tmp/logs/coredumps.txt" 2>&1 || true
+fi
+if [ "$is_root" = 1 ]; then
+    dmesg --time-format iso >"$tmp/logs/dmesg.txt" 2>&1 || dmesg >"$tmp/logs/dmesg.txt" 2>&1 || true
+    {
+        echo "listing:"
+        ls -la /sys/fs/pstore 2>&1
+        echo
+        echo "contents:"
+        for f in /sys/fs/pstore/*; do
+            [ -f "$f" ] || continue
+            printf '\n===== %s =====\n' "$f"
+            cat "$f" 2>&1
+        done
+    } >"$tmp/logs/pstore.txt" 2>&1 || true
+    if [ -d /var/lib/systemd/pstore ]; then
+        mkdir -p "$tmp/logs/pstore-archive"
+        cp -a /var/lib/systemd/pstore/. "$tmp/logs/pstore-archive/" 2>/dev/null || true
+    fi
+else
+    # dmesg is restricted; keep whatever tail the kernel allows.
+    dmesg 2>/dev/null | tail -n 500 >"$tmp/logs/dmesg-tail.txt" || true
+fi
+
+# ---------------------------------------------------------- afk log snapshots ---
+if [ -d /var/log/afk ]; then
+    mkdir -p "$tmp/logs/afk"
+    cp -a /var/log/afk/. "$tmp/logs/afk/" 2>/dev/null || true
+fi
+
+# -------------------------------------------------------------------- health ----
+if [ -x /usr/local/sbin/afk-health ]; then
+    /usr/local/sbin/afk-health >"$tmp/logs/health.txt" 2>&1 || true
+fi
+
+# --------------------------------------------------------------------- tarball --
+# -C + ".", so the archive has no leading directory component.
+tar -C "$tmp" -czf - . 1>&3
+rc=$?
+exit $rc

@@ -1,0 +1,4 @@
+# Re-assert the product USB NCM link when the controller role / Type-C changes.
+# --no-block keeps udev outside the work; no driver unbind or host changes.
+ACTION=="add|change", SUBSYSTEM=="usb_role", KERNEL=="a600000.usb-role-switch", RUN+="/usr/bin/systemctl --no-block start liuqin-usb0-link.service"
+ACTION=="change", SUBSYSTEM=="typec", KERNEL=="port0", RUN+="/usr/bin/systemctl --no-block start liuqin-usb0-link.service"

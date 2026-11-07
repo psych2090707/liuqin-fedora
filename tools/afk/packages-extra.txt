@@ -1,0 +1,20 @@
+# AFK channel (TN0048) — optional/plan-B packages, installed only with
+#   tools/afk/afk.sh repo build --with-extra
+#
+# krfb + krfb-libs: VNC server, the plan B if KRDP (RDP) cannot get an
+# unattended RemoteDesktop portal session.  krfb talks to
+# org_kde_kwin_remote_access_manager directly (no portal), but stores its VNC
+# password in KWallet.  Host side would need a VNC client (nothing is installed
+# on this host) or `afk.sh tunnel 5900:127.0.0.1:5900` + any viewer.
+krfb
+krfb-libs
+libvncserver
+
+# ydotool: /dev/uinput-based input injection, the last-resort way to "operate"
+# the session over SSH if no remote desktop works at all
+# (ydotool type/click/mousemove).  Needs ydotoold + uinput permissions.
+# ydotool
+
+# tesseract: OCR for screenshots (spectacle can extract text) - useful to read
+# dialogs from a PNG when no interactive channel exists.
+# tesseract

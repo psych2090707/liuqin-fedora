@@ -1,0 +1,16 @@
+--- a/src/adw-main.c
++++ b/src/adw-main.c
+@@ -44,6 +44,13 @@
+ static gboolean adw_initialized = FALSE;
+ static gboolean adw_adaptive_preview = FALSE;
+ 
++__attribute__((constructor))
++static void
++liuqin_fd_flush_init (void)
++{
++  g_setenv ("FD_MESA_DEBUG", "flush", FALSE);
++}
++
+ static void
+ init_debug (void)
+ {

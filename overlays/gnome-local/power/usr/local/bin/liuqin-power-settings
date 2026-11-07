@@ -1,0 +1,227 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: MIT
+# TN0086: "电源键与合盖" settings app for the liuqin tablet.
+#
+# Writes /etc/liuqin/power-policy.conf (root:laplus 0664) and keeps GNOME's
+# native power-button-action at 'nothing' so gsd-media-keys does not
+# double-handle the power key. The actual key/lid handling lives in the system
+# services; this app is the update-safe UI.
+
+import os
+import subprocess
+import sys
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gio, Gtk  # noqa: E402
+
+CONFIG = "/etc/liuqin/power-policy.conf"
+NATIVE_SCHEMA = "org.gnome.settings-daemon.plugins.power"
+NATIVE_KEY = "power-button-action"
+
+SHORT_VALUES = [("blank", "熄屏"), ("suspend", "挂起"), ("nothing", "无操作")]
+LONG_VALUES = [
+    ("nothing", "无操作"),
+    ("poweroff", "关机"),
+    ("reboot", "重启"),
+    ("suspend", "挂起"),
+]
+LID_VALUES = [("blank", "熄屏 + 锁屏"), ("suspend", "挂起"), ("nothing", "无操作")]
+
+CONFIG_HEADER = """# TN0086: liuqin power-key / lid policy.
+# Written by /usr/local/bin/liuqin-power-settings; read by the power-key helper
+# and the lid watcher. Keep one key per line.
+#
+# FIRST-BOOT PRESET TRAP: the units reading this file are enabled by
+# /etc/systemd/system-preset/90-liuqin-power.preset.  A bare `systemctl enable`
+# is undone by Fedora's first-boot preset-all (99-default-disable.preset =
+# "disable *").  See overlays/gnome-local/README.md.
+#
+# 2026-11-06: immediate suspend is verified. The power service locks the
+# session and waits for the screensaver to become active before logind.Suspend;
+# without that lock step, opening the lid during resume could leave the GDM
+# greeter in control and the old shell without input. Do not remove that lock
+# step.
+#
+# 2026-11-07 phase 3: when the physical screen is dark, the first short press
+# only wakes/recovers the display. The short action below runs only when the
+# screen is already lit. A closed lid keeps the covered panel dark.
+"""
+
+
+def read_config():
+    values = {
+        "SHORT_ACTION": "suspend",
+        "LONG_ACTION": "nothing",
+        "LID_ACTION": "suspend",
+        "LID_RESUSPEND": "1",
+    }
+    try:
+        with open(CONFIG, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key.strip() in values:
+                    values[key.strip()] = value.strip()
+    except OSError:
+        pass
+    return values
+
+
+def write_config(values):
+    body = CONFIG_HEADER + "".join(
+        f"{key}={values[key]}\n"
+        for key in ("SHORT_ACTION", "LONG_ACTION", "LID_ACTION", "LID_RESUSPEND")
+    )
+    with open(CONFIG, "w", encoding="utf-8") as handle:
+        handle.write(body)
+
+
+class PowerSettingsApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id="org.liuqin.PowerSettings", flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        self.values = read_config()
+        self.loading = True
+        self.native_settings = Gio.Settings.new(NATIVE_SCHEMA)
+        self.native_row = None
+        self.status_label = None
+
+    def do_activate(self):
+        window = Adw.ApplicationWindow(application=self, title="电源键与合盖")
+        window.set_default_size(560, 700)
+
+        toolbar = Adw.ToolbarView()
+        toolbar.add_top_bar(Adw.HeaderBar())
+        page = Adw.PreferencesPage()
+        toolbar.set_content(page)
+        window.set_content(toolbar)
+
+        power_group = Adw.PreferencesGroup(
+            title="电源键",
+            description="屏幕亮时短按执行此动作；屏幕灭时第一下只负责点亮/恢复显示，不执行该动作。",
+        )
+        self.short_row = self.make_combo("短按电源键", SHORT_VALUES, "SHORT_ACTION")
+        power_group.add(self.short_row)
+        self.long_row = self.make_combo("长按电源键", LONG_VALUES, "LONG_ACTION")
+        power_group.add(self.long_row)
+        page.add(power_group)
+
+        lid_group = Adw.PreferencesGroup(
+            title="合盖",
+            description="合盖默认立即挂起（睡眠），打开盖子由霍尔传感器唤醒。",
+        )
+        self.lid_row = self.make_combo("合盖时", LID_VALUES, "LID_ACTION")
+        lid_group.add(self.lid_row)
+        self.resuspend_row = Adw.SwitchRow(
+            title="闭盖早醒后自动重睡",
+            subtitle="电池供电、无输入、无应用阻止睡眠时，醒来 20 秒后再次挂起",
+        )
+        self.resuspend_row.set_active(self.values.get("LID_RESUSPEND", "1") == "1")
+        self.resuspend_row.connect("notify::active", self.on_resuspend_changed)
+        lid_group.add(self.resuspend_row)
+        page.add(lid_group)
+
+        native_group = Adw.PreferencesGroup(title="与 GNOME 设置的关系")
+        self.native_row = Adw.ActionRow(title="GNOME 原生电源键行为")
+        self.native_fix = Gtk.Button(label="设为无操作", valign=Gtk.Align.CENTER)
+        self.native_fix.connect("clicked", self.on_fix_native)
+        self.native_row.add_suffix(self.native_fix)
+        native_group.add(self.native_row)
+        page.add(native_group)
+
+        quick_group = Adw.PreferencesGroup(title="快捷操作")
+        blank_row = Adw.ActionRow(title="立即熄屏", subtitle="锁屏并关闭显示，不必等空闲超时")
+        blank_button = Gtk.Button(label="熄屏", valign=Gtk.Align.CENTER)
+        blank_button.connect("clicked", self.on_screen_off)
+        blank_row.add_suffix(blank_button)
+        quick_group.add(blank_row)
+
+        self.status_label = Gtk.Label(label="屏幕灭时第一下电源键只唤醒；开盖后才会点亮被遮住的屏幕。")
+        self.status_label.set_xalign(0.0)
+        self.status_label.add_css_class("dim-label")
+        quick_group.add(self.status_label)
+        page.add(quick_group)
+
+        self.loading = False
+        self.refresh_native_row()
+        window.present()
+
+    def make_combo(self, title, values, key):
+        row = Adw.ComboRow(title=title)
+        row.set_model(Gtk.StringList.new([label for _value, label in values]))
+        current = self.values.get(key, values[0][0])
+        selected = 0
+        for index, (value, _label) in enumerate(values):
+            if value == current:
+                selected = index
+                break
+        row.set_selected(selected)
+
+        def on_selected(_row, _pspec):
+            if self.loading:
+                return
+            index = row.get_selected()
+            if index < 0 or index >= len(values):
+                return
+            self.values[key] = values[index][0]
+            self.save()
+
+        row.connect("notify::selected", on_selected)
+        return row
+
+    def save(self):
+        try:
+            write_config(self.values)
+        except OSError as error:
+            self.status_label.set_text(f"保存失败：{error}")
+            return
+        self.keep_native_nothing()
+        self.refresh_native_row()
+        self.status_label.set_text("已保存，立即生效。")
+
+    def keep_native_nothing(self):
+        if self.native_settings.get_string(NATIVE_KEY) != "nothing":
+            self.native_settings.set_string(NATIVE_KEY, "nothing")
+
+    def refresh_native_row(self):
+        if self.native_row is None:
+            return
+        current = self.native_settings.get_string(NATIVE_KEY)
+        labels = {
+            "nothing": "无操作（由本应用接管，推荐）",
+            "suspend": "挂起（GNOME 会先处理短按，本应用的短按设置暂不生效）",
+            "hibernate": "休眠（GNOME 会先处理短按，本应用的短按设置暂不生效）",
+            "interactive": "关机菜单（GNOME 会先处理短按，本应用的短按设置暂不生效）",
+        }
+        self.native_row.set_subtitle(labels.get(current, current))
+        self.native_fix.set_visible(current != "nothing")
+
+    def on_fix_native(self, _button):
+        self.keep_native_nothing()
+        self.refresh_native_row()
+        self.status_label.set_text("已把 GNOME 原生电源键行为设为无操作。")
+
+    def on_resuspend_changed(self, row, _pspec):
+        if self.loading:
+            return
+        self.values["LID_RESUSPEND"] = "1" if row.get_active() else "0"
+        self.save()
+
+    def on_screen_off(self, _button):
+        try:
+            subprocess.Popen(["/usr/local/bin/liuqin-screen-off"])
+        except OSError as error:
+            self.status_label.set_text(f"熄屏失败：{error}")
+
+
+if __name__ == "__main__":
+    try:
+        app = PowerSettingsApp()
+        sys.exit(app.run(sys.argv))
+    except Exception as error:  # keep a visible failure for the app grid case
+        print(f"liuqin-power-settings: {error}", file=sys.stderr)
+        raise

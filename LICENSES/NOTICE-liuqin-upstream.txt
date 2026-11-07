@@ -1,0 +1,87 @@
+Third-party notices
+===================
+
+The MIT license in LICENSE applies to original project work only. It does not
+replace licenses on third-party code, patches to that code, or binary inputs.
+File-level notices take precedence.
+
+Kernel
+------
+
+The kernel is maintained separately in linux-sm8450-liuqin, based on
+https://github.com/sm8450-mainline/linux.git. Its COPYING, LICENSES directory,
+file-level SPDX identifiers and original authorship are retained. The exact
+revision is recorded in kernel/source.json.
+
+Sensor stack
+------------
+
+Pinned repositories and revisions: device/sensors/sources.manifest.
+
+* hexagonrpc: https://github.com/linux-msm/hexagonrpc
+  GPL-3.0-or-later; see its COPYING and source file notices.
+* libssc: https://codeberg.org/DylanVanAssche/libssc
+  GPL-3.0-or-later; see its LICENSE and source file notices.
+* iio-sensor-proxy: https://gitlab.freedesktop.org/hadess/iio-sensor-proxy
+  GPL-3.0-or-later; see its COPYING and source file notices.
+
+The patches under device/sensors/patches retain the licenses of the components
+they modify.
+
+Charger authentication
+----------------------
+
+* liuqin-mipps-auth (device/gnome-overlay/usr/local/libexec/liuqin-mipps-auth)
+  is derived from xiaomi-mipps-auth by ianchb,
+  https://github.com/ianchb/xiaomi-mipps-auth, GPL-2.0-only; the file-level
+  SPDX identifier and authorship notice are retained. The liuqin adaptation
+  and the standard PPS switch (--allow-unverified-adapter) are by xiaoabiao,
+  https://github.com/yzddmr6/xiaomipad-6pro-mainline/pull/7. The file is not
+  covered by the project's MIT license.
+
+Desktop and build components
+----------------------------
+
+* GNOME Control Center: Ubuntu source package 1:50.0-0ubuntu6.
+  https://archive.ubuntu.com/ubuntu/pool/main/g/gnome-control-center/
+  See the source package's COPYING, debian/copyright and file-level notices.
+  device/gnome-control-center/patches modifies that program and is not covered
+  by the project's MIT license.
+* AudioReach topology: the board topology source and build script carry
+  BSD-3-Clause identifiers. The generated Xiaomi-Pad-6-Pro-tplg.bin is built
+  from topology source; it is not classified as proprietary DSP firmware.
+* AOSP mkbootimg: Apache-2.0.
+  https://android.googlesource.com/platform/system/tools/mkbootimg/
+* BusyBox: GPL-2.0, with file-level exceptions as documented upstream.
+  https://busybox.net/
+* Ubuntu packages: each package retains its own license and copyright notices,
+  available in its source package and /usr/share/doc/*/copyright.
+
+Binary releases must identify the corresponding source versions and provide
+the source materials required by the licenses of the distributed components.
+
+Firmware and factory data
+-------------------------
+
+Qualcomm, Xiaomi and Cirrus firmware remain subject to their respective
+licenses. Inclusion in a download bundle does not place firmware under MIT.
+Redistribution permissions and notices must be established for each distributed
+firmware set before publication.
+
+Device-specific calibration, WLAN and Bluetooth addresses and factory sensor
+registry data are read from the user's tablet. They are not public source or
+shared firmware assets and must not be distributed.
+
+Fingerprint integration
+-----------------------
+
+Optional device/fingerprint/oem source retains file-level BSD-2-Clause,
+LGPL-2.1-or-later, GPL-2.0-or-later and Apache-2.0 notices. QSEE supplicant/QCBOR
+retain upstream BSD licenses. QSEE supplicant is by Dawid Wróbel
+(https://github.com/wrobelda/qsee-supplicant); QCBOR is by Laurence Lundblade
+(https://github.com/laurencelundblade/QCBOR). Exact dependencies are in
+device/fingerprint/oem/SOURCE_LOCK.json.
+The fprintd original source remains external and hash-pinned; distribution of
+binaries must include corresponding source/adaptation as required by its license.
+OEM TA firmware, credentials, HATs, templates, raw images and private calibration
+are not included in this source repository.

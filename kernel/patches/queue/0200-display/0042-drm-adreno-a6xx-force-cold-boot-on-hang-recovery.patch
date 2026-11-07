@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: yp <yp@e5debian>
+Date: Sun, 27 Sep 2026 19:08:02 +0800
+Subject: [PATCH] drm/adreno/a6xx: force cold boot on hang recovery
+
+On the recovery path the CX power domain has been cycled, which can
+clear the CM3's TCM even though the TCM-retention flag still reads
+"retained". Taking the warm-boot path in that case skips the firmware
+reload, so the CM3 boots from dead memory and never acks the host OOB
+handshake, leaving the GPU stuck in a hang -> recover -> hang loop.
+
+Force a cold boot (full firmware reload and re-init) whenever we are
+recovering from a hang.
+
+Co-Authored-By: claude-sonnet-4-6 <noreply@anthropic.com>
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+index 28e6705c6..672e281ca 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+@@ -1109,6 +1109,18 @@ int a6xx_gmu_resume(struct a6xx_gpu *a6xx_gpu)
+ 		status = GMU_COLD_BOOT;
+ 	}
+ 
++	/*
++	 * On the recovery path the CX power domain has been cycled, which can
++	 * clear the CM3's TCM even though the TCM-retention flag read above
++	 * still reports "retained". Taking the warm-boot path in that case
++	 * skips the firmware reload, so the CM3 boots from dead memory and
++	 * never acks the host OOB handshake, leaving the GPU stuck in a
++	 * hang -> recover -> hang loop. Force a cold boot (full firmware
++	 * reload and re-init) whenever we are recovering from a hang.
++	 */
++	if (a6xx_gpu->hung)
++		status = GMU_COLD_BOOT;
++
+ 	ret = a6xx_gmu_fw_start(gmu, status);
+ 	if (ret)
+ 		goto out;

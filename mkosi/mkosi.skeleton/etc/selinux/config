@@ -1,0 +1,17 @@
+# liuqin bring-up image: SELinux permissive (Lead decision, 2026-10-20).
+#
+# Rationale: the liuqin kernel has SELinux support enabled and the next rootfs
+# rebuild includes selinux-policy-targeted + policycoreutils; PERMISSIVE lets the first device boots collect AVC
+# denials without blocking boot. Enforcing is evaluated only after real-device
+# validation (policy relabel on root.img, no blocking denials, plasmalogin/
+# sensors/fingerprint PAM paths verified).
+#
+# Switch conditions to enforcing (all required, see docs/build/rootfs-build.md §8):
+#   1. root.img assembly performs a full `setfiles` relabel (xattr preserved);
+#   2. device boot with permissive collects no blocking AVCs for the critical
+#      stack (systemd, plasmalogin, NetworkManager, PipeWire, iio-sensor-proxy);
+#   3. installer/kernel-update paths do not rely on unlabeled writable areas.
+# If the kernel/initramfs ever needs SELinux fully off for diagnosis, add
+# `selinux=0` on the kernel command line (image task) instead of editing this file.
+SELINUX=permissive
+SELINUXTYPE=targeted

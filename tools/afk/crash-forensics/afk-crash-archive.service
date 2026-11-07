@@ -1,0 +1,19 @@
+[Unit]
+Description=AFK: preserve pstore and reset metadata before archival
+DefaultDependencies=no
+After=local-fs.target
+Before=systemd-pstore.service sysinit.target shutdown.target
+Conflicts=shutdown.target
+RequiresMountsFor=/var/lib/afk/crash
+
+[Service]
+Type=oneshot
+# Keep the unit active after the first boot-time run; systemd-pstore's drop-in
+# also Wants=this unit, and an inactive oneshot would be started a second time.
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/afk-crash-archive --pon-module-dir /usr/lib/afk/pon
+TimeoutStartSec=20
+UMask=0077
+
+[Install]
+WantedBy=sysinit.target

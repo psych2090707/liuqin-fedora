@@ -1,0 +1,35 @@
+/* Shared proposal A geometry. Both color variants import this file.
+ * GNOME loads only the first matching stylesheet, not this plus a variant. */
+#keyboard.liuqin-osk-a {
+    padding: 0 12px 12px;
+}
+#keyboard.liuqin-osk-a .liuqin-osk-header {
+    height: 42px;
+    spacing: 10px;
+}
+#keyboard.liuqin-osk-a .liuqin-osk-header .word-suggestions {
+    padding: 0;
+    spacing: 12px;
+}
+#keyboard.liuqin-osk-a .liuqin-osk-hide {
+    margin: 6px 3px;
+    padding: 3px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+}
+#keyboard.liuqin-osk-a .key-container { padding: 3px; }
+#keyboard.liuqin-osk-a .keyboard-key {
+    min-height: 0;
+    min-width: 0;
+    padding: 4px 6px;
+    border-radius: 7px;
+    font-size: 20px;
+    font-weight: normal;
+}
+#keyboard.liuqin-osk-a .keyboard-key.default-key {
+    font-size: 14px;
+}
+#keyboard.liuqin-osk-a .liuqin-key-label { text-align: center; }
+#keyboard.liuqin-osk-a .liuqin-key-secondary {
+    font-size: 10px;
+}

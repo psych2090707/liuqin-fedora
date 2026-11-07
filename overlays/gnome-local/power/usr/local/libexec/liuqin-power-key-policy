@@ -1,0 +1,93 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# TN0086: configurable power-key policy helper for the pinned liuqin evdev
+# daemon (liuqin-power-keyd). The daemon calls this with "short" or "long";
+# the lid watcher calls it with "lid-short" to toggle blank/wake without
+# consulting the native GNOME power-button setting.
+set -u
+
+CONFIG=/etc/liuqin/power-policy.conf
+ORIGINAL_HELPER=/usr/libexec/liuqin/gnome-power-key-action
+action=${1:-}
+
+config_value() {
+	[ -r "$CONFIG" ] || return 0
+	sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONFIG" 2>/dev/null |
+		tail -n 1 | tr -d '\r'
+}
+
+active_session_info() {
+	SESSION=$(/usr/bin/loginctl show-seat seat0 --property=ActiveSession --value 2>/dev/null || true)
+	[ -n "$SESSION" ] && [ "$SESSION" != n/a ] || return 1
+	class=$(/usr/bin/loginctl show-session "$SESSION" --property=Class --value 2>/dev/null || true)
+	active=$(/usr/bin/loginctl show-session "$SESSION" --property=Active --value 2>/dev/null || true)
+	[ "$class" = user ] && [ "$active" = yes ] || return 1
+	UID_NUM=$(/usr/bin/loginctl show-session "$SESSION" --property=User --value 2>/dev/null || true)
+	USER_NAME=$(/usr/bin/loginctl show-session "$SESSION" --property=Name --value 2>/dev/null || true)
+	case $UID_NUM in ''|*[!0-9]*) return 1 ;; esac
+	[ -n "$USER_NAME" ] || return 1
+	passwd_entry=$(/usr/bin/getent passwd "$UID_NUM" 2>/dev/null || true)
+	[ -n "$passwd_entry" ] || return 1
+	GID_NUM=$(printf '%s\n' "$passwd_entry" | cut -d: -f4)
+	HOME_DIR=$(printf '%s\n' "$passwd_entry" | cut -d: -f6)
+	RUNTIME_DIR=/run/user/$UID_NUM
+	case $GID_NUM in ''|*[!0-9]*) return 1 ;; esac
+	[ -d "$HOME_DIR" ] && [ -d "$RUNTIME_DIR" ] || return 1
+	return 0
+}
+
+native_power_action() {
+	active_session_info || return 0
+	/usr/bin/setpriv --reuid="$UID_NUM" --regid="$GID_NUM" --init-groups \
+		/usr/bin/env HOME="$HOME_DIR" XDG_RUNTIME_DIR="$RUNTIME_DIR" \
+		DBUS_SESSION_BUS_ADDRESS="unix:path=$RUNTIME_DIR/bus" \
+		/usr/bin/gsettings get org.gnome.settings-daemon.plugins.power power-button-action \
+		2>/dev/null | head -n 1 | tr -d "'"
+}
+
+case $action in
+short)
+	# If the user changed GNOME's native row to something other than Nothing,
+	# let gsd-media-keys own the short press; otherwise apply our policy.
+	native=$(native_power_action)
+	if [ -n "$native" ] && [ "$native" != nothing ]; then
+		exit 0
+	fi
+	case $(config_value SHORT_ACTION) in
+		blank) exec "$ORIGINAL_HELPER" short ;;
+		suspend) exec /usr/bin/systemctl suspend ;;
+		nothing) exit 0 ;;
+		*) exec "$ORIGINAL_HELPER" short ;;
+	esac
+	;;
+ensure-off|ensure-on)
+	# TN0097: idempotent display actions used by the lid service. Unlike the
+	# power-key path they do not consult the native GNOME action, and unlike
+	# lid-short they never toggle.
+	exec "$ORIGINAL_HELPER" "$action"
+	;;
+lid-short)
+	# Kept for an older running lid service during a rolling update. The TN0097
+	# service calls ensure-off/ensure-on instead of this toggle.
+	exec "$ORIGINAL_HELPER" short
+	;;
+long)
+	case $(config_value LONG_ACTION) in
+		poweroff) exec /usr/bin/systemctl poweroff --no-block ;;
+		reboot) exec /usr/bin/systemctl reboot --no-block ;;
+		suspend) exec /usr/bin/systemctl suspend --no-block ;;
+		''|nothing) exit 0 ;;
+		*) exit 0 ;;
+	esac
+	;;
+status)
+	echo "SHORT_ACTION=$(config_value SHORT_ACTION)"
+	echo "LONG_ACTION=$(config_value LONG_ACTION)"
+	echo "LID_ACTION=$(config_value LID_ACTION)"
+	echo "LID_RESUSPEND=$(config_value LID_RESUSPEND)"
+	echo "NATIVE=$(native_power_action)"
+	;;
+*)
+	exit 64
+	;;
+esac

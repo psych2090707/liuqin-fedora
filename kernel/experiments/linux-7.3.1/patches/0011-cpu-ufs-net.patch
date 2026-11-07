@@ -1,0 +1,85 @@
+From: liuqin Fedora experiment <liuqin@localhost>
+Subject: [PATCH] liuqin 7.3.1: cpu-ufs-net
+
+Experimental offline port, not device acceptance. Retains copyright notices.
+Source: https://github.com/Seeker0472/liuqin-nixos/tree/eadaad6e032dbc0c3fc96347d5cf5bc78715827c/pkgs/kernel/patches
+Original device base: yzddmr6/linux-sm8450-liuqin fe81794b5e1b8a3f11a165f3acbfdb8fa671dbb3
+Local decisions and original patch coverage: tasks/kernel-7.3.1/RESULT.md and PATCH-INVENTORY.md.
+Apply to the verified pristine kernel.org Linux 7.3.1 tree in series order.
+---
+diff --git a/drivers/cpufreq/cpufreq-dt-platdev.c b/drivers/cpufreq/cpufreq-dt-platdev.c
+index 371ca1fe9..368aeb9b3 100644
+--- a/drivers/cpufreq/cpufreq-dt-platdev.c
++++ b/drivers/cpufreq/cpufreq-dt-platdev.c
+@@ -184,6 +184,7 @@ static const struct of_device_id blocklist[] __initconst = {
+ 	{ .compatible = "qcom,sm8150", },
+ 	{ .compatible = "qcom,sm8250", },
+ 	{ .compatible = "qcom,sm8350", },
++	{ .compatible = "qcom,sm8475", },
+ 	{ .compatible = "qcom,sm8450", },
+ 	{ .compatible = "qcom,sm8550", },
+ 	{ .compatible = "qcom,sm8650", },
+diff --git a/drivers/ufs/host/ufs-qcom.c b/drivers/ufs/host/ufs-qcom.c
+index 954be9343..aedf41b32 100644
+--- a/drivers/ufs/host/ufs-qcom.c
++++ b/drivers/ufs/host/ufs-qcom.c
+@@ -1758,6 +1758,9 @@ static int ufs_qcom_set_clk_40ns_cycles(struct ufs_hba *hba,
+ 	 * generic formulae.
+ 	 */
+ 	switch (cycles_in_1us) {
++	case UNIPRO_CORE_CLK_FREQ_850_MHZ:
++		cycles_in_40ns = 34;
++		break;
+ 	case UNIPRO_CORE_CLK_FREQ_403_MHZ:
+ 		cycles_in_40ns = 16;
+ 		break;
+diff --git a/drivers/ufs/host/ufs-qcom.h b/drivers/ufs/host/ufs-qcom.h
+index a5ad5ce44..084aaf0e4 100644
+--- a/drivers/ufs/host/ufs-qcom.h
++++ b/drivers/ufs/host/ufs-qcom.h
+@@ -221,6 +221,7 @@ enum {
+ #define UNIPRO_CORE_CLK_FREQ_300_MHZ           300
+ #define UNIPRO_CORE_CLK_FREQ_201_5_MHZ         202
+ #define UNIPRO_CORE_CLK_FREQ_403_MHZ           403
++#define UNIPRO_CORE_CLK_FREQ_850_MHZ           850
+ 
+ /* TX_HSG1_SYNC_LENGTH attr value */
+ #define PA_TX_HSG1_SYNC_LENGTH_VAL	0x4A
+diff --git a/net/core/rtnetlink.c b/net/core/rtnetlink.c
+index be9d1625b..fabbaf98b 100644
+--- a/net/core/rtnetlink.c
++++ b/net/core/rtnetlink.c
+@@ -2260,10 +2260,29 @@ static int rtnl_fill_ifinfo(struct sk_buff *skb,
+ 		goto nla_put_failure_rcu;
+ 	rcu_read_unlock();
+ 
+-	if (dev->dev.parent &&
+-	    nla_put_string(skb, IFLA_PARENT_DEV_NAME,
+-			   dev_name(dev->dev.parent)))
+-		goto nla_put_failure;
++	if (dev->dev.parent) {
++		const struct device *parent = dev->dev.parent;
++		const char *parent_name = dev_name(parent);
++
++		if (!parent_name) {
++			/*
++			 * dev_name() returns NULL for a device that was
++			 * initialised but never named.  Handing that to
++			 * nla_put_string() is a NULL strlen() in the kernel
++			 * (seen here as an oops in gnome-shell while dumping
++			 * the interface list).  Omit the attribute and name the
++			 * device, so the unnamed parent can be tracked down.
++			 */
++			dev_warn_once(&dev->dev,
++				      "RTNL: netdev '%s' has an unnamed parent device (init_name=%s kobj.name=%s type=%s parent=%s); omitting IFLA_PARENT_DEV_NAME\n",
++				      dev->name, parent->init_name,
++				      parent->kobj.name,
++				      parent->type ? parent->type->name : "(none)",
++				      parent->parent ? dev_name(parent->parent) : "(none)");
++		} else if (nla_put_string(skb, IFLA_PARENT_DEV_NAME, parent_name)) {
++			goto nla_put_failure;
++		}
++	}
+ 
+ 	if (dev->dev.parent && dev->dev.parent->bus &&
+ 	    nla_put_string(skb, IFLA_PARENT_DEV_BUS_NAME,

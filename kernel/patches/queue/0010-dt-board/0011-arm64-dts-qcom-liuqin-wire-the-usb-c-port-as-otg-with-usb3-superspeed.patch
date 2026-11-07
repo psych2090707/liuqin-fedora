@@ -1,0 +1,159 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Date: Mon, 14 Sep 2026 16:49:41 +0800
+Subject: [PATCH] arm64: dts: qcom: liuqin: wire the USB-C port as OTG with
+ USB3 SuperSpeed
+
+The board DTS pinned the port to USB2 peripheral for the rescue gadget:
+dr_mode=peripheral, maximum-speed=high-speed, no QMP PHY. A wired mouse
+could never work and SuperSpeed was disabled, while the vendor FDT runs
+the same port as OTG super-speed.
+
+Follow the sm8450-hdk mainline wiring:
+
+- pmic-glink gains a usb-c-connector (dual power/data role) with HS/SS
+  endpoints linked to the DWC3 and the QMP combo PHY; UCSI now reports
+  the data role and CC orientation (TLMM gpio91, as the vendor routes it)
+- &usb_1_dwc3: dr_mode=otg, usb-role-switch, super-speed, both PHYs;
+  qcom,select-utmi-as-pipe-clk is dropped (only valid without an SSPHY)
+- &usb_1_qmpphy: enabled with vdda-phy (pm8350c_l10) and a new pm8350_l1
+  LDO at the vendor's 0.912 V for the PLL
+- CONFIG_PHY_QCOM_QMP_COMBO=y joins the fragment set (integration repo)
+
+Peripheral role still engages when attached to a PC, so the configfs
+rescue gadget keeps working; host role powers and enumerates OTG
+devices.
+
+diff --git a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+index 49d1cb493..894f3b9c0 100644
+--- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
++++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+@@ -198,9 +198,11 @@
+ 
+ 	/*
+ 	 * The charger PD runs on ADSP and publishes PMIC_RTR_ADSP_APPS, exactly
+-	 * as the vendor FDT describes. Keep USB role wiring out of this first
+-	 * step: battmgr and UCSI may report state, while the already-validated
+-	 * DWC3 peripheral gadget remains the only control/data path.
++	 * as the vendor FDT describes.  The connector is now wired through as
++	 * well: pmic-glink UCSI reports the data role and CC orientation, the
++	 * DWC3 follows it as an OTG dual-role port, and the QMP combo PHY takes
++	 * the orientation for its lane swap (vendor routes the CC orientation
++	 * line to TLMM gpio91).
+ 	 */
+ 	pmic-glink {
+ 		compatible = "qcom,sm8475-pmic-glink",
+@@ -208,6 +210,38 @@
+ 			     "qcom,pmic-glink";
+ 		#address-cells = <1>;
+ 		#size-cells = <0>;
++
++		orientation-gpios = <&tlmm 91 GPIO_ACTIVE_HIGH>;
++		pinctrl-0 = <&usb3_orient_default>;
++		pinctrl-names = "default";
++
++		connector@0 {
++			compatible = "usb-c-connector";
++			reg = <0>;
++			power-role = "dual";
++			data-role = "dual";
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				port@0 {
++					reg = <0>;
++
++					pmic_glink_hs_in: endpoint {
++						remote-endpoint = <&usb_1_dwc3_hs>;
++					};
++				};
++
++				port@1 {
++					reg = <1>;
++
++					pmic_glink_ss_in: endpoint {
++						remote-endpoint = <&usb_1_qmpphy_out>;
++					};
++				};
++			};
++		};
+ 	};
+ 
+ 	reserved-memory {
+@@ -465,6 +499,17 @@
+ 			regulator-max-microvolt = <1304000>;
+ 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+ 		};
++
++		/*
++		 * USB3 QMP combo PHY PLL rail. The vendor names L1B as the
++		 * ssphy vdd-supply at 0.912 V (vendor FDT usb_qmp_dp_phy).
++		 */
++		pm8350_l1: ldo1 {
++			regulator-name = "pm8350_l1";
++			regulator-min-microvolt = <912000>;
++			regulator-max-microvolt = <912000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++		};
+ 	};
+ 
+ 	regulators-1 {
+@@ -1170,6 +1215,14 @@
+ 	gpio-reserved-ranges = <28 4>, <36 4>;
+ 	status = "okay";
+ 
++	/* Type-C CC orientation line into the QMP lane-swap decision. */
++	usb3_orient_default: usb3-orient-state {
++		pins = "gpio91";
++		function = "gpio";
++		bias-disable;
++		input-enable;
++	};
++
+ 	/*
+ 	 * The QCA6490 enable lines come up deasserted and are raised by the
+ 	 * power sequencer when a radio is actually claimed. Levels, direction
+@@ -1478,15 +1531,21 @@
+ };
+ 
+ &usb_1 {
+-	qcom,select-utmi-as-pipe-clk;
++	/* select-utmi-as-pipe-clk removed: it waives the QMP pipe clock and is
++	 * only valid for USB2-only operation. */
+ 	status = "okay";
+ };
+ 
+ &usb_1_dwc3 {
+-	dr_mode = "peripheral";
+-	maximum-speed = "high-speed";
+-	phys = <&usb_1_hsphy>;
+-	phy-names = "usb2-phy";
++	dr_mode = "otg";
++	usb-role-switch;
++	maximum-speed = "super-speed";
++	phys = <&usb_1_hsphy>, <&usb_1_qmpphy QMP_USB43DP_USB3_PHY>;
++	phy-names = "usb2-phy", "usb3-phy";
++};
++
++&usb_1_dwc3_hs {
++	remote-endpoint = <&pmic_glink_hs_in>;
+ };
+ 
+ &usb_1_hsphy {
+@@ -1496,3 +1555,14 @@
+ 
+ 	status = "okay";
+ };
++
++&usb_1_qmpphy {
++	status = "okay";
++
++	vdda-phy-supply = <&pm8350c_l10>;
++	vdda-pll-supply = <&pm8350_l1>;
++};
++
++&usb_1_qmpphy_out {
++	remote-endpoint = <&pmic_glink_ss_in>;
++};

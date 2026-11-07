@@ -1,0 +1,302 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# /usr/libexec/liuqin/boot-assets/bin/liuqin-boot-tools — manage the on-device
+# boot asset tree used by kernel-install → liuqin-bootimg-refresh.
+#
+# Subcommands:
+#   stage [--firmware-root DIR] [--stock-rom-dir DIR] [--require-all]
+#         Build/refresh firmware-pool/, wlan-hsp2-tuple/ and
+#         firmware-pool/audio/... from the device's own firmware files
+#         (liuqin-firmware / liuqin-audio packages, both in /usr/lib/firmware)
+#         plus the user's stock ROM analysis tree for vendor-only files
+#         (qca6490/bd_m81.elf). Missing categories are warnings by default
+#         (the kernel-install hook fails closed later and names the path);
+#         --require-all turns them into errors for release validation.
+#   verify
+#         Verify the packaged asset tree: required files present, BusyBox
+#         sha256 matches the pinned value, assets.manifest hashes match, and
+#         report whether the staged firmware pool is release-complete.
+#   version
+#         Print the package version.
+#
+# All operations are offline and never touch a device partition.
+set -eu
+
+assets=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+firmware_root=/usr/lib/firmware
+stock_rom_dir=/usr/share/liuqin/stock
+require_all=0
+run_user=
+run_group=
+
+usage() {
+	cat <<'EOF'
+usage: liuqin-boot-tools <stage|verify|version> [options]
+
+stage:
+  --firmware-root DIR   firmware source root (default /usr/lib/firmware)
+  --stock-rom-dir DIR   user stock ROM analysis tree (default /usr/share/liuqin/stock)
+  --require-all         error on missing firmware categories (default: warn)
+verify:
+  (no options) verifies the packaged tree and staged pool completeness
+EOF
+}
+
+die() { printf 'liuqin-boot-tools: %s\n' "$*" >&2; exit 1; }
+say() { printf 'liuqin-boot-tools: %s\n' "$*"; }
+
+# Determine the owner to preserve root:root when staged as root (posttrans).
+if [ "$(id -u)" -eq 0 ]; then
+	run_user=0
+	run_group=0
+fi
+
+owned_copy() { # owned_copy SRC DST
+	mkdir -p "$(dirname -- "$2")"
+	cp -L -- "$1" "$2"
+	if [ -n "${run_user:-}" ]; then chown "$run_user:$run_group" "$2"; fi
+}
+
+find_first() { # find_first NAME DIR...
+	local name=$1
+	shift
+	for dir in "$@"; do
+		[ -d "$dir" ] || continue
+		found=$(find "$dir" -maxdepth 5 -type f -name "$name" 2>/dev/null | head -n 1)
+		[ -n "$found" ] && {
+			printf '%s\n' "$found"
+			return 0
+		}
+	done
+	return 1
+}
+
+staged_total=0
+missing_total=0
+declare_missing() { # declare_missing CATEGORY DETAIL
+	case $require_all in
+	1)
+		printf 'liuqin-boot-tools: ERROR: missing %s: %s\n' "$1" "$2" >&2
+		missing_total=$((missing_total + 1))
+		;;
+	*)
+		printf 'liuqin-boot-tools: warning: missing %s: %s\n' "$1" "$2" >&2
+		missing_total=$((missing_total + 1))
+		;;
+	esac
+}
+
+stage_firmware() {
+	pool=$assets/firmware-pool
+	mkdir -p "$pool" "$assets/wlan-hsp2-tuple"
+
+	# touchscreen firmware (Novatek NT36532)
+	if [ -d "$firmware_root/novatek/liuqin" ] &&
+		find "$firmware_root/novatek/liuqin" -maxdepth 1 -type f -name '*.bin' | grep -q .; then
+		mkdir -p "$pool/touch-nt36532/vendor/firmware"
+		for f in "$firmware_root/novatek/liuqin"/*.bin; do
+			owned_copy "$f" "$pool/touch-nt36532/vendor/firmware/$(basename "$f")"
+		done
+		staged_total=$((staged_total + 1))
+	else
+		declare_missing touch "$firmware_root/novatek/liuqin"
+	fi
+
+	# Bluetooth firmware (QCA6490 / WCN6855); liuqin-firmware installs /qca/hp*
+	bt_src=
+	for candidate in "$firmware_root/qca"; do
+		[ -d "$candidate" ] || continue
+		if find "$candidate" -maxdepth 1 -type f \( -name 'hpbtfw2*' -o -name 'hpnv2*' \) | grep -q .; then
+			bt_src=$candidate
+			break
+		fi
+	done
+	if [ -n "$bt_src" ]; then
+		mkdir -p "$pool/bt-qca6490/vendor/bt_firmware/image"
+		for f in "$bt_src"/hp*; do
+			[ -f "$f" ] || continue
+			owned_copy "$f" "$pool/bt-qca6490/vendor/bt_firmware/image/$(basename "$f")"
+		done
+		staged_total=$((staged_total + 1))
+	else
+		declare_missing bluetooth "$firmware_root/qca/hp*"
+	fi
+
+	# WLAN upstream WCN6855 .zst set (liuqin-firmware puts it under /updates)
+	wlan_src=$firmware_root/updates/ath11k/WCN6855/hw2.0
+	if [ -d "$wlan_src" ] && [ -f "$wlan_src/amss.bin.zst" ]; then
+		mkdir -p "$pool/wlan-qca6490/upstream/WCN6855/hw2.0"
+		for f in "$wlan_src"/*.bin.zst; do
+			[ -f "$f" ] || continue
+			owned_copy "$f" "$pool/wlan-qca6490/upstream/WCN6855/hw2.0/$(basename "$f")"
+		done
+		staged_total=$((staged_total + 1))
+	else
+		declare_missing wlan "$wlan_src/amss.bin.zst"
+	fi
+	# WLAN board data is a vendor-partition file; it may come from the
+	# firmware package or the user's stock ROM analysis tree.
+	board=$(find_first bd_m81.elf "$firmware_root" "$stock_rom_dir") || board=
+	if [ -n "$board" ]; then
+		mkdir -p "$pool/wlan-qca6490/vendor/firmware_mnt/image/qca6490"
+		owned_copy "$board" "$pool/wlan-qca6490/vendor/firmware_mnt/image/qca6490/bd_m81.elf"
+	else
+		declare_missing wlan-board "bd_m81.elf (install firmware or provide $stock_rom_dir/vendor/firmware_mnt)"
+	fi
+
+	# regulatory database (signed pair); usually from wireless-regdb
+	if [ -f "$firmware_root/regulatory.db" ] && [ -f "$firmware_root/regulatory.db.p7s" ]; then
+		mkdir -p "$pool/regulatory/upstream"
+		owned_copy "$firmware_root/regulatory.db" "$pool/regulatory/upstream/regulatory.db"
+		owned_copy "$firmware_root/regulatory.db.p7s" "$pool/regulatory/upstream/regulatory.db.p7s"
+		staged_total=$((staged_total + 1))
+	else
+		declare_missing regulatory "$firmware_root/regulatory.db(.p7s)"
+	fi
+
+	# Adreno 730 GPU firmware
+	gpu_ok=1
+	mkdir -p "$pool/gpu-adreno730/vendor"
+	for name in a730_sqe.fw a730_zap.mbn gmu_gen70000.bin; do
+		f=$(find_first "$name" "$firmware_root" "$stock_rom_dir") || f=
+		if [ -n "$f" ]; then
+			owned_copy "$f" "$pool/gpu-adreno730/vendor/$name"
+		else
+			gpu_ok=0
+		fi
+	done
+	if [ "$gpu_ok" -eq 1 ]; then staged_total=$((staged_total + 1)); else declare_missing gpu "a730_sqe.fw/a730_zap.mbn/gmu_gen70000.bin"; fi
+
+	# DSP firmware set (qcom/sm8475/liuqin, 68 files in the release set)
+	dsp_src=$firmware_root/qcom/sm8475/liuqin
+	if [ -d "$dsp_src" ] && find "$dsp_src" -maxdepth 1 -type f | grep -q .; then
+		mkdir -p "$pool/dsp-sm8475/vendor/qcom/sm8475/liuqin"
+		for f in "$dsp_src"/*; do
+			[ -f "$f" ] || continue
+			owned_copy "$f" "$pool/dsp-sm8475/vendor/qcom/sm8475/liuqin/$(basename "$f")"
+		done
+		staged_total=$((staged_total + 1))
+	else
+		declare_missing dsp "$dsp_src"
+	fi
+
+	# Reviewed HSP2 WLAN tuple: use the uncompressed hw2.0/hw2.1 files that
+	# liuqin-firmware installs under /usr/lib/firmware/updates (vendor-derived).
+	hsp2_ok=1
+	for revision in hw2.0 hw2.1; do
+		src=$firmware_root/updates/ath11k/WCN6855/$revision
+		mkdir -p "$assets/wlan-hsp2-tuple/$revision"
+		for name in amss.bin m3.bin board-2.bin regdb.bin; do
+			if [ -f "$src/$name" ]; then
+				owned_copy "$src/$name" "$assets/wlan-hsp2-tuple/$revision/$name"
+			else
+				hsp2_ok=0
+			fi
+		done
+	done
+	if [ "$hsp2_ok" -eq 1 ]; then staged_total=$((staged_total + 1)); else declare_missing wlan-hsp2 "updates/ath11k/WCN6855/hw2.{0,1}/{amss,m3,board-2,regdb}.bin"; fi
+
+	# AudioReach topology (liuqin-audio). build-initramfs rejects symlinks for
+	# this file, so copy the bytes.
+	tplg=$firmware_root/qcom/sm8450/Xiaomi-Pad-6-Pro-tplg.bin
+	if [ -f "$tplg" ]; then
+		mkdir -p "$pool/audio"
+		owned_copy "$tplg" "$pool/audio/Xiaomi-Pad-6-Pro-tplg.bin"
+		staged_total=$((staged_total + 1))
+	else
+		declare_missing audio-topology "$tplg"
+	fi
+}
+
+verify_assets() {
+	problems=0
+	for f in scripts/build-initramfs.sh scripts/build-bootimg.sh \
+		overlays/boot/abl-symbols-dtc-labels.patch liuqin-bootargs.txt \
+		initramfs/init tools/build-root-contract.py \
+		tools/build-busybox.sh mkbootimg/mkbootimg.py mkbootimg/unpack_bootimg.py \
+		upstream/xiaomipad-6pro-mainline/tools/lib/build-bootimg.sh \
+		upstream/xiaomipad-6pro-mainline/device/native-bootargs.txt \
+		bin/busybox bin/cc-prebuilt bin/build-initramfs.sh bin/build-bootimg.sh; do
+		[ -e "$assets/$f" ] || {
+			printf 'liuqin-boot-tools: MISSING %s\n' "$assets/$f" >&2
+			problems=$((problems + 1))
+		}
+	done
+	for helper in liuqin-mark-slot-successful liuqin-charger-mode-power-key liuqin-charger-mode-exit; do
+		[ -f "$assets/helpers/$helper" ] || {
+			printf 'liuqin-boot-tools: MISSING helper %s\n' "$helper" >&2
+			problems=$((problems + 1))
+		}
+	done
+	if [ -f "$assets/assets.manifest" ]; then
+		if ! (cd "$assets" && sha256sum -c assets.manifest --quiet) >/dev/null 2>&1; then
+			printf 'liuqin-boot-tools: assets.manifest verification FAILED\n' >&2
+			problems=$((problems + 1))
+		fi
+	else
+		printf 'liuqin-boot-tools: MISSING assets.manifest\n' >&2
+		problems=$((problems + 1))
+	fi
+	if [ -f "$assets/busybox.sha256" ]; then
+		want=$(cut -d' ' -f1 <"$assets/busybox.sha256")
+		got=$(sha256sum "$assets/bin/busybox" | cut -d' ' -f1)
+		[ "$want" = "$got" ] || {
+			printf 'liuqin-boot-tools: BusyBox sha256 mismatch (want %s got %s)\n' "$want" "$got" >&2
+			problems=$((problems + 1))
+		}
+	fi
+	# Staged firmware pool completeness (release readiness).
+	pool=$assets/firmware-pool
+	staged=0
+	for probe in \
+		"$pool/touch-nt36532/vendor/firmware" \
+		"$pool/bt-qca6490/vendor/bt_firmware/image" \
+		"$pool/wlan-qca6490/upstream/WCN6855/hw2.0" \
+		"$pool/regulatory/upstream" \
+		"$pool/gpu-adreno730/vendor" \
+		"$pool/dsp-sm8475/vendor/qcom/sm8475/liuqin" \
+		"$assets/wlan-hsp2-tuple/hw2.0" \
+		"$pool/audio/Xiaomi-Pad-6-Pro-tplg.bin"; do
+		[ -e "$probe" ] && staged=$((staged + 1))
+	done
+	printf 'liuqin-boot-tools: asset verification: %s (%d/8 staged firmware categories)\n' \
+		"$([ "$problems" -eq 0 ] && echo PASS || echo FAIL)" "$staged"
+	[ "$problems" -eq 0 ]
+}
+
+command=${1:-}
+[ $# -gt 0 ] && shift
+case $command in
+stage)
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--firmware-root) firmware_root=${2:?}; shift 2 ;;
+		--stock-rom-dir) stock_rom_dir=${2:?}; shift 2 ;;
+		--require-all) require_all=1; shift ;;
+		-h|--help) usage; exit 0 ;;
+		*) die "unknown stage argument: $1" ;;
+		esac
+	done
+	say "assets: $assets"
+	say "firmware root: $firmware_root; stock ROM tree: $stock_rom_dir"
+	stage_firmware
+	say "staged firmware categories: $staged_total/8 (missing/warned: $missing_total)"
+	if [ "$require_all" -eq 1 ] && [ "$missing_total" -gt 0 ]; then
+		die "missing firmware inputs; install liuqin-firmware/liuqin-audio and provide the stock ROM analysis tree"
+	fi
+	exit 0
+	;;
+verify)
+	verify_assets
+	;;
+version)
+	printf 'liuqin-boot-tools %s\n' "$(cat "$assets/VERSION" 2>/dev/null || echo unknown)"
+	;;
+-h|--help|help|'')
+	usage
+	;;
+*)
+	die "unknown subcommand: $command (try --help)"
+	;;
+esac

@@ -1,0 +1,60 @@
+# /etc/liuqin/bootimg.conf — default configuration for the on-device boot
+# image rebuild chain installed by liuqin-boot-tools.
+#
+# The kernel-install hook (kernel-liuqin package) is opt-in: it does nothing
+# unless this file exists. Removing it disables automatic boot.img staging on
+# kernel updates (the kernel still installs normally).
+#
+# This file is sourced by /bin/sh. Keep it simple: KEY=VALUE, no commands.
+#
+# The chain NEVER writes the boot partition and NEVER calls qbootctl/fastboot.
+# Applying a staged image is explicit:
+#   liuqin-apply-boot --image /boot/liuqin/boot-<kver>.img          # dry-run
+#   liuqin-apply-boot --image ... --yes-write                      # Phase 6 gate
+#
+# If any asset below is missing, the kernel-install hook fails closed (exit 1,
+# old /boot/liuqin image kept) and prints the missing path. Re-run asset staging
+# after installing/updating liuqin-firmware / liuqin-audio:
+#   /usr/libexec/liuqin/boot-assets/bin/liuqin-boot-tools stage
+
+# --- on-device boot asset tree (this package) ------------------------------
+LIUQIN_BOOT_ASSETS_DIR=/usr/libexec/liuqin/boot-assets
+
+# --- kernel RPM boot-staging pipeline (kernel-liuqin package) --------------
+LIUQIN_BOOTIMG_REFRESH=/usr/libexec/liuqin/liuqin-bootimg-refresh
+
+# --- inputs for the root admission contract --------------------------------
+# rootfs builder must install this hash manifest (task-14 interface).
+LIUQIN_ROOTFS_MANIFEST=/usr/share/liuqin/rootfs.files.sha256
+# Desktop topology used when the contract is regenerated from that manifest.
+# The image is GNOME-only after the KDE removal; `kde` would fail admission.
+export LIUQIN_DESKTOP=gnome
+
+# --- firmware inputs (staged by `liuqin-boot-tools stage` from the device's
+#     own /usr/lib/firmware + user's stock ROM analysis tree) ----------------
+LIUQIN_FIRMWARE_POOL=/usr/libexec/liuqin/boot-assets/firmware-pool
+LIUQIN_WLAN_HSP2_TUPLE=/usr/libexec/liuqin/boot-assets/wlan-hsp2-tuple
+LIUQIN_AUDIO_TOPOLOGY=/usr/libexec/liuqin/boot-assets/firmware-pool/audio/Xiaomi-Pad-6-Pro-tplg.bin
+
+# --- stock ROM analysis tree (user's own ROM; never redistributed) ---------
+# dtbo/entry.NN x44 + vendor_boot/dtbs/dtb-NN.dtb x14 (+ vendor firmware_mnt
+# files such as qca6490/bd_m81.elf). Required for the canonical boot.img DTB.
+LIUQIN_STOCK_ROM_DIR=/usr/share/liuqin/stock
+
+# --- boot.img assembly ------------------------------------------------------
+# Production MUST use stock-rom: raw board DTB + /chosen cmdline overlay +
+# ABL overlay sink, generated from the 44 DTBO + 14 vendor_boot base DTB inputs.
+LIUQIN_BOOTIMG_DTB_SOURCE=stock-rom
+LIUQIN_MKBOOTIMG_DIR=/usr/libexec/liuqin/boot-assets/mkbootimg
+# Project cmdline: the verified A-slot profile (console=tty0, gnome.is_vm=0,
+# no console=drm_log). The token stops gsd-power from treating this board as a
+# VM and ignoring automatic suspend; it must survive every kernel-update boot
+# rebuild and stay byte-identical to overlays/boot/liuqin-bootargs.txt.
+LIUQIN_CMDLINE_FILE=/usr/libexec/liuqin/boot-assets/liuqin-bootargs.txt
+
+# --- extra builder arguments (space separated; keep empty) -----------------
+LIUQIN_BOOTIMG_EXTRA_ARGS=
+
+# --- staging / logging -----------------------------------------------------
+LIUQIN_BOOT_STAGING_DIR=/boot/liuqin
+LIUQIN_BOOT_LOG_DIR=/var/log/liuqin-bootimg

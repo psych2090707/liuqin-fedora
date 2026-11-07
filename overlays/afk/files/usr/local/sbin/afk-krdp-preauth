@@ -1,0 +1,32 @@
+#!/bin/bash
+# AFK channel (TN0048) — pre-authorize krdpserver for the KDE RemoteDesktop portal.
+#
+# Runs as a Plasma-session user unit (afk-krdp-preauth.service) before
+# app-org.kde.krdpserver.service.  Without this the portal would pop a
+# "share your screen" dialog that nobody is there to accept, and unattended RDP
+# would never start a screencast session.
+#
+# The command is the one documented by KRDP itself in
+# /usr/share/doc/krdp/README.md ("CLI" section).
+set -u
+
+uid="$(id -u)"
+# Systemd user services already have these, but the installer and ad-hoc SSH
+# invocations may not.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$uid}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+
+if ! command -v flatpak >/dev/null 2>&1; then
+    echo "afk-krdp-preauth: flatpak not installed; leaving portal authorization to the session" >&2
+    exit 0
+fi
+
+if flatpak permission-set kde-authorized remote-desktop org.kde.krdpserver yes 2>/dev/null; then
+    echo "afk-krdp-preauth: granted kde-authorized/remote-desktop to org.kde.krdpserver"
+else
+    # Do not fail the unit: krdpserver is allowed to start anyway and will fall
+    # back to asking the portal; afk.sh diag reports the permission state.
+    echo "afk-krdp-preauth: warning: could not persist portal permission (session bus unavailable?)" >&2
+fi
+
+exit 0

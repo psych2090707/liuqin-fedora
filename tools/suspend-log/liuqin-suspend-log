@@ -1,0 +1,1208 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: MIT
+"""Suspend/resume evidence collector for liuqin.
+
+Installed as /usr/local/sbin/liuqin-suspend-log and called by
+/usr/lib/systemd/system-sleep/50-liuqin-suspend-log.  It records the pre-sleep
+state, the post-resume state, and a human-readable diff.  It never changes
+power settings and has no network access. Normally only the state directory is
+written. With explicit early-wake opt-in, it also arms the bounded debugfs
+recorder; sealed evidence is archived before the next arm can erase it.
+
+Usage:
+  liuqin-suspend-log pre suspend     # called by systemd-sleep
+  liuqin-suspend-log post suspend    # called by systemd-sleep
+  liuqin-suspend-log latest          # print the newest report
+  liuqin-suspend-log list            # list recorded events
+  liuqin-suspend-log show <id>       # print one report
+  liuqin-suspend-log screen-latest   # panel on/off vs suspend intervals/notifications
+  liuqin-suspend-log prune           # keep only the newest --keep events
+
+Version 2 keeps the passive IRQ/source snapshot before any firmware query,
+does not read ddr_stats unless LIUQIN_SUSPEND_LOG_DDR_STATS=1, separates the
+total window from the suspend residency estimate, and never turns missing
+clocks or statistics into "real_sleep=yes".
+"""
+import argparse
+import datetime
+import json
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+VERSION = 2
+DEFAULT_STATE = Path("/var/lib/liuqin-suspend-log")
+MAX_TEXT = 512 * 1024
+DEFAULT_KEEP = 30
+EARLY_WAKE_AUTO = Path("/etc/liuqin/early-wake-auto")
+EARLY_WAKE_HELPER = "/usr/local/sbin/liuqin-early-wake-log"
+ID_RE = re.compile(r"^[0-9a-f]{8}-\d{10}(?:-\d+)?$")
+IRQ_RE = re.compile(r"^\s*(\S+):\s+((?:\d+\s+)+)(.*)$")
+KEYWORDS = re.compile(
+    r"PM:|suspend|resume|wake|wakeup|rtc|alarm|usb|typec|ucsi|battmgr|"
+    r"thermal|tsens|pwrkey|resin|hall|lid|panel_prepared|panel_unpreparing|"
+    r"dwc3|mhi|ath11k|bluetooth|gpio-key|input:",
+    re.IGNORECASE,
+)
+
+
+def read_text(path, limit=MAX_TEXT):
+    try:
+        with open(path, "r", errors="replace") as stream:
+            return stream.read(limit)
+    except OSError as exc:
+        return f"<unavailable: {exc.__class__.__name__}: {exc}>"
+
+
+def read_bytes(path, limit=MAX_TEXT):
+    try:
+        with open(path, "rb") as stream:
+            return stream.read(limit)
+    except OSError:
+        return b""
+
+
+def read_number(path):
+    """Read a scalar sysfs/proc value, but never confuse an error string with 0."""
+    value = read_text(path, 512).strip()
+    return value if value.isdigit() else ""
+
+
+def stat_number(stats, key):
+    value = str(stats.get(key, "")).strip()
+    return int(value) if value.isdigit() else None
+
+
+def run(argv, timeout=2):
+    try:
+        result = subprocess.run(
+            argv, capture_output=True, text=True, timeout=timeout,
+            env={"PATH": "/usr/bin:/usr/sbin", "LC_ALL": "C"},
+        )
+        return result.stdout if result.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def tail_lines(text, count):
+    lines = text.splitlines()
+    return "\n".join(lines[-count:]) + ("\n" if lines else "")
+
+
+def build_id():
+    data = read_bytes("/sys/kernel/notes")
+    offset, found = 0, []
+    try:
+        while offset + 12 <= len(data):
+            namesz, descsz, kind = struct.unpack_from("<III", data, offset)
+            offset += 12
+            desc_at = offset + ((namesz + 3) & ~3)
+            end = desc_at + descsz
+            if desc_at > len(data) or end > len(data):
+                break
+            if data[offset:offset + namesz].rstrip(b"\0") == b"GNU" and kind == 3:
+                found.append(data[desc_at:end].hex())
+            offset = desc_at + ((descsz + 3) & ~3)
+    except (struct.error, ValueError):
+        return "unavailable"
+    return found[0] if len(found) == 1 else "unavailable"
+
+
+def redact_cmdline(text):
+    """Keep boot tokens useful for debugging, but not device-unique identifiers."""
+    keys = ("androidboot.serialno", "androidboot.cpuid", "androidboot.hwid",
+            "hwid.hwid_value", "hwid.project", "hwid.build_adc",
+            "hwid.project_adc", "androidboot.oled_wp", "msm_drm.oled_wp")
+    for key in keys:
+        text = re.sub(rf"(\b{re.escape(key)}=)\S+", r"\1<redacted>", text)
+    return text
+
+
+def parse_interrupts(text):
+    out = {}
+    for line in text.splitlines():
+        match = IRQ_RE.match(line)
+        if not match:
+            continue
+        label = match.group(1)
+        try:
+            counts = [int(value) for value in match.group(2).split()]
+        except ValueError:
+            continue
+        out[label] = {
+            "total": sum(counts),
+            "counts": counts,
+            "desc": match.group(3).strip(),
+        }
+    return out
+
+
+def parse_wakeup_sources(text):
+    fields = ("active_count", "event_count", "wakeup_count", "expire_count",
+              "active_since", "total_time", "max_time", "last_change",
+              "prevent_suspend_time")
+    out = {}
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("name"):
+            continue
+        parts = line.split()
+        if len(parts) < 10:
+            continue
+        try:
+            values = [int(value) for value in parts[1:10]]
+        except ValueError:
+            continue
+        out[parts[0]] = dict(zip(fields, values))
+    return out
+
+
+def wake_enabled_irqs():
+    out = {}
+    root = Path("/sys/kernel/irq")
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return out
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            enabled = (entry / "wakeup").read_text().strip()
+        except OSError:
+            continue
+        if enabled != "enabled":
+            continue
+        try:
+            action = (entry / "actions").read_text().strip()
+        except OSError:
+            action = ""
+        out[entry.name] = action
+    return out
+
+
+def collect(phase):
+    """Snapshot passively first, then do the reads that talk to firmware.
+
+    qcom_battmgr property reads can issue GLINK requests, and qcom_stats
+    ddr_stats sends a QMP freqsync, so they are kept after the IRQ/wakeup
+    snapshot and tagged with their own time window.  ddr_stats is off unless
+    LIUQIN_SUSPEND_LOG_DDR_STATS=1.
+    """
+    errors = []
+    started = {
+        "boottime_ns": time.clock_gettime_ns(time.CLOCK_BOOTTIME),
+        "monotonic_ns": time.monotonic_ns(),
+        "realtime_ns": time.time_ns(),
+    }
+
+    def fail(label, exc):
+        errors.append(f"{label}: {exc.__class__.__name__}: {exc}")
+
+    interrupts_text = read_text("/proc/interrupts")
+    wakeup_text = read_text("/sys/kernel/debug/wakeup_sources")
+    wake_enabled = wake_enabled_irqs()
+    pm_wakeup_irq = read_number("/sys/power/pm_wakeup_irq")
+    passive_finished_boottime = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+
+    query_windows = {}
+
+    def window(label, function):
+        begin = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+        try:
+            return function()
+        except Exception as exc:
+            fail(label, exc)
+            return None
+        finally:
+            query_windows[label] = {
+                "started_boottime_ns": begin,
+                "finished_boottime_ns": time.clock_gettime_ns(time.CLOCK_BOOTTIME),
+            }
+
+    def read_suspend_stats():
+        stats = {}
+        for item in Path("/sys/power/suspend_stats").iterdir():
+            if item.is_file():
+                stats[item.name] = read_text(item, 4096).strip()
+        return stats
+
+    suspend_stats = window("suspend_stats", read_suspend_stats) or {}
+
+    rtc = {
+        "wakealarm": read_text("/sys/class/rtc/rtc0/wakealarm", 4096).strip(),
+        "since_epoch": read_text("/sys/class/rtc/rtc0/since_epoch", 4096).strip(),
+        "proc_driver_rtc": read_text("/proc/driver/rtc", 8192).strip(),
+    }
+
+    def read_power():
+        supplies = sorted(Path("/sys/class/power_supply").glob("*"))
+        power = {}
+        for supply in supplies:
+            item = {}
+            for key in ("type", "online", "status", "capacity",
+                        "current_now", "voltage_now", "temp"):
+                candidate = supply / key
+                if candidate.exists():
+                    item[key] = read_text(candidate, 512).strip()
+            if item:
+                power[supply.name] = item
+        return power
+
+    power = window("power_supply", read_power) or {}
+
+    def read_thermal():
+        thermal = {}
+        for zone in sorted(Path("/sys/class/thermal").glob("thermal_zone*")):
+            name = read_text(zone / "type", 256).strip() or zone.name
+            value = read_text(zone / "temp", 256).strip()
+            if value:
+                thermal[name] = value
+        return thermal
+
+    def read_drm():
+        drm = {}
+        for connector in sorted(Path("/sys/class/drm").glob("card*-*")):
+            item = {}
+            for key in ("status", "dpms"):
+                candidate = connector / key
+                if candidate.exists():
+                    item[key] = read_text(candidate, 256).strip()
+            if item:
+                drm[connector.name] = item
+        return drm
+
+    def read_qcom_stats():
+        stats = {}
+        stats_root = Path("/sys/kernel/debug/qcom_stats")
+        names = ["apss", "aosd", "cxsd", "ddr", "adsp", "slpi",
+                 "slpi_island", "modem", "gpu"]
+        read_ddr = os.environ.get("LIUQIN_SUSPEND_LOG_DDR_STATS") == "1"
+        if read_ddr:
+            names.insert(4, "ddr_stats")
+        for name in names:
+            candidate = stats_root / name
+            if candidate.exists():
+                stats[name] = read_text(candidate, 8192).strip()
+        return stats
+
+    thermal = read_thermal()
+    drm = read_drm()
+    ddr_stats_read = os.environ.get("LIUQIN_SUSPEND_LOG_DDR_STATS") == "1"
+    qcom_stats = window("qcom_stats", read_qcom_stats) or {}
+
+    dmesg_count = 250 if phase == "post" else 80
+    journal_count = 120 if phase == "post" else 40
+    finished = {
+        "boottime_ns": time.clock_gettime_ns(time.CLOCK_BOOTTIME),
+        "monotonic_ns": time.monotonic_ns(),
+        "realtime_ns": time.time_ns(),
+    }
+
+    return {
+        "phase": phase,
+        "collector_version": VERSION,
+        "collected_boottime_ns": started["boottime_ns"],
+        "collected_monotonic_ns": started["monotonic_ns"],
+        "collected_realtime_ns": started["realtime_ns"],
+        "collection_started_boottime_ns": started["boottime_ns"],
+        "collection_started_monotonic_ns": started["monotonic_ns"],
+        "collection_started_realtime_ns": started["realtime_ns"],
+        "collection_finished_boottime_ns": finished["boottime_ns"],
+        "collection_finished_monotonic_ns": finished["monotonic_ns"],
+        "collection_finished_realtime_ns": finished["realtime_ns"],
+        "passive_snapshot_finished_boottime_ns": passive_finished_boottime,
+        "collection_errors": errors,
+        "query_windows": query_windows,
+        "ddr_stats_read": ddr_stats_read,
+        "boot_id": read_text("/proc/sys/kernel/random/boot_id", 128).strip(),
+        "release": os.uname().release,
+        "build_id": build_id(),
+        "cmdline": redact_cmdline(read_text("/proc/cmdline", 8192).strip()),
+        "uptime": read_text("/proc/uptime", 256).strip(),
+        "mem_sleep": read_text("/sys/power/mem_sleep", 256).strip(),
+        "sleep_state": read_text("/sys/power/state", 256).strip(),
+        "wakeup_count": read_text("/sys/power/wakeup_count", 256).strip(),
+        "pm_wakeup_irq": pm_wakeup_irq,
+        "pm_wakeup_irq_available": Path("/sys/power/pm_wakeup_irq").exists(),
+        "pm_debug_messages": read_number("/sys/power/pm_debug_messages"),
+        "pm_print_times": read_number("/sys/power/pm_print_times"),
+        "pm_async": read_number("/sys/power/pm_async"),
+        "suspend_stats": suspend_stats,
+        "sleep_time": read_text("/sys/kernel/debug/sleep_time", 8192).strip(),
+        "rtc": rtc,
+        "power_supply": power,
+        "thermal": thermal,
+        "drm": drm,
+        "qcom_stats": qcom_stats,
+        "wake_enabled_irqs": wake_enabled,
+        "interrupts_text": interrupts_text,
+        "interrupts": parse_interrupts(interrupts_text),
+        "wakeup_sources_text": wakeup_text,
+        "wakeup_sources": parse_wakeup_sources(wakeup_text),
+        "dmesg": tail_lines(run(["dmesg"]), dmesg_count),
+        "journal": tail_lines(
+            run(["journalctl", "-b", "--no-pager", "-o", "short-iso",
+                 "-n", str(journal_count)]),
+            journal_count,
+        ),
+    }
+
+
+def irq_delta(pre, post):
+    """Every IRQ whose counter moved, with pre/post wake flags kept apart.
+
+    A wake flag seen before suspend but revoked after resume is still printed
+    (wake_enabled_pre), so a missing post flag is not treated as "no Linux
+    candidate".
+    """
+    rows = []
+    pre_enabled = (pre or {}).get("wake_enabled_irqs", {}) or {}
+    post_enabled = (post or {}).get("wake_enabled_irqs", {}) or {}
+    for label, current in (post or {}).get("interrupts", {}).items():
+        before = (pre or {}).get("interrupts", {}).get(label)
+        if before is None:
+            delta = current["total"]
+            note = "new"
+        else:
+            delta = current["total"] - before["total"]
+            note = ""
+        if delta:
+            rows.append({
+                "irq": label,
+                "delta": delta,
+                "desc": current.get("desc", ""),
+                "wake_enabled_pre": label in pre_enabled,
+                "wake_enabled_post": label in post_enabled,
+                "wake_enabled": label in pre_enabled or label in post_enabled,
+                "wake_action_pre": pre_enabled.get(label, ""),
+                "wake_action_post": post_enabled.get(label, ""),
+                "wake_action": post_enabled.get(label) or pre_enabled.get(label, ""),
+                "note": note,
+            })
+    rows.sort(key=lambda row: (not row["wake_enabled"], -abs(row["delta"]),
+                               row["irq"].zfill(4)))
+    return rows
+
+
+
+def wakeup_delta(pre, post):
+    rows = []
+    current_map = (post or {}).get("wakeup_sources", {})
+    before_map = (pre or {}).get("wakeup_sources", {})
+    post_monotonic = (post or {}).get("collected_monotonic_ns", 0)
+    post_realtime = (post or {}).get("collected_realtime_ns", 0)
+    for name, current in current_map.items():
+        before = before_map.get(name)
+        if before is None:
+            event_delta = current.get("event_count", 0)
+            wake_delta = current.get("wakeup_count", 0)
+        else:
+            event_delta = current.get("event_count", 0) - before.get("event_count", 0)
+            wake_delta = current.get("wakeup_count", 0) - before.get("wakeup_count", 0)
+        if not event_delta and not wake_delta:
+            continue
+        last_change_ms = current.get("last_change", 0)
+        last_change_rt = None
+        if last_change_ms and post_monotonic:
+            last_change_rt = post_realtime - (post_monotonic - last_change_ms * 1_000_000)
+        rows.append({
+            "name": name,
+            "event_delta": event_delta,
+            "wakeup_delta": wake_delta,
+            "last_change_ms": last_change_ms,
+            "last_change_realtime_ns": last_change_rt,
+        })
+    rows.sort(key=lambda row: -abs(row["event_delta"]))
+    return rows
+
+
+def format_time(ns):
+    if not ns:
+        return "-"
+    return datetime.datetime.fromtimestamp(ns / 1e9).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
+def bat_line(power):
+    battery = power.get("qcom-battmgr-bat", {})
+    usb = power.get("qcom-battmgr-usb", {})
+    if not battery and not usb:
+        return "unavailable"
+    return (f"bat={battery.get('capacity', '?')}% {battery.get('status', '?')} "
+            f"current={battery.get('current_now', '?')}; "
+            f"usb_online={usb.get('online', '?')} "
+            f"usb_current={usb.get('current_now', '?')}")
+
+
+def metrics(pre, post):
+    """Total window, running window and suspend residency, or None.
+
+    duration_s stays the pre/post collection window.  The residency estimate
+    is CLOCK_BOOTTIME delta minus CLOCK_MONOTONIC delta; it is only produced
+    when both snapshots belong to one boot and both clocks are consistent.
+    """
+    result = {
+        "window_s": None,
+        "awake_window_s": None,
+        "suspend_estimate_s": None,
+        "clocks_valid": False,
+        "cross_boot": False,
+        "reason": "",
+    }
+    if not pre or not post:
+        result["reason"] = "missing pre or post snapshot"
+        return result
+    if pre.get("boot_id") and post.get("boot_id") and \
+            pre["boot_id"] != post["boot_id"]:
+        result["cross_boot"] = True
+        result["reason"] = "boot changed inside the window"
+        return result
+    try:
+        pre_boot = int(pre["collected_boottime_ns"])
+        post_boot = int(post["collected_boottime_ns"])
+        pre_mono = int(pre["collected_monotonic_ns"])
+        post_mono = int(post["collected_monotonic_ns"])
+    except (KeyError, TypeError, ValueError):
+        result["reason"] = "missing clock fields"
+        return result
+    window = (post_boot - pre_boot) / 1e9
+    awake = (post_mono - pre_mono) / 1e9
+    if window < 0 or awake < 0 or window - awake < -0.01:
+        result["reason"] = "clocks inconsistent"
+        return result
+    result.update(
+        window_s=round(window, 3),
+        awake_window_s=round(awake, 3),
+        suspend_estimate_s=round(max(0.0, window - awake), 3),
+        clocks_valid=True,
+    )
+    return result
+
+
+def real_sleep(pre, post, measure):
+    """True/False/None; success must actually increase, never a duration guess."""
+    if not measure.get("clocks_valid") or measure.get("cross_boot"):
+        return None
+    pre_success = stat_number((pre or {}).get("suspend_stats", {}), "success")
+    post_success = stat_number((post or {}).get("suspend_stats", {}), "success")
+    if pre_success is None or post_success is None:
+        return None
+    if post_success > pre_success:
+        return True
+    if post_success == pre_success:
+        return False
+    return None
+
+
+def fmt_seconds(value):
+    return f"{value:.3f}s" if isinstance(value, (int, float)) else "unknown"
+
+
+def fmt_real_sleep(value):
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return "unknown"
+
+
+def conclusion(pre, post, irq_rows, wake_rows, real, measure):
+    lines = []
+    direct = (post or {}).get("pm_wakeup_irq", "")
+    previous = (pre or {}).get("pm_wakeup_irq", "")
+    if real is None:
+        lines.append("本次无法确认是否真正完成 suspend 驻留"
+                     f"（{measure.get('reason') or '统计/时钟不足'}）；"
+                     "下述差值和 pm_wakeup_irq 只能算线索。")
+    elif real is False:
+        lines.append("suspend success 没有增加，本次可能没有真正睡眠；"
+                     "pm_wakeup_irq 可能仍是上一次的旧值。")
+    available = (post or {}).get("pm_wakeup_irq_available", False)
+    if real is True and direct and direct != "0":
+        if previous and previous != direct:
+            lines.append(f"直接读出 pm_wakeup_irq = {direct}（睡前旧值 {previous}）")
+        else:
+            lines.append(f"直接读出 pm_wakeup_irq = {direct}（与睡前相同，"
+                         "可能是同一 IRQ 再次唤醒）")
+    elif available:
+        lines.append("pm_wakeup_irq 接口可用，但本次没有记录到唤醒 IRQ；"
+                     "可能来自 NO_SUSPEND/平台固件路径，不能据此说没有 Linux 中断。")
+    else:
+        lines.append("pm_wakeup_irq 不可用（当前内核没有 PM_SLEEP_DEBUG）；"
+                     "空值不代表没有中断发生。")
+
+    wake_pre = [row for row in irq_rows if row["wake_enabled_pre"]]
+    wake_post = [row for row in irq_rows if row["wake_enabled_post"]]
+    if wake_pre or wake_post:
+        lines.append("wake-enabled IRQ 计数有变化（pre/post 分别标记）：")
+        shown = set()
+        for row in wake_pre + wake_post:
+            if row["irq"] in shown:
+                continue
+            shown.add(row["irq"])
+            marks = "/".join(
+                name for name, flag in (("pre", row["wake_enabled_pre"]),
+                                        ("post", row["wake_enabled_post"]))
+                if flag)
+            lines.append(f"  IRQ {row['irq']} {row['delta']:+d} "
+                         f"wake={marks} {row['wake_action'] or row['desc']}")
+    else:
+        lines.append("醒后 wake-enabled 名单没有变化；这不等于睡眠期间没有可唤醒的 "
+                     "IRQ：驱动可能在 suspend 时临时 enable_irq_wake()，"
+                     "IRQF_NO_SUSPEND 路径也不会出现在这份名单里。")
+
+    if wake_rows:
+        lines.append("wakeup source 有事件变化：")
+        for row in wake_rows[:8]:
+            lines.append(f"  {row['name']} event+{row['event_delta']} "
+                         f"wakeup+{row['wakeup_delta']}")
+    else:
+        lines.append("wakeup source 没有记录到事件变化。")
+
+    rtc_before = (pre or {}).get("rtc", {}).get("wakealarm", "")
+    alarm_before = "alarm_IRQ\t: yes" in (pre or {}).get("rtc", {}).get(
+        "proc_driver_rtc", "")
+    if rtc_before or alarm_before:
+        lines.append(f"睡前 RTC 闹钟处于活动状态（wakealarm={rtc_before!r}, "
+                     f"alarm_IRQ={'yes' if alarm_before else 'no'}）。")
+    else:
+        lines.append("睡前没有 RTC 闹钟。")
+
+    before_online = (pre or {}).get("power_supply", {}).get(
+        "qcom-battmgr-usb", {}).get("online")
+    after_online = (post or {}).get("power_supply", {}).get(
+        "qcom-battmgr-usb", {}).get("online")
+    if before_online != after_online:
+        lines.append(f"USB/充电 online 从 {before_online} 变为 {after_online}。")
+    else:
+        lines.append(f"USB/充电 online 保持 {before_online}。")
+
+    if real is True and not direct and not wake_rows and not irq_rows:
+        lines.append("判读：现有观测没有指认首个唤醒源。动态 wake、NO_SUSPEND "
+                     "路径和固件层都还不能排除，不能直接归因 PON/AOSS；"
+                     "下一步先补消息/IRQ 时序。")
+    elif real is True and not direct:
+        lines.append("判读：没有 pm_wakeup_irq；上面列出的 IRQ/source 变化可能包含"
+                     "恢复后的活动，不是首个唤醒源的证明，需要结合消息先后判断。")
+    return lines
+
+
+
+def render(report):
+    pre = report.get("pre") or {}
+    post = report.get("post") or {}
+    measure = report.get("clocks", {})
+    pre_line = (
+        f"pre : {format_time(pre['collected_realtime_ns'])}  "
+        f"boottime={pre['collected_boottime_ns'] / 1e9:.3f}s"
+        if pre else "pre : <missing pre snapshot>"
+    )
+    lines = [
+        f"=== liuqin suspend event {report['id']} ===",
+        f"boot_id: {report['boot_id']}",
+        f"release: {report['release']}  build_id: {report['build_id']}",
+        f"operation: {report.get('sleep_op') or 'suspend'}",
+        pre_line,
+        f"post: {format_time(post['collected_realtime_ns'])}  "
+        f"boottime={post['collected_boottime_ns'] / 1e9:.3f}s",
+        f"duration: {fmt_seconds(report.get('duration_s'))} "
+        f"(boottime, total collection window)  "
+        f"suspend_estimate={fmt_seconds(report.get('suspend_estimate_s'))}  "
+        f"awake_window={fmt_seconds(report.get('awake_window_s'))}  "
+        f"realtime_delta={fmt_seconds(report.get('realtime_delta_s'))}",
+        f"real_sleep={fmt_real_sleep(report.get('real_sleep'))}  "
+        f"clocks_valid={'yes' if measure.get('valid') else 'no'}"
+        + (f"  ({measure['reason']})" if measure.get("reason") else ""),
+        "",
+        "--- conclusion ---",
+    ]
+    lines.extend(report["conclusion"])
+    if "early_wake" in report:
+        early = report["early_wake"]
+        lines.append(f"early-wake: {early.get('state', 'unknown')} "
+                     f"cycle={early.get('cycle', '-')} "
+                     f"path={early.get('path', '-')} "
+                     f"error={early.get('error', 'none')}")
+        lines.append("early-wake 保存的是观察顺序，不自动认定第一条 IRQ 为物理唤醒源。")
+    lines.extend([
+        "",
+        "--- power / rtc / suspend stats ---",
+        f"power pre : {bat_line(pre.get('power_supply', {}))}",
+        f"power post: {bat_line(post.get('power_supply', {}))}",
+        f"rtc wakealarm pre : {pre.get('rtc', {}).get('wakealarm', '')!r}",
+        f"rtc wakealarm post: {post.get('rtc', {}).get('wakealarm', '')!r}",
+        f"mem_sleep: {post.get('mem_sleep', '?')}",
+        f"pm_wakeup_irq: pre={pre.get('pm_wakeup_irq') or '-'} "
+        f"post={post.get('pm_wakeup_irq') or '-'} "
+        f"available={'yes' if post.get('pm_wakeup_irq_available') else 'no'}",
+        f"suspend_stats: success={post.get('suspend_stats', {}).get('success', '?')} "
+        f"fail={post.get('suspend_stats', {}).get('fail', '?')}",
+        f"collection errors: {post.get('collection_errors') or 'none'}",
+        f"ddr_stats read: {'yes' if post.get('ddr_stats_read') else 'no'}",
+        "",
+        "--- IRQ deltas (wake flags from pre/post snapshots) ---",
+    ])
+    if report["irq_delta"]:
+        for row in report["irq_delta"][:60]:
+            marks = "/".join(
+                name for name, flag in (("pre", row.get("wake_enabled_pre")),
+                                        ("post", row.get("wake_enabled_post")))
+                if flag)
+            flag = f"[WAKE-{marks}]" if marks else ""
+            action = row["wake_action"] or row["desc"]
+            lines.append(f"{row['irq']:>5} {row['delta']:+6d} {flag:<11} {action}")
+    else:
+        lines.append("<no interrupt counter changed>")
+    lines.extend(["", "--- wakeup source deltas ---"])
+    if report["wakeup_delta"]:
+        for row in report["wakeup_delta"][:20]:
+            when = format_time(row["last_change_realtime_ns"])
+            lines.append(f"{row['name']:<55} event+{row['event_delta']:<4} "
+                         f"wakeup+{row['wakeup_delta']:<3} last={when}")
+    else:
+        lines.append("<no wakeup source event changed>")
+
+    lines.extend([
+        "",
+        "--- kernel log highlights (post) ---",
+    ])
+    highlights = [line for line in post.get("dmesg", "").splitlines()
+                  if KEYWORDS.search(line)]
+    lines.extend(highlights[-50:] or ["<no matching kernel lines>"])
+    lines.extend([
+        "",
+        "note: duration is the collection window; [WAKE-pre/post] comes from the",
+        "      sysfs wake list at those two moments, not from the sleeping state.",
+        f"raw: {report['event_dir']}/pre.json  {report['event_dir']}/post.json",
+        f"full post dmesg: {report['event_dir']}/dmesg-post.txt",
+    ])
+    return "\n".join(lines) + "\n"
+
+
+
+def fsync_dir(path):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def write_atomic(path, text, mode=0o600):
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w") as stream:
+        stream.write(text)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+    fsync_dir(path.parent)
+
+
+def state_path(args):
+    return Path(os.environ.get("LIUQIN_SUSPEND_LOG_STATE", str(args.state_dir)))
+
+
+def make_id(pre):
+    boot = pre.get("boot_id", "").replace("-", "")[:8] or "unknown0"
+    boottime = pre.get("collected_boottime_ns", 0)
+    return f"{boot}-{int(boottime / 1e9):010d}"
+
+
+def early_wake_enabled(args, state):
+    # A staging --state-dir or self-test environment must NEVER arm real HW.
+    return (args.sleep_op == "suspend" and os.geteuid() == 0
+            and "LIUQIN_SUSPEND_LOG_STATE" not in os.environ
+            and Path(state).resolve() == DEFAULT_STATE
+            and read_text(EARLY_WAKE_AUTO, 32).strip() == "1")
+
+
+def reserve_event_dir(events, event_id):
+    path = events / event_id
+    suffix = 0
+    while path.exists():
+        suffix += 1
+        path = events / f"{event_id}-{suffix}"
+    path.mkdir(mode=0o700, parents=True)
+    return path
+
+
+def early_wake_call(phase, state, event_dir, pre, cycle=None):
+    argv = [EARLY_WAKE_HELPER, phase, "--state", str(state),
+            "--event-id", event_dir.name, "--boot-id", pre.get("boot_id", ""),
+            "--build-id", pre.get("build_id", "")]
+    if cycle is not None:
+        argv += ["--cycle", str(cycle)]
+    try:
+        result = json.loads(run(argv, timeout=2))
+        if not isinstance(result, dict) or result.get("state") not in ("armed", "saved", "error"):
+            raise ValueError("unknown helper result")
+        return result
+    except (ValueError, TypeError):
+        return {"state": "error", "error": "early-wake helper failed/timed out; buffer not assumed saved"}
+
+
+def do_pre(args):
+    state = state_path(args)
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(state, 0o700)
+    events = state / "events"
+    events.mkdir(mode=0o700, exist_ok=True)
+    pending_path = state / "pending.json"
+    if pending_path.exists():
+        try:
+            old = json.loads(pending_path.read_text())
+            old_id = old.get("id", "unknown")
+            orphan = events / old_id
+            orphan.mkdir(mode=0o700, parents=True, exist_ok=True)
+            write_atomic(orphan / "orphan-pre.json",
+                         json.dumps(old, ensure_ascii=False, indent=1))
+        except (OSError, ValueError):
+            pass
+    pre = collect("pre")
+    record = {
+        "version": VERSION,
+        "id": make_id(pre),
+        "sleep_op": args.sleep_op,
+        "started_realtime_ns": time.time_ns(),
+        "pre": pre,
+    }
+    event_dir = None
+    if early_wake_enabled(args, state):
+        event_dir = reserve_event_dir(events, record["id"])
+        record["id"] = event_dir.name
+        record["event_dir_reserved"] = True
+        write_atomic(event_dir / "pre.json", json.dumps(pre, ensure_ascii=False, indent=1))
+    # Persist association BEFORE arm. If killed afterward, next pre can recover
+    # a sealed buffer without silently overwriting the preceding sample.
+    write_atomic(pending_path, json.dumps(record, ensure_ascii=False, indent=1))
+    if event_dir is not None:
+        record["early_wake"] = early_wake_call("pre", state, event_dir, pre)
+        write_atomic(pending_path, json.dumps(record, ensure_ascii=False, indent=1))
+    print(f"pre snapshot: {state}/pending.json id={record['id']}")
+
+
+def build_report(pre, post, sleep_op, event_dir):
+    """Assemble one report.  Missing pieces stay None/unknown, never guessed."""
+    measure = metrics(pre, post)
+    rows = irq_delta(pre, post) if pre else []
+    wake_rows = wakeup_delta(pre, post) if pre else []
+    real = real_sleep(pre, post, measure)
+    realtime_delta = None
+    if pre and pre.get("collected_realtime_ns") and \
+            post.get("collected_realtime_ns"):
+        realtime_delta = round(max(
+            0.0,
+            (post["collected_realtime_ns"] - pre["collected_realtime_ns"]) / 1e9,
+        ), 3)
+    report = {
+        "version": VERSION,
+        "id": event_dir.name,
+        "boot_id": post.get("boot_id", ""),
+        "release": post.get("release", ""),
+        "build_id": post.get("build_id", ""),
+        "sleep_op": sleep_op,
+        "duration_s": measure["window_s"],
+        "suspend_estimate_s": measure["suspend_estimate_s"],
+        "awake_window_s": measure["awake_window_s"],
+        "realtime_delta_s": realtime_delta,
+        "clocks": {
+            "valid": measure["clocks_valid"],
+            "cross_boot": measure["cross_boot"],
+            "reason": measure["reason"],
+        },
+        "real_sleep": real,
+        "pre_present": pre is not None,
+        "pm_wakeup_irq_pre": (pre or {}).get("pm_wakeup_irq", ""),
+        "pm_wakeup_irq_post": post.get("pm_wakeup_irq", ""),
+        "pre": pre,
+        "post": post,
+        "irq_delta": rows,
+        "wakeup_delta": wake_rows,
+        "event_dir": str(event_dir),
+    }
+    report["conclusion"] = conclusion(pre, post, rows, wake_rows, real, measure)
+    return report
+
+
+def do_post(args):
+    state = state_path(args)
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    events = state / "events"
+    events.mkdir(mode=0o700, exist_ok=True)
+    pending_path = state / "pending.json"
+    pending = None
+    if pending_path.exists():
+        try:
+            pending = json.loads(pending_path.read_text())
+        except (OSError, ValueError):
+            pending = None
+    pre = (pending or {}).get("pre") or None
+    event_dir, early = None, None
+    if early_wake_enabled(args, state) and pre is not None:
+        event_id = pending.get("id", "")
+        candidate = events / event_id
+        if (pending.get("event_dir_reserved") and ID_RE.fullmatch(event_id)
+                and candidate.is_dir() and not candidate.is_symlink()
+                and not (candidate / "report.json").exists()):
+            event_dir = candidate
+            armed = pending.get("early_wake", {})
+            cycle = armed.get("cycle")
+            if armed.get("state") == "armed" and type(cycle) is int and cycle > 0:
+                # Export BEFORE post's active battery/firmware queries.
+                early = early_wake_call("post", state, event_dir, pre, cycle)
+            else:
+                early = {"state": "error", "error": "pre did not confirm an armed cycle", "pre_result": armed}
+    if early_wake_enabled(args, state) and early is None:
+        early = {"state": "error", "error": "no reserved pre event; sealed buffer not assumed captured"}
+    post = collect("post")
+    if pre is not None:
+        event_id = pending.get("id") or make_id(pre)
+        sleep_op = pending.get("sleep_op") or args.sleep_op
+    else:
+        event_id = make_id(post)
+        sleep_op = args.sleep_op
+
+    if event_dir is None:
+        event_dir = reserve_event_dir(events, event_id)
+    report = build_report(pre, post, sleep_op, event_dir)
+    if early is not None:
+        report["early_wake"] = early
+    if pre is not None:
+        write_atomic(event_dir / "pre.json",
+                     json.dumps(pre, ensure_ascii=False, indent=1))
+    write_atomic(event_dir / "post.json",
+                 json.dumps(post, ensure_ascii=False, indent=1))
+    write_atomic(event_dir / "dmesg-post.txt", post.get("dmesg", ""))
+    write_atomic(event_dir / "report.json",
+                 json.dumps(report, ensure_ascii=False, indent=1))
+    write_atomic(event_dir / "report.txt", render(report))
+    try:
+        pending_path.unlink()
+    except OSError:
+        pass
+    prune(state, args.keep)
+    print(f"post snapshot: {event_dir}/report.txt")
+    print(render(report))
+
+
+
+def event_dirs(state):
+    events = Path(state) / "events"
+    try:
+        items = [item for item in events.iterdir()
+                 if item.is_dir() and not item.is_symlink()]
+    except OSError:
+        return []
+
+    def key(item):
+        try:
+            data = json.loads((item / "report.json").read_text())
+            realtime = data.get("post", {}).get("collected_realtime_ns")
+            if isinstance(realtime, int) and realtime > 0:
+                return realtime
+        except (OSError, ValueError):
+            pass
+        try:
+            return item.stat().st_mtime_ns
+        except OSError:
+            return 0
+
+    return sorted(items, key=key)
+
+
+def prune(state, keep):
+    dirs = event_dirs(state)
+    for old in dirs[:-keep] if keep > 0 else []:
+        try:
+            shutil.rmtree(old)
+        except OSError:
+            pass
+
+
+def do_latest(args):
+    dirs = event_dirs(state_path(args))
+    if not dirs:
+        print("no suspend events recorded")
+        return 1
+    report = dirs[-1] / "report.txt"
+    if not report.exists():
+        print(f"{dirs[-1]} has no report.txt")
+        return 1
+    print(report.read_text())
+    return 0
+
+
+def do_list(args):
+    dirs = event_dirs(state_path(args))
+    if not dirs:
+        print("no suspend events recorded")
+        return 0
+    for item in dirs:
+        summary = "-"
+        report = item / "report.json"
+        try:
+            data = json.loads(report.read_text())
+            pre, post = data.get('pre'), data.get('post')
+            suspend = data.get('suspend_estimate_s')
+            awake = data.get('awake_window_s')
+            if suspend is None and pre and post:
+                # v1 reports predate the split fields; recompute from clocks.
+                measure = metrics(pre, post)
+                suspend = measure['suspend_estimate_s']
+                awake = measure['awake_window_s']
+            status = (pre or {}).get(
+                'power_supply', {}).get('qcom-battmgr-bat', {}).get('status', '?')
+            version = data.get('version', 1)
+            summary = (
+                f"window={fmt_seconds(data.get('duration_s'))}  "
+                f"suspend={fmt_seconds(suspend)}  "
+                f"awake={fmt_seconds(awake)}  "
+                f"real_sleep={fmt_real_sleep(data.get('real_sleep'))}"
+                f"{' (v1)' if version < 2 else ''}  "
+                f"{status}  "
+                f"wake_irq={(post or {}).get('pm_wakeup_irq', '') or '-'}"
+            )
+        except (OSError, ValueError):
+            pass
+        print(f"{item.name}  {summary}")
+    return 0
+
+
+def do_show(args):
+    event_id = args.event_id or args.sleep_op
+    if not event_id or not ID_RE.match(event_id):
+        print("usage: liuqin-suspend-log show <id>  (id from 'list')", file=sys.stderr)
+        return 2
+    path = state_path(args) / "events" / event_id / "report.txt"
+    if not path.exists():
+        print(f"event not found: {event_id}", file=sys.stderr)
+        return 1
+    print(path.read_text())
+    return 0
+
+
+def notification_log():
+    candidates = [
+        Path("/home/laplus/.local/state/liuqin-notify-log/notifications.jsonl"),
+        Path.home() / ".local" / "state" / "liuqin-notify-log" / "notifications.jsonl",
+    ]
+    for path in candidates:
+        if path.exists():
+            rows = []
+            for line in path.read_text(errors="replace").splitlines():
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(row, dict) and notification_time(row) is not None:
+                    rows.append(row)
+            return path, rows
+    return candidates[0], []
+
+
+def notification_time(row):
+    value = row.get("realtime_ns")
+    if isinstance(value, (int, float)) and value > 0:
+        return datetime.datetime.fromtimestamp(value / 1e9).astimezone()
+    value = row.get("realtime")
+    if isinstance(value, (int, float)) and value > 0:
+        return datetime.datetime.fromtimestamp(value).astimezone()
+    return None
+
+
+def parse_kernel_journal(text):
+    """Return panel events, suspend entries, exits and the first journal stamp."""
+    panels, entries, exits = [], [], []
+    first = None
+    for line in text.splitlines():
+        if not line:
+            continue
+        stamp = line.split(maxsplit=1)[0]
+        try:
+            when = datetime.datetime.fromisoformat(stamp)
+        except ValueError:
+            continue
+        if first is None:
+            first = when
+        if "panel_prepared" in line:
+            panels.append((when, "on"))
+        elif "panel_unpreparing" in line:
+            panels.append((when, "off"))
+        elif "PM: suspend entry" in line:
+            entries.append(when)
+        elif "PM: suspend exit" in line:
+            exits.append(when)
+    return panels, entries, exits, first
+
+
+def suspend_intervals(entries, exits):
+    """Pair entries and exits in time order; an unpaired entry stays open."""
+    events = sorted([(when, "entry") for when in entries] +
+                    [(when, "exit") for when in exits])
+    intervals, current = [], None
+    for when, kind in events:
+        if kind == "entry":
+            if current is not None:
+                intervals.append({"entry": current, "exit": None})
+            current = when
+        else:
+            intervals.append({"entry": current, "exit": when})
+            current = None
+    if current is not None:
+        intervals.append({"entry": current, "exit": None})
+    return intervals
+
+
+def classify_panel_on(when, last_off, intervals, journal_start=None):
+    """Classify one panel-on by suspend interval, not by a 5 s distance."""
+    if last_off is None:
+        return "unknown", "no earlier panel-off in this boot"
+    if journal_start is not None and last_off <= journal_start:
+        return "unknown", "journal coverage starts after the previous panel-off"
+    if when < last_off:
+        return "unknown", "panel-on precedes the recorded panel-off"
+    for interval in intervals:
+        end = interval.get("exit")
+        begin = interval.get("entry")
+        if begin is not None and begin <= when and (end is None or end > when):
+            return "unknown", "panel on while suspend interval is still open"
+    exits = [interval["exit"] for interval in intervals
+             if interval.get("exit") and last_off <= interval["exit"] <= when]
+    if exits:
+        delay = (when - max(exits)).total_seconds()
+        if delay <= 5:
+            return "resume", f"panel on {delay:.1f}s after PM suspend exit"
+        return "resume", (f"slow resume: panel on {delay:.1f}s after PM suspend "
+                          "exit; treat as recovery, not an independent wake")
+    return "screen-only", "no suspend exit between panel off and on"
+
+
+def notification_relation(delta_s, window=10.0):
+    """Only a notification before the panel-on can be a cause candidate."""
+    if delta_s is None or abs(delta_s) > window:
+        return None
+    if delta_s <= 0:
+        return "before panel on (candidate)"
+    return "after panel on (not a cause)"
+
+
+def do_screen_latest(args):
+    journal = run(["journalctl", "-b", "-k", "--no-pager", "-o", "short-iso"],
+                  timeout=3)
+    panels, entries, exits, first = parse_kernel_journal(journal)
+    intervals = suspend_intervals(entries, exits)
+    path, notes = notification_log()
+    print("=== screen wake correlation (panel events + suspend intervals + notifications) ===")
+    print(f"notification log: {path} ({len(notes)} records)")
+    print("coverage: FDO Notify and GTK AddNotification only; GNOME Shell internal "
+          "sources are not visible.")
+    if not panels:
+        print("no panel events in this boot")
+        return 0
+    if intervals:
+        print("suspend intervals:")
+        for interval in intervals[-6:]:
+            entry = interval.get("entry")
+            exit_ = interval.get("exit")
+            entry_text = entry.strftime("%H:%M:%S") if entry else "?"
+            exit_text = exit_.strftime("%H:%M:%S") if exit_ else "open"
+            print(f"  {entry_text} -> {exit_text}")
+    else:
+        print("no suspend intervals in this boot")
+
+    last_off = None
+    on_events = []
+    for when, state in panels:
+        if state == "off":
+            last_off = when
+            continue
+        on_events.append((when, last_off))
+    for when, off in on_events[-12:]:
+        off_text = "-"
+        if off is not None:
+            off_text = f"off {int((when - off).total_seconds())}s before"
+        kind, detail = classify_panel_on(when, off, intervals, first)
+        print(f"\npanel ON  {when.isoformat()}  [{kind}]  ({off_text})")
+        print(f"  {detail}")
+        near = []
+        for row in notes:
+            note_time = notification_time(row)
+            if note_time is None:
+                continue
+            delta = (note_time - when).total_seconds()
+            relation = notification_relation(delta)
+            if relation:
+                near.append((delta, relation, row))
+        for delta, relation, row in sorted(near, key=lambda item: abs(item[0])):
+            print(f"  notify {delta:+.1f}s  {relation}  "
+                  f"app={row.get('app', '?')!r} "
+                  f"protocol={row.get('protocol', '?')} "
+                  f"summary={row.get('summary', '')!r}")
+        if not near:
+            print("  no notification within +/-10s (missing rows are not proof)")
+    print("\n--- last notifications ---")
+    shown = 0
+    for row in reversed(notes):
+        note_time = notification_time(row)
+        if note_time is None:
+            continue
+        print(f"{note_time.isoformat()}  {row.get('protocol', '?')}  "
+              f"{row.get('app', '?')!r}  {row.get('summary', '')!r}")
+        shown += 1
+        if shown >= 10:
+            break
+    return 0
+
+
+
+def do_prune(args):
+    state = state_path(args)
+    prune(state, args.keep)
+    print(f"kept newest {args.keep} events in {state}")
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("pre", "post", "latest", "list",
+                                           "show", "prune", "screen-latest"))
+    parser.add_argument("sleep_op", nargs="?", default="")
+    parser.add_argument("event_id", nargs="?", default="")
+    parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE)
+    parser.add_argument("--keep", type=int, default=DEFAULT_KEEP)
+    args = parser.parse_args()
+    try:
+        if args.action == "pre":
+            do_pre(args)
+            return 0
+        if args.action == "post":
+            do_post(args)
+            return 0
+        if args.action == "latest":
+            return do_latest(args)
+        if args.action == "list":
+            return do_list(args)
+        if args.action == "show":
+            return do_show(args)
+        if args.action == "screen-latest":
+            return do_screen_latest(args)
+        if args.action == "prune":
+            return do_prune(args)
+    except Exception as exc:  # keep systemd-sleep hooks from failing the sleep
+        print(f"liuqin-suspend-log: {exc.__class__.__name__}: {exc}",
+              file=sys.stderr)
+        return 0 if args.action in ("pre", "post") else 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

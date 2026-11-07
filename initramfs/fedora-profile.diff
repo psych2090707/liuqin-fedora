@@ -1,0 +1,578 @@
+--- upstream/xiaomipad-6pro-mainline/initramfs/init
++++ initramfs/init
+@@ -1,4 +1,43 @@
+ #!/bin/busybox sh
++# SPDX-License-Identifier: MIT
++
++# ===========================================================================
++# FEDORA FORK NOTICE (project "Fedora on Xiaomi Pad 6 Pro / liuqin")
++#
++# This file is a fork of upstream xiaomipad-6pro-mainline v0.6.0
++# initramfs/init (MIT, sha256 935517a5332365cbbd4f9ae8afe4edbc2f6f5f152d5e30b5bfe71e0e10fc89d8).
++# The upstream logic -- UFS fail-closed storage gate, PARTNAME/LABEL root and
++# home resolution, charger-mode hold, A/B slot-successful marking, USB NCM
++# rescue shell, read-only/read-write revalidation -- is kept intact.
++#
++# Only the distribution-bound admission points were replaced; each is marked
++# with a "FEDORA:" comment and the full set is enumerable with:
++#     grep -n 'FEDORA' initramfs/init
++# Summary:
++#   * new root profile "fedora" (marker /etc/liuqin-fedora-root, contract
++#     /etc/liuqin-fedora-root.contract, header LIUQIN_FEDORA_ROOT_CONTRACT_V2,
++#     ADR-0004 D2).  The contract is a *topology* list, not a content-hash pin
++#     list: device/partition identity stays here in the reboot-safe gate, while
++#     dnf-owned and user-editable files are never hashed at boot (a normal
++#     `dnf upgrade` or hostname change must not force the rescue shell).  The
++#     Fedora topology entries are /usr/lib/systemd/systemd, plasmalogin,
++#     plasmashell, kwin_wayland, startplasma-wayland, kscreenlocker_greet,
++#     the kernel identity interface (existence/owner only) and the login
++#     manager resolution (display-manager.service alias or .wants, both
++#     accepted); the Fedora root lives directly on LIUQIN_ROOT (flat layout:
++#     /etc, /usr, /bin ... at the partition root), matching root.img and the
++#     RAM installer's flat extraction.  This matches the image bundle's
++#     root.img, which is built flat so it can be flashed as linux_root.
++#   * kernel identity is a WARNING only: /usr/share/liuqin/kernel.release is
++#     compared with /proc/sys/kernel/osrelease and a mismatch only logs, because
++#     a dnf kernel update legitimately installs the new identity before the new
++#     boot.img is applied; the strict check belongs to the update/apply tools
++#     (ADR-0004 D5);
++#   * pre-switch_root daemon cleanup no longer requires a BusyBox inside the
++#     real root (Fedora does not ship one at /usr/local/bin/busybox).
++# The gnome/native/legacy profiles are left as upstream so the fork does not
++# silently change behaviour for upstream images.
++# ===========================================================================
+ 
+ # All storage admission decisions are made through this pinned, statically
+ # linked BusyBox.  Do not rely on PATH here: the persistent root is mutable
+@@ -71,11 +110,15 @@
+ 		case $("$BB" sha256sum "$storage_profile_file" | "$BB" cut -d' ' -f1) in
+ 		497a8b108a3eefc839c3738a5c452ee3d6a437eb1ebaf0ea43bd635a8a227978) storage_profile=gnome ;;
+ 		c54b6fd77bc699a17876ed9b46dcf770b66d0bd01380e25cd620ec82adf9c736) storage_profile=native ;;
++		# FEDORA: sha256 of "fedora\n".  scripts/build-initramfs.sh writes
++		# that content as /etc/liuqin-root-profile in the Fedora image.
++		e3c32ad1d1a463cd791660be85efccca017994e4d6f88071e6ccafa4e89e6064) storage_profile=fedora ;;
+ 		esac
+ 	fi
+ fi
+ case $storage_profile in
+-	legacy|gnome|native) ;;
++	# FEDORA: "fedora" added to the accepted profile set.
++	legacy|gnome|native|fedora) ;;
+ 	*)
+ 		log "warning: invalid root profile; forcing legacy"
+ 		storage_profile=legacy
+@@ -129,6 +172,8 @@
+ storage_init=/sbin/init
+ storage_gnome_contract=/etc/liuqin-gnome-root.contract
+ storage_native_contract=/etc/liuqin-native-root.contract
++# FEDORA: contract embedded by scripts/build-initramfs.sh for the fedora profile.
++storage_fedora_contract=/etc/liuqin-fedora-root.contract
+ if [ "$storage_profile" = gnome ]; then
+ 	storage_marker=etc/liuqin-gnome-root
+ 	storage_marker_sha256=bd86a359f5b6bf05f09abf544967489e924c251ab7c07684df62b0dbda4c3fca
+@@ -141,10 +186,22 @@
+ 	storage_root_subdir=native-root
+ 	storage_init=/usr/lib/systemd/systemd
+ fi
++# FEDORA: the root lives directly on the LIUQIN_ROOT partition (flat layout:
++# /etc, /usr, /bin ... at the partition root), which is also how root.img in the
++# image bundle is built.  PID 1 is Fedora's /usr/lib/systemd/systemd; the marker
++# content is "liuqin-fedora-root-v1\n" (21 bytes + newline = 22) and is written
++# by the image assembler, not by dpkg/rpm.
++if [ "$storage_profile" = fedora ]; then
++	storage_marker=etc/liuqin-fedora-root
++	storage_marker_sha256=3c32b153d6dc59ec4752badc5403f1c2df0ef6d88c722508cd08677903cfdda1
++	storage_root_subdir=
++	storage_init=/usr/lib/systemd/systemd
++fi
+ if [ "${LIUQIN_INIT_STORAGE_TEST_ONLY:-0}" = 1 ]; then
+ 	storage_root_contract=${LIUQIN_STORAGE_ROOT_CONTRACT:-$storage_root_contract}
+ 	storage_gnome_contract=${LIUQIN_STORAGE_GNOME_CONTRACT:-$storage_gnome_contract}
+ 	storage_native_contract=${LIUQIN_STORAGE_NATIVE_CONTRACT:-$storage_native_contract}
++	storage_fedora_contract=${LIUQIN_STORAGE_FEDORA_CONTRACT:-$storage_fedora_contract}
+ fi
+ storage_rcs_expected_sha256=
+ storage_inittab_expected_sha256=
+@@ -598,6 +655,263 @@
+ 	return 0
+ }
+ 
++storage_fedora_reject() {
++	log "fedora root rejected: $1"
++	return 1
++}
++
++# FEDORA (ADR-0004 D2): contract v2 is a topology contract.
++#
++# v1 hash-pinned project-owned files, including user-editable configuration
++# (/etc/hostname, locale, vconsole, fstab, selinux config, environment.d,
++# chrony, plasmalogin config, skel dotfiles) and the payload of the project's
++# device RPMs.  That turned a normal `dnf upgrade` or hostname change into a
++# rescue boot.  v2 keeps only what the boot really needs to be fail-closed:
++# the root role marker and the Fedora KDE user-space handoff (PID1, login
++# manager, Plasma session programs, kernel identity interface).  Content
++# hashes of those distribution files are deliberately NOT checked here.
++#
++# These helpers do lexical path resolution inside the target root (absolute
++# symlink targets are interpreted inside the root, not on the initramfs host).
++storage_fedora_normalize_path() { # <absolute path> -> normalized in-root path
++	sfnp_in=${1#/}
++	sfnp_out=
++	while [ -n "$sfnp_in" ]; do
++		sfnp_comp=${sfnp_in%%/*}
++		case $sfnp_in in
++		*/*) sfnp_in=${sfnp_in#*/} ;;
++		*) sfnp_in= ;;
++		esac
++		case $sfnp_comp in
++		''|.) continue ;;
++		..) sfnp_out=${sfnp_out%/*} ;;
++		*) sfnp_out=$sfnp_out/$sfnp_comp ;;
++		esac
++	done
++	[ -n "$sfnp_out" ] || sfnp_out=/
++	printf '%s' "$sfnp_out"
++}
++
++storage_fedora_resolve_path() { # <root> <absolute in-root path> -> resolved path
++	sfrp_root=$1
++	sfrp_path=$(storage_fedora_normalize_path "$2") || return 1
++	sfrp_hops=0
++	while [ "$sfrp_hops" -lt 16 ]; do
++		if [ -L "$sfrp_root$sfrp_path" ]; then
++			sfrp_target=$("$BB" readlink "$sfrp_root$sfrp_path" 2>/dev/null || true)
++			[ -n "$sfrp_target" ] || return 1
++			case $sfrp_target in
++			/*)
++				sfrp_path=$(storage_fedora_normalize_path "$sfrp_target") || return 1
++				;;
++			*)
++				sfrp_parent=${sfrp_path%/*}
++				sfrp_path=$(storage_fedora_normalize_path "$sfrp_parent/$sfrp_target") ||
++					return 1
++				;;
++			esac
++			sfrp_hops=$((sfrp_hops + 1))
++			continue
++		fi
++		[ -e "$sfrp_root$sfrp_path" ] || return 1
++		printf '%s' "$sfrp_path"
++		return 0
++	done
++	return 1
++}
++
++storage_fedora_owned_regular() { # <in-root path> -> 0 when regular + root-owned
++	[ -f "$storage_checked_root$1" ] && [ ! -L "$storage_checked_root$1" ] ||
++		return 1
++	[ "$("$BB" stat -c '%u %g' "$storage_checked_root$1" 2>/dev/null || true)" = "0 0" ] ||
++		return 1
++	return 0
++}
++
++storage_fedora_executable() { # <in-root path> -> 0 when regular+root-owned+exec bit
++	storage_fedora_owned_regular "$1" || return 1
++	sfe_mode=$("$BB" stat -c '%a' "$storage_checked_root$1" 2>/dev/null || true)
++	case $sfe_mode in ''|*[!0-7]*) return 1 ;; esac
++	[ "$((0$sfe_mode & 0111))" -ne 0 ]
++}
++
++# The login manager may be enabled through the systemd display-manager alias
++# (Fedora KDE 44: /etc/systemd/system/display-manager.service -> plasmalogin) or
++# through a graphical/multi-user .wants symlink.  Both forms are accepted, but
++# either way the unit must resolve to an existing regular file (ADR-0004 D2-B).
++storage_fedora_login_manager_ok() {
++	sfdm_unit=$1
++	for sfdm_candidate in \
++		/etc/systemd/system/display-manager.service \
++		/etc/systemd/system/multi-user.target.wants/$sfdm_unit \
++		/etc/systemd/system/graphical.target.wants/$sfdm_unit; do
++		[ -L "$storage_checked_root$sfdm_candidate" ] || continue
++		sfdm_resolved=$(storage_fedora_resolve_path "$storage_checked_root" \
++			"$sfdm_candidate") || continue
++		[ "${sfdm_resolved##*/}" = "$sfdm_unit" ] || continue
++		[ -f "$storage_checked_root$sfdm_resolved" ] &&
++			[ ! -L "$storage_checked_root$sfdm_resolved" ] &&
++			[ "$("$BB" stat -c '%u %g' "$storage_checked_root$sfdm_resolved" \
++				2>/dev/null || true)" = "0 0" ] && return 0
++	done
++	return 1
++}
++
++# Optional migration envelope: both payloads remain complete v2 contracts. The
++# marker and contracts live in INITRAMFS, never in the writable root. Select by
++# one actual enabled manager, not by an arbitrary user setting or a missing-file
++# fallback. Legacy images without the marker retain the original KDE behavior.
++storage_fedora_select_contract() {
++	sfsc_dir=${storage_fedora_contract%/*}
++	sfsc_marker=$sfsc_dir/liuqin-fedora-desktop-transition
++	if [ ! -e "$sfsc_marker" ] && [ ! -L "$sfsc_marker" ]; then
++		return 0
++	fi
++	[ -f "$sfsc_marker" ] && [ ! -L "$sfsc_marker" ] &&
++		[ "$("$BB" cat "$sfsc_marker")" = gnome-v1 ] ||
++		storage_fedora_reject "invalid desktop transition marker" || return 1
++	for sfsc_contract in "$sfsc_dir/liuqin-fedora-root.contract" \
++		"$sfsc_dir/liuqin-fedora-root.gnome.contract"; do
++		[ -f "$sfsc_contract" ] && [ ! -L "$sfsc_contract" ] ||
++			storage_fedora_reject "transition contract missing: $sfsc_contract" || return 1
++	done
++	sfsc_alias=/etc/systemd/system/display-manager.service
++	if [ -e "$storage_checked_root$sfsc_alias" ] ||
++		[ -L "$storage_checked_root$sfsc_alias" ]; then
++		[ -L "$storage_checked_root$sfsc_alias" ] || return 1
++		sfsc_resolved=$(storage_fedora_resolve_path "$storage_checked_root" "$sfsc_alias") || return 1
++		case ${sfsc_resolved##*/} in
++		gdm.service|plasmalogin.service) ;;
++		*) storage_fedora_reject "unreviewed display-manager alias"; return 1 ;;
++		esac
++	fi
++	sfsc_kde=0
++	sfsc_gnome=0
++	storage_fedora_login_manager_ok plasmalogin.service && sfsc_kde=1
++	storage_fedora_login_manager_ok gdm.service && sfsc_gnome=1
++	case $sfsc_kde:$sfsc_gnome in
++	1:0) storage_fedora_contract=$sfsc_dir/liuqin-fedora-root.contract ;;
++	0:1) storage_fedora_contract=$sfsc_dir/liuqin-fedora-root.gnome.contract ;;
++	*) storage_fedora_reject "transition requires exactly one enabled login manager"; return 1 ;;
++	esac
++	log "Fedora desktop admission: $storage_fedora_contract"
++}
++
++# Fedora profile (project fork, see the FEDORA FORK NOTICE at the top):
++# the persistent root is a Fedora KDE ARM64 filesystem living directly on
++# LIUQIN_ROOT.  The contract is topology-only (v2); hash pinning of RPM-owned
++# or user-editable files was removed on purpose (ADR-0004 D2).
++storage_fedora_root_ok() {
++	storage_checked_root=$1
++	storage_fedora_select_contract || return 1
++	[ -f "$storage_fedora_contract" ] && [ ! -L "$storage_fedora_contract" ] ||
++		storage_fedora_reject "contract missing from the initramfs" || return 1
++	storage_fedora_contract_size=$("$BB" stat -c '%s' "$storage_fedora_contract" 2>/dev/null || true)
++	case $storage_fedora_contract_size in ''|*[!0-9]*) return 1 ;; esac
++	[ "$storage_fedora_contract_size" -ge 256 ] &&
++		[ "$storage_fedora_contract_size" -le 16384 ] || return 1
++	storage_fedora_lines=0
++	storage_fedora_entries=0
++	storage_fedora_header_seen=false
++	storage_fedora_marker_seen=false
++	storage_fedora_display_manager_seen=false
++	storage_fedora_kernel_release=
++	while IFS= read -r storage_fedora_line; do
++		storage_fedora_lines=$((storage_fedora_lines + 1))
++		case $storage_fedora_line in
++		''|'#'*) continue ;;
++		esac
++		if [ "$storage_fedora_header_seen" = false ]; then
++			[ "$storage_fedora_line" = LIUQIN_FEDORA_ROOT_CONTRACT_V2 ] ||
++				storage_fedora_reject \
++					"contract header is not LIUQIN_FEDORA_ROOT_CONTRACT_V2" || return 1
++			storage_fedora_header_seen=true
++			continue
++		fi
++		set -f
++		# shellcheck disable=SC2086
++		set -- $storage_fedora_line
++		set +f
++		storage_fedora_kind=$1
++		storage_fedora_entries=$((storage_fedora_entries + 1))
++		case $storage_fedora_kind in
++		marker)
++			[ "$#" = 4 ] || storage_fedora_reject "malformed marker entry" || return 1
++			[ "$2" = /etc/liuqin-fedora-root ] ||
++				storage_fedora_reject "marker path is not /etc/liuqin-fedora-root" || return 1
++			storage_fedora_file=$storage_checked_root$2
++			[ -f "$storage_fedora_file" ] && [ ! -L "$storage_fedora_file" ] ||
++				storage_fedora_reject "marker missing or a symlink" || return 1
++			storage_fedora_marker_mode=${3#0}
++			[ "$("$BB" stat -c '%a %u %g' "$storage_fedora_file" 2>/dev/null || true)" = \
++				"$storage_fedora_marker_mode 0 0" ] ||
++				storage_fedora_reject "marker metadata is not $3 0 0" || return 1
++			[ "$("$BB" sha256sum "$storage_fedora_file" | "$BB" cut -d' ' -f1)" = "$4" ] ||
++				storage_fedora_reject "marker content mismatch" || return 1
++			storage_fedora_marker_seen=true
++			;;
++		file)
++			[ "$#" = 2 ] || storage_fedora_reject "malformed file entry" || return 1
++			storage_fedora_owned_regular "$2" ||
++				storage_fedora_reject "not a root-owned regular file: $2" || return 1
++			case $2 in
++			/usr/share/liuqin/kernel.release)
++				storage_fedora_kernel_release=$2
++				;;
++			esac
++			;;
++		exec)
++			[ "$#" = 2 ] || storage_fedora_reject "malformed exec entry" || return 1
++			storage_fedora_executable "$2" ||
++				storage_fedora_reject "not an executable root-owned regular file: $2" || return 1
++			;;
++		resolve)
++			[ "$#" = 3 ] || storage_fedora_reject "malformed resolve entry" || return 1
++			storage_fedora_resolved=$(storage_fedora_resolve_path \
++				"$storage_checked_root" "$2") ||
++				storage_fedora_reject "unresolvable symlink: $2" || return 1
++			[ "${storage_fedora_resolved##*/}" = "$3" ] ||
++				storage_fedora_reject "$2 resolves to $storage_fedora_resolved" || return 1
++			storage_fedora_owned_regular "$storage_fedora_resolved" ||
++				storage_fedora_reject "$2 resolves to a non-root-owned file" || return 1
++			;;
++		display-manager)
++			[ "$#" = 2 ] || storage_fedora_reject "malformed display-manager entry" || return 1
++			storage_fedora_login_manager_ok "$2" ||
++				storage_fedora_reject "login manager $2 does not resolve to an existing unit" ||
++				return 1
++			storage_fedora_display_manager_seen=true
++			;;
++		*)
++			storage_fedora_reject "unknown contract entry: $storage_fedora_kind" || return 1
++			;;
++		esac
++	done <"$storage_fedora_contract"
++	[ "$storage_fedora_header_seen" = true ] || return 1
++	[ "$storage_fedora_marker_seen" = true ] || return 1
++	[ "$storage_fedora_display_manager_seen" = true ] || return 1
++	[ "$storage_fedora_lines" -ge 8 ] && [ "$storage_fedora_lines" -le 128 ] || return 1
++	[ "$storage_fedora_entries" -ge 8 ] || return 1
++	# Kernel identity interface (warn-only, see the fork notice): the modules
++	# tree for the identity the rootfs reports should exist, but being one
++	# update behind must not send the tablet to recovery (ADR-0004 D2-B/D5).
++	storage_fedora_root_release=$("$BB" cat \
++		"$storage_checked_root$storage_fedora_kernel_release" 2>/dev/null || true)
++	storage_fedora_running_release=$("$BB" cat /proc/sys/kernel/osrelease 2>/dev/null || true)
++	if [ -z "$storage_fedora_running_release" ] ||
++		[ "$storage_fedora_running_release" != "$storage_fedora_root_release" ]; then
++		log "warning: kernel.release ($storage_fedora_root_release) does not match the running kernel ($storage_fedora_running_release); boot image and rootfs may be one update apart"
++	else
++		log "kernel identity matches the running kernel: $storage_fedora_running_release"
++	fi
++	[ -z "$storage_fedora_root_release" ] ||
++		[ -d "$storage_checked_root/usr/lib/modules/$storage_fedora_root_release" ] ||
++		log "warning: /usr/lib/modules/$storage_fedora_root_release is missing in the rootfs (boot image may be newer than the module tree)"
++	"$BB" chroot "$storage_checked_root" /usr/lib/systemd/systemd --version >/dev/null 2>&1 ||
++		storage_fedora_reject "systemd will not execute under chroot" || return 1
++	return 0
++}
++
+ storage_root_ok() {
+ 	storage_checked_root=$1
+ 	if [ "$storage_profile" = native ]; then
+@@ -608,6 +922,11 @@
+ 		storage_gnome_root_ok "$storage_checked_root"
+ 		return $?
+ 	fi
++	# FEDORA: dispatch the new Fedora profile before the legacy fallthrough.
++	if [ "$storage_profile" = fedora ]; then
++		storage_fedora_root_ok "$storage_checked_root"
++		return $?
++	fi
+ 	storage_checked_marker=$storage_checked_root/$storage_marker
+ 	[ -f "$storage_checked_marker" ] || return 1
+ 	[ ! -L "$storage_checked_marker" ] || return 1
+@@ -893,7 +1212,7 @@
+ 		fi
+ 		storage_probe_mounted=true
+ 		if ! "$BB" mount --bind "$storage_probe_root/$storage_root_subdir" "$storage_newroot"; then
+-			log "persistent GNOME subroot bind failed"
++			log "persistent root subroot bind failed"
+ 			storage_abort
+ 			return 1
+ 		fi
+@@ -962,13 +1281,30 @@
+ 	fi
+ 
+ 	# The stage-1 DHCP daemon has the deleted initramfs as its root after
+-	# switch_root. Kill it only after every fallible move completed. Run the
+-	# new root's BusyBox under chroot because /proc has already moved there.
++	# switch_root. Kill it only after every fallible move completed. /proc has
++	# already moved into the new root, so the kill list has to be read from
++	# there; run the new root's BusyBox under chroot when it has one.
+ 	if [ -f /run/udhcpd.pid ]; then
+ 		kill "$(cat /run/udhcpd.pid)" 2>/dev/null || true
+ 	fi
+-	chroot "$storage_newroot" /usr/local/bin/busybox \
+-		killall telnetd udhcpd 2>/dev/null || true
++	# FEDORA: a Fedora root does not carry /usr/local/bin/busybox.  Use the
++	# pinned initramfs BusyBox through a chroot when the root has one (upstream
++	# layout), otherwise walk the moved /proc directly.  This must never be the
++	# only fallible step left before the exec below.
++	if [ -x "$storage_newroot/usr/local/bin/busybox" ]; then
++		chroot "$storage_newroot" /usr/local/bin/busybox \
++			killall telnetd udhcpd 2>/dev/null || true
++	else
++		for storage_stale_proc in "$storage_newroot"/proc/[0-9]*; do
++			[ -r "$storage_stale_proc/comm" ] || continue
++			storage_stale_comm=$(cat "$storage_stale_proc/comm" 2>/dev/null || true)
++			case $storage_stale_comm in
++			telnetd|udhcpd)
++				kill "${storage_stale_proc##*/}" 2>/dev/null || true
++				;;
++			esac
++		done
++	fi
+ 	if ! storage_snapshot_persistent_ok "$storage_newroot/dev"; then
+ 		log "persistent root UFS state changed immediately before switch_root"
+ 		# /dev has moved, so restore it before the normal abort path tries to
+@@ -987,6 +1323,26 @@
+ 	exec "$BB" switch_root "$storage_newroot" "$storage_init"
+ }
+ 
++# Host/CI admission self-check (tests/installer/install-simulation.sh): run the
++# SAME Fedora admission predicate the device runs, against an installed or
++# staged root, without booting.  This is the real-product cross-check between
++# rootfs.tar.gz (what the installer extracts), root.img (what the bundle ships)
++# and the boot path; it is never active on a device boot.
++if [ -n "${LIUQIN_INIT_ADMISSION_ROOT:-}" ]; then
++	storage_profile=fedora
++	storage_marker=etc/liuqin-fedora-root
++	storage_marker_sha256=3c32b153d6dc59ec4752badc5403f1c2df0ef6d88c722508cd08677903cfdda1
++	storage_root_subdir=
++	storage_init=/usr/lib/systemd/systemd
++	storage_fedora_contract=${LIUQIN_STORAGE_FEDORA_CONTRACT:-$storage_fedora_contract}
++	if storage_fedora_root_ok "$LIUQIN_INIT_ADMISSION_ROOT"; then
++		log "admission self-check: PASS for $LIUQIN_INIT_ADMISSION_ROOT"
++		exit 0
++	fi
++	log "admission self-check: FAIL for $LIUQIN_INIT_ADMISSION_ROOT"
++	exit 1
++fi
++
+ # The mutation test enters only the storage gate.  It uses an isolated fake
+ # /dev, sysfs and command PATH, and never reaches the real init sequence.
+ if [ "${LIUQIN_INIT_STORAGE_TEST_ONLY:-0}" = 1 ]; then
+@@ -1017,37 +1373,6 @@
+ [ ! -w /proc/sys/kernel/hotplug ] || echo /sbin/mdev >/proc/sys/kernel/hotplug
+ mdev -s
+ 
+-log "waiting for SCSI/UFS block devices and marking them read-only"
+-found_block=false
+-for attempt in 1 2 3 4 5 6 7 8 9 10; do
+-	mdev -s
+-	for blockdev_path in /dev/sd*; do
+-		[ -b "$blockdev_path" ] || continue
+-		found_block=true
+-		if ! blockdev --setro "$blockdev_path"; then
+-			log "warning: failed to mark read-only: $blockdev_path"
+-		fi
+-	done
+-	sleep 1
+-done
+-
+-ufs_safe=false
+-if [ "$found_block" != true ]; then
+-	log "critical: no SCSI/UFS block devices detected; UFS is not fail-closed"
+-elif storage_lock_all; then
+-	ufs_safe=true
+-	for blockdev_path in /dev/sd*; do
+-		[ -b "$blockdev_path" ] || continue
+-		log "verified read-only: $blockdev_path"
+-	done
+-else
+-	log "critical: could not prove every SCSI/UFS block device read-only"
+-fi
+-
+-if [ "$ufs_safe" != true ]; then
+-	log "critical: remote shell will remain disabled because UFS is not fail-closed"
+-fi
+-
+ # ABL uses androidboot.mode=charger when external power wakes a deeply
+ # discharged tablet.  A normal desktop boot in that state consumes more than
+ # an SDP input can supply and creates a boot/drain/reboot loop.  Product GNOME
+@@ -1059,7 +1384,9 @@
+ case " $(cat /proc/cmdline 2>/dev/null) " in
+ *' androidboot.mode=charger '*) charger_boot=true ;;
+ esac
+-if { [ "$storage_profile" = gnome ] || [ "$storage_profile" = native ]; } && [ "$charger_boot" = true ]; then
++# FEDORA: the fedora profile takes the charger hold just like gnome/native.
++if { [ "$storage_profile" = gnome ] || [ "$storage_profile" = native ] ||
++	[ "$storage_profile" = fedora ]; } && [ "$charger_boot" = true ]; then
+ 	charger_marker=/etc/liuqin-charger-mode
+ 	charger_marker_ok=false
+ 	charger_marker_hash=$(sha256sum "$charger_marker" 2>/dev/null | cut -d' ' -f1)
+@@ -1082,7 +1409,6 @@
+ 	# through to gadget setup, persistent-root preparation, or GNOME.
+ 	while :; do sleep 60; done
+ fi
+-
+ gadget=/sys/kernel/config/usb_gadget/liuqin
+ mkdir -p "$gadget"
+ echo 0x1d6b >"$gadget/idVendor"
+@@ -1153,6 +1479,7 @@
+ storage_installer_optional='userdata linux_root linux_home'
+ 
+ start_stage1_telnet() {
++	[ -f /run/liuqin-telnetd.started ] && return 0
+ 	if [ "$ufs_safe" = true ]; then
+ 		if [ -f "$storage_installer_marker" ]; then
+ 			mkdir -p "$storage_dev_root/disk/by-partlabel" || return 1
+@@ -1183,7 +1510,8 @@
+ 			log "installer data partitions linked:${storage_installer_linked:- none}"
+ 		fi
+ 		log "development-only unauthenticated shell: telnet 192.168.7.2 2323"
+-		telnetd -b 192.168.7.2:2323 -l /bin/sh
++		telnetd -b 192.168.7.2:2323 -l /bin/sh || true
++		: >/run/liuqin-telnetd.started
+ 	else
+ 		log "remote shell withheld; inspect the local console for UFS failures"
+ 	fi
+@@ -1219,19 +1547,55 @@
+ 			log "warning: udhcpd did not start; the host must configure 192.168.7.1/24 itself"
+ 		fi
+ 
+-		if [ "$storage_mode" = persistent ]; then
+-			log "persistent root probe precedes the development shell"
+-		else
+-			start_stage1_telnet
+-		fi
+ 	else
+ 		log "warning: UDC bound but usb0 did not appear"
+ 	fi
+ else
+ 	log "warning: no UDC found; USB networking unavailable"
+ fi
++log "waiting for SCSI/UFS block devices and marking them read-only"
++found_block=false
++for attempt in 1 2 3 4 5 6 7 8 9 10; do
++	mdev -s
++	for blockdev_path in /dev/sd*; do
++		[ -b "$blockdev_path" ] || continue
++		found_block=true
++		if ! blockdev --setro "$blockdev_path"; then
++			log "warning: failed to mark read-only: $blockdev_path"
++		fi
++	done
++	sleep 1
++done
++
++ufs_safe=false
++if [ "$found_block" != true ]; then
++	log "critical: no SCSI/UFS block devices detected; UFS is not fail-closed"
++elif storage_lock_all; then
++	ufs_safe=true
++	for blockdev_path in /dev/sd*; do
++		[ -b "$blockdev_path" ] || continue
++		log "verified read-only: $blockdev_path"
++	done
++else
++	log "critical: could not prove every SCSI/UFS block device read-only"
++fi
++
++if [ "$ufs_safe" != true ]; then
++	log "critical: remote shell will remain disabled because UFS is not fail-closed"
++fi
++
++# FEDORA: the RAM-installer (read-only) image exposes its stage-1 shell
++# only after the read-only proof above.  The persistent image decides
++# separately, in its own branch below (including the dev-rescue marker).
++if [ "$storage_mode" != persistent ] && [ -e /sys/class/net/usb0 ]; then
++	start_stage1_telnet
++fi
+ 
+ if [ "$storage_mode" = persistent ] && [ "$ufs_safe" = true ]; then
++	if [ -f /etc/liuqin-dev-rescue ] && [ -e /sys/class/net/usb0 ]; then
++		log "development rescue: stage-1 shell available before the root probe"
++		start_stage1_telnet
++	fi
+ 	if storage_prepare_persistent_root; then
+ 		slot_success_ok=true
+ 		# Mark the slot this boot actually came from.  The dual layout

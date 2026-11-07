@@ -1,0 +1,78 @@
+From: liuqin local observation patch
+Subject: [PATCH] power: supply: qcom_battmgr: expose liuqin stylus status (read-only)
+
+The Xiaomi liuqin battery firmware exposes the wireless stylus state through
+the same Xiaomi PMIC-GLINK property opcode already used by this driver, but
+with liuqin-specific property IDs.  The vendor qti_battery_charger driver
+uses 0x35..0x41 for pen MAC, TX current/voltage, pen SOC, the two hall
+sensors and reverse-charging mode/state.
+
+Expose only the read side through the existing sm8475_raw group.  This does
+not start, stop or reconfigure charging; it is an observability aid for
+determining whether the stylus is detected and whether reverse charging is
+active.
+
+The IDs come from the liuqin-t-oss qti_battery_charger.c enum and are not
+the sheng 0x55..0x5c values.
+---
+ drivers/power/supply/qcom_battmgr.c | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -124,6 +124,18 @@
+ #define XM_POWER_MAX			44
+ #define XM_CC_ORIENTATION		36
+ 
++/* Xiaomi liuqin wireless stylus properties (vendor qti_battery_charger). */
++#define XM_PEN_MAC_L			53
++#define XM_PEN_MAC_H			54
++#define XM_PEN_TX_IOUT			55
++#define XM_PEN_TX_VOUT			56
++#define XM_PEN_SOC			57
++#define XM_PEN_HALL3			58
++#define XM_PEN_HALL4			59
++#define XM_BT_STATE			63
++#define XM_REVERSE_CHG_MODE		64
++#define XM_REVERSE_CHG_STATE		65
++
+ #define BATTMGR_WLS_PROPERTY_GET	0x34
+ #define BATTMGR_WLS_PROPERTY_SET	0x35
+ #define WLS_ONLINE			0
+@@ -638,6 +650,16 @@
+ QCOM_BATTMGR_RAW_ATTR(raw_xm_quick_charge_type, BATTMGR_XM_PROPERTY_GET, XM_QUICK_CHARGE_TYPE);
+ QCOM_BATTMGR_RAW_ATTR(raw_xm_apdo_max, BATTMGR_XM_PROPERTY_GET, XM_APDO_MAX);
+ QCOM_BATTMGR_RAW_ATTR(raw_xm_power_max, BATTMGR_XM_PROPERTY_GET, XM_POWER_MAX);
++QCOM_BATTMGR_RAW_ATTR(raw_xm_pen_mac_l, BATTMGR_XM_PROPERTY_GET, XM_PEN_MAC_L);
++QCOM_BATTMGR_RAW_ATTR(raw_xm_pen_mac_h, BATTMGR_XM_PROPERTY_GET, XM_PEN_MAC_H);
++QCOM_BATTMGR_RAW_ATTR(raw_xm_pen_tx_iout, BATTMGR_XM_PROPERTY_GET, XM_PEN_TX_IOUT);
++QCOM_BATTMGR_RAW_ATTR(raw_xm_pen_tx_vout, BATTMGR_XM_PROPERTY_GET, XM_PEN_TX_VOUT);
++QCOM_BATTMGR_RAW_ATTR(raw_xm_pen_soc, BATTMGR_XM_PROPERTY_GET, XM_PEN_SOC);
++QCOM_BATTMGR_RAW_ATTR(raw_xm_pen_hall3, BATTMGR_XM_PROPERTY_GET, XM_PEN_HALL3);
++QCOM_BATTMGR_RAW_ATTR(raw_xm_pen_hall4, BATTMGR_XM_PROPERTY_GET, XM_PEN_HALL4);
++QCOM_BATTMGR_RAW_ATTR(raw_xm_bt_state, BATTMGR_XM_PROPERTY_GET, XM_BT_STATE);
++QCOM_BATTMGR_RAW_ATTR(raw_xm_reverse_chg_mode, BATTMGR_XM_PROPERTY_GET, XM_REVERSE_CHG_MODE);
++QCOM_BATTMGR_RAW_ATTR(raw_xm_reverse_chg_state, BATTMGR_XM_PROPERTY_GET, XM_REVERSE_CHG_STATE);
+ 
+ static struct attribute *qcom_battmgr_raw_attrs[] = {
+ 	&dev_attr_raw_usb_real_type.attr,
+@@ -653,6 +675,16 @@
+ 	&dev_attr_raw_xm_quick_charge_type.attr,
+ 	&dev_attr_raw_xm_apdo_max.attr,
+ 	&dev_attr_raw_xm_power_max.attr,
++	&dev_attr_raw_xm_pen_mac_l.attr,
++	&dev_attr_raw_xm_pen_mac_h.attr,
++	&dev_attr_raw_xm_pen_tx_iout.attr,
++	&dev_attr_raw_xm_pen_tx_vout.attr,
++	&dev_attr_raw_xm_pen_soc.attr,
++	&dev_attr_raw_xm_pen_hall3.attr,
++	&dev_attr_raw_xm_pen_hall4.attr,
++	&dev_attr_raw_xm_bt_state.attr,
++	&dev_attr_raw_xm_reverse_chg_mode.attr,
++	&dev_attr_raw_xm_reverse_chg_state.attr,
+ 	NULL,
+ };
+ 
+-- 
+2.43.0

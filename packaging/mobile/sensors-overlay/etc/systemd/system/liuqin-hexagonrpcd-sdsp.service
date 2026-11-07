@@ -1,0 +1,36 @@
+[Unit]
+Description=liuqin SLPI FastRPC reverse tunnel
+Documentation=file:///usr/share/doc/liuqin/README-sensors.md
+ConditionPathExists=/dev/fastrpc-sdsp
+Requires=liuqin-slpi.service
+After=systemd-udevd.service systemd-tmpfiles-setup.service liuqin-slpi.service
+Before=liuqin-ssc-sample-gate.service
+StartLimitIntervalSec=30s
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=fastrpc
+Group=fastrpc
+ExecStart=/usr/bin/hexagonrpcd -f /dev/fastrpc-sdsp -d sdsp -s -R /usr/share/qcom/sm8450/Xiaomi/liuqin
+# The patched daemon maps every listener teardown to a non-zero process exit.
+# Retry transient FastRPC loss, but fail closed after three rapid crashes.
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=5s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=no
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_LOCAL
+ReadOnlyPaths=/usr/share/qcom/sm8450/Xiaomi/liuqin
+ReadOnlyPaths=/var/lib/liuqin-sensors/registry
+DevicePolicy=closed
+DeviceAllow=/dev/fastrpc-sdsp rw
+
+[Install]
+WantedBy=liuqin-sensor-stack.target

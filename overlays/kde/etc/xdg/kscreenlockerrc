@@ -1,0 +1,4 @@
+# KScreenLocker native fingerprint authenticator, backed by Fedora authselect.
+# No enrolled template means password remains the available authenticator.
+[Authenticators]
+Fingerprint=true

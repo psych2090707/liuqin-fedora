@@ -1,0 +1,191 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: yp <yp@e5debian>
+Date: Sat, 26 Sep 2026 02:55:28 +0800
+Subject: [PATCH] drm/msm/dp, usb: typec: mux: bring the DP PHY up before AUX
+ and trace the AUX path
+
+The vendor powers the DP PHY in dp_ctrl_host_init() -- before the first AUX
+transfer -- and mainline has to do the same on this PHY: with only
+phy_init() the AUX controller drives a request that never reaches the wire
+and every DPCD read times out with -ETIMEDOUT.  phy_configure() at RBR /
+2 lanes plus phy_power_on() now run from msm_dp_ctrl_phy_init(), and
+enable_mainlink_clocks() power cycles the PHY first so the rate-dependent
+bring-up re-runs for the link rate the sink reports.
+
+On top of that, trace what AUX actually does: the controller register state
+on a timeout, each successful transaction, the per-attempt DPCD result, and
+the SBU state the FSA4480 was left in.  AUX failures otherwise log at debug
+level only, so a dead channel is invisible by default.
+
+Co-Authored-By: claude-sonnet-4-6 <noreply@anthropic.com>
+
+diff --git a/drivers/gpu/drm/msm/dp/dp_aux.c b/drivers/gpu/drm/msm/dp/dp_aux.c
+index 3825a2fb4..bef015ab3 100644
+--- a/drivers/gpu/drm/msm/dp/dp_aux.c
++++ b/drivers/gpu/drm/msm/dp/dp_aux.c
+@@ -200,8 +200,15 @@ static ssize_t msm_dp_aux_cmd_fifo_tx(struct msm_dp_aux_private *aux,
+ 
+ 	time_left = wait_for_completion_timeout(&aux->comp,
+ 						msecs_to_jiffies(250));
+-	if (!time_left)
++	if (!time_left) {
++		DRM_INFO("aux: no isr in 250ms (ctrl=%#x status=%#x trans=%#x tmo=%#x hpd=%#x)\n",
++			 msm_dp_read_aux(aux, REG_DP_AUX_CTRL),
++			 msm_dp_read_aux(aux, REG_DP_AUX_STATUS),
++			 msm_dp_read_aux(aux, REG_DP_AUX_TRANS_CTRL),
++			 msm_dp_read_aux(aux, REG_DP_TIMEOUT_COUNT),
++			 msm_dp_read_aux(aux, REG_DP_DP_HPD_INT_STATUS));
+ 		return -ETIMEDOUT;
++	}
+ 
+ 	return ret;
+ }
+@@ -494,6 +501,18 @@ irqreturn_t msm_dp_aux_isr(struct drm_dp_aux *msm_dp_aux, u32 isr)
+ 		return IRQ_NONE;
+ 	}
+ 
++	if (aux->aux_error_num == DP_AUX_ERR_NONE) {
++		DRM_INFO("aux: xfer ok (%#010x)\n", isr);
++	} else {
++		static bool logged_aux_err;
++
++		if (!logged_aux_err) {
++			logged_aux_err = true;
++			DRM_INFO("aux: isr err isr=%#010x err_num=%d native=%d\n",
++				 isr, aux->aux_error_num, aux->native);
++		}
++	}
++
+ 	complete(&aux->comp);
+ 
+ 	return IRQ_HANDLED;
+diff --git a/drivers/gpu/drm/msm/dp/dp_ctrl.c b/drivers/gpu/drm/msm/dp/dp_ctrl.c
+index c42fd2c17..d9301772e 100644
+--- a/drivers/gpu/drm/msm/dp/dp_ctrl.c
++++ b/drivers/gpu/drm/msm/dp/dp_ctrl.c
+@@ -1695,8 +1695,14 @@ int msm_dp_ctrl_core_clk_enable(struct msm_dp_ctrl *msm_dp_ctrl)
+ 	}
+ 
+ 	ret = clk_bulk_prepare_enable(ctrl->num_core_clks, ctrl->core_clks);
+-	if (ret)
++	if (ret) {
++		DRM_ERROR("core clk enable failed: %d\n", ret);
+ 		return ret;
++	}
++
++	for (unsigned int i = 0; i < ctrl->num_core_clks; i++)
++		DRM_INFO("core clk[%u] %s rate=%lu\n", i, ctrl->core_clks[i].id,
++			 clk_get_rate(ctrl->core_clks[i].clk));
+ 
+ 	ctrl->core_clks_on = true;
+ 
+@@ -1786,6 +1792,18 @@ static int msm_dp_ctrl_enable_mainlink_clocks(struct msm_dp_ctrl_private *ctrl)
+ 	ctrl->phy_opts.dp.link_rate = ctrl->link->link_params.rate / 100;
+ 	ctrl->phy_opts.dp.ssc = drm_dp_max_downspread(dpcd);
+ 
++	/*
++	 * msm_dp_ctrl_phy_init() already powered the PHY on so that AUX would
++	 * come up, but with provisional RBR options.  phy_configure() only
++	 * latches the new options -- the rate-dependent PLL/serdes bring-up
++	 * lives in power_on(), which is a no-op while power_count is non-zero,
++	 * so the PHY would otherwise stay tuned for RBR while the link runs at
++	 * the sink's rate and training fails.  Power-cycle it now that the DPCD
++	 * read has told us the real rate.
++	 */
++	if (phy->power_count)
++		phy_power_off(phy);
++
+ 	phy_configure(phy, &ctrl->phy_opts);
+ 	phy_power_on(phy);
+ 
+@@ -1908,15 +1926,34 @@ void msm_dp_ctrl_phy_init(struct msm_dp_ctrl *msm_dp_ctrl)
+ {
+ 	struct msm_dp_ctrl_private *ctrl;
+ 	struct phy *phy;
++	int ret;
+ 
+ 	ctrl = container_of(msm_dp_ctrl, struct msm_dp_ctrl_private, msm_dp_ctrl);
+ 	phy = ctrl->phy;
+ 
+ 	msm_dp_ctrl_phy_reset(ctrl);
+-	phy_init(phy);
+ 
+-	drm_dbg_dp(ctrl->drm_dev, "phy=%p init=%d power_on=%d\n",
+-			phy, phy->init_count, phy->power_count);
++	ret = phy_init(phy);
++
++	/*
++	 * Bring the DP PHY up before the first AUX transaction, as the vendor's
++	 * dp_ctrl_host_init() does.  mainline defers phy_configure()/phy_power_on()
++	 * to msm_dp_ctrl_enable_mainlink_clocks(), i.e. to after
++	 * process_hpd_high() has already tried to read the sink's DPCD over AUX,
++	 * so that first read goes out with the DP block held down and times out.
++	 * Conservative RBR/2-lane options here; the real link parameters are
++	 * applied later by msm_dp_ctrl_enable_mainlink_clocks().
++	 */
++	if (!ctrl->phy_opts.dp.lanes)
++		ctrl->phy_opts.dp.lanes = 2;
++	if (!ctrl->phy_opts.dp.link_rate)
++		ctrl->phy_opts.dp.link_rate = 1620;
++
++	phy_configure(phy, &ctrl->phy_opts);
++	ret = phy_power_on(phy);
++
++	DRM_INFO("phy_init init=%d power_on=%d power_on_ret=%d\n",
++		 phy->init_count, phy->power_count, ret);
+ }
+ 
+ void msm_dp_ctrl_phy_exit(struct msm_dp_ctrl *msm_dp_ctrl)
+diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_display.c
+index 7b648a119..923b409bd 100644
+--- a/drivers/gpu/drm/msm/dp/dp_display.c
++++ b/drivers/gpu/drm/msm/dp/dp_display.c
+@@ -396,8 +396,24 @@ static int msm_dp_display_process_hpd_high(struct msm_dp_display_private *dp)
+ 	const struct drm_display_info *info = &connector->display_info;
+ 	int rc = 0;
+ 	u8 dpcd[DP_RECEIVER_CAP_SIZE];
++	int attempt;
++
++	/*
++	 * The first AUX transaction of a plug occasionally gets no reply on
++	 * liuqin: the controller drives it, the ISR reports DP_INTR_TIMEOUT, and
++	 * the DPCD read fails with -ETIMEDOUT.  It has been observed to succeed
++	 * on the same code, so retry instead of abandoning the whole plug on the
++	 * first timeout -- this is bounded and gives each plug several samples.
++	 */
++	for (attempt = 0; attempt < 5; attempt++) {
++		rc = drm_dp_read_dpcd_caps(dp->aux, dpcd);
++		if (!rc)
++			break;
++
++		DRM_INFO("DPCD read attempt %d/5 failed: %d\n", attempt + 1, rc);
++		msleep(100);
++	}
+ 
+-	rc = drm_dp_read_dpcd_caps(dp->aux, dpcd);
+ 	if (rc) {
+ 		DRM_ERROR("failed to read DPCD caps, rc=%d\n", rc);
+ 		goto end;
+diff --git a/drivers/usb/typec/mux/fsa4480.c b/drivers/usb/typec/mux/fsa4480.c
+index c54e42c7e..64b929ef4 100644
+--- a/drivers/usb/typec/mux/fsa4480.c
++++ b/drivers/usb/typec/mux/fsa4480.c
+@@ -141,6 +141,18 @@ static int fsa4480_set(struct fsa4480 *fsa)
+ 		usleep_range(15, 1000);
+ 	}
+ 
++	{
++		unsigned int r04, r05, r07;
++
++		regmap_read(fsa->regmap, FSA4480_SWITCH_ENABLE, &r04);
++		regmap_read(fsa->regmap, FSA4480_SWITCH_SELECT, &r05);
++		regmap_read(fsa->regmap, FSA4480_SWITCH_STATUS1, &r07);
++		dev_info(&fsa->client->dev,
++			 "set: mode=%#lx svid=%#06x orient=%d swap=%d rev=%d sel=%#x en=%#x rd=%#x/%#x/%#x\n",
++			 fsa->mode, fsa->svid, fsa->orientation,
++			 fsa->swap_sbu_lanes, reverse, sel, enable, r04, r05, r07);
++	}
++
+ 	fsa->cur_enable = enable;
+ 
+ 	return 0;

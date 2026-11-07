@@ -1,0 +1,44 @@
+/* SPDX-License-Identifier: MIT */
+.liuqin-stylus-box {
+    spacing: 2px;
+}
+
+.liuqin-stylus-bolt {
+    font-size: 11px;
+}
+
+.liuqin-stylus-card {
+    spacing: 5px;
+    min-width: 220px;
+    padding: 4px 2px;
+}
+
+.liuqin-stylus-title {
+    font-weight: bold;
+}
+
+.liuqin-stylus-status {
+    opacity: 0.8;
+}
+
+.liuqin-stylus-track {
+    background-color: rgba(128, 128, 128, 0.3);
+    border-radius: 3px;
+    height: 6px;
+    width: 200px;
+    margin-top: 2px;
+}
+
+.liuqin-stylus-fill {
+    background-color: #2ec27e;
+    border-radius: 3px;
+    height: 6px;
+}
+
+.liuqin-stylus-fill.low {
+    background-color: #e5a50a;
+}
+
+.liuqin-stylus-fill.critical {
+    background-color: #e01b24;
+}

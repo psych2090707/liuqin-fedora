@@ -1,0 +1,4 @@
+0001-usb-gadget-f_ncm-device-move-lifecycle-6.17.patch
+0002-usb-gadget-u_ether-disconnect-race.patch
+0003-usb-gadget-u_ether-eth-get-drvinfo-null.patch
+0004-usb-gadget-u_ether-netdev-logging.patch

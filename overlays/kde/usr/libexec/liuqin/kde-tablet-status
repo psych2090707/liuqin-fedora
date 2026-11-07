@@ -1,0 +1,23 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Read-only diagnostics for the liuqin KDE tablet defaults (KDE 6.7 tools).
+# Safe on-device and inside an offline rootfs copy.
+set -u
+KR=${KREADCONFIG:-kreadconfig6}
+say() { printf '%s\n' "$*"; }
+group=$($KR --file kwinrc --group Wayland --key VirtualKeyboardMode 2>/dev/null || :)
+say "kwinrc [Wayland] VirtualKeyboardMode=${group:-<unset>} (1=NonMouseInput)"
+for key in TapToClick NaturalScroll DisableWhileTyping; do
+    val=$($KR --file kwinrc --group 'Libinput' --group 'Defaults' --group 'Touchpad' --key "$key" 2>/dev/null || :)
+    say "kwinrc [Libinput][Defaults][Touchpad] $key=${val:-<unset>}"
+done
+for profile in AC Battery LowBattery; do
+    pba=$($KR --file powerdevilrc --group "$profile" --group SuspendAndShutdown --key PowerButtonAction 2>/dev/null || :)
+    lid=$($KR --file powerdevilrc --group "$profile" --group SuspendAndShutdown --key LidAction 2>/dev/null || :)
+    say "powerdevilrc [$profile] PowerButtonAction=${pba:-<default>} LidAction=${lid:-<default>}"
+done
+if command -v systemctl >/dev/null 2>&1; then
+    say "liuqin-power-keyd enabled: $(systemctl is-enabled liuqin-power-keyd.service 2>/dev/null || echo n/a)"
+    say "PowerDevil active: $(systemctl --user is-active plasma-powerdevil.service 2>/dev/null || echo n/a)"
+fi
+say "fingerprint prerequisites: $(test -e /usr/lib64/security/pam_fprintd.so && echo pam_fprintd-present || echo pam_fprintd-missing); libfprint-tod: $(test -e /usr/libexec/liuqin-fingerprint/tod/libfprint-tod-fpc1264-oem.so && echo present || echo BLOCKED/pending)"

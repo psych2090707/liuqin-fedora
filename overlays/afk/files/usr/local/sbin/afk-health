@@ -1,0 +1,112 @@
+#!/bin/bash
+# AFK channel (TN0048) — device-side health snapshot.
+#
+# Read-only and defensive: it never asks for root and never exits non-zero for a
+# missing optional subsystem, so it can be the first thing to run when the AFK
+# link "looks wrong".  Output is plain `key=value` lines under `## section`
+# headers so both humans and `tools/afk/afk.sh` can grep it.
+#
+# Installed by overlays/afk/install.sh.  Host entry point: tools/afk/afk.sh diag
+set -u
+
+sec() { printf '\n## %s\n' "$*"; }
+kv() { printf '%s=%s\n' "$1" "${2:-}"; }
+
+# ----------------------------------------------------------------- identity ---
+sec identity
+kv hostname "$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null)"
+kv uname "$(uname -srm 2>/dev/null)"
+kv os_release "$( (. /etc/os-release 2>/dev/null; printf '%s' "${PRETTY_NAME:-unknown}") )"
+kv boot_id "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"
+kv uptime_sec "$(cut -d' ' -f1 /proc/uptime 2>/dev/null)"
+kv cmdline "$(cat /proc/cmdline 2>/dev/null)"
+kv date_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+kv afk_overlay_version "$(cat /var/lib/afk/version 2>/dev/null)"
+
+# ------------------------------------------------------------- usb / network ---
+sec usb_ncm
+if [ -e /sys/class/net/usb0 ]; then
+    kv usb0 present
+    kv usb0_operstate "$(cat /sys/class/net/usb0/operstate 2>/dev/null)"
+    kv usb0_carrier "$(cat /sys/class/net/usb0/carrier 2>/dev/null)"
+    kv usb0_addr4 "$(ip -4 -o addr show dev usb0 2>/dev/null | awk '{print $4}' | tr '\n' ' ')"
+    kv usb0_addr6 "$(ip -6 -o addr show dev usb0 2>/dev/null | awk '{print $4}' | tr '\n' ' ')"
+    kv usb0_mac "$(cat /sys/class/net/usb0/address 2>/dev/null)"
+else
+    kv usb0 absent
+fi
+if [ -e /sys/kernel/config/usb_gadget/liuqin/UDC ]; then
+    kv gadget_udc "$(cat /sys/kernel/config/usb_gadget/liuqin/UDC 2>/dev/null)"
+else
+    kv gadget_absent 1
+fi
+kv nm_active "$(systemctl is-active NetworkManager 2>/dev/null)"
+kv nm_usb0_connection "$(nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -i usb0 | head -n1)"
+kv nm_usb0_device_state "$(nmcli -t -f DEVICE,STATE connection show --active 2>/dev/null | grep -i usb0 | head -n1)"
+kv all_ipv4 "$(ip -4 -o addr show 2>/dev/null | awk '{print $2"="$4}' | tr '\n' ' ')"
+
+# ------------------------------------------------------------------ services ---
+sec services
+for unit in sshd.service NetworkManager.service afk-usb0-dhcp.service systemd-pstore.service afk-boot-snapshot.service afk-shutdown-snapshot.service systemd-journald.service; do
+    printf '%s_active=%s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null)"
+    printf '%s_enabled=%s\n' "$unit" "$(systemctl is-enabled "$unit" 2>/dev/null)"
+done
+kv sshd_listeners "$(ss -ltn 2>/dev/null | awk 'NR>1 && ($4 ~ /:22$/ || $4 ~ /\]:22$/) {print $4}' | tr '\n' ' ')"
+kv failed_units "$(systemctl --failed --no-legend 2>/dev/null | wc -l)"
+kv failed_units_list "$(systemctl --failed --no-legend 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
+
+# ------------------------------------------------------------------- session ---
+sec session
+kv graphical_target "$(systemctl is-active graphical.target 2>/dev/null)"
+kv plasmalogin "$(systemctl is-active plasmalogin.service 2>/dev/null)"
+DEV_USER="${AFK_DEV_USER:-user}"
+DEV_UID="$(id -u "$DEV_USER" 2>/dev/null || true)"
+kv dev_user "$DEV_USER"
+kv dev_uid "${DEV_UID:-}"
+kv user_units "$(loginctl list-sessions --no-legend 2>/dev/null | tr '\n' ';')"
+if [ -n "${DEV_UID:-}" ]; then
+    kv plasmashell_pid "$(pgrep -u "$DEV_UID" -x plasmashell 2>/dev/null | head -n1)"
+    kv kwin_wayland_pid "$(pgrep -u "$DEV_UID" -x kwin_wayland 2>/dev/null | head -n1)"
+    kv session_type "$(loginctl show-user "$DEV_USER" -p Session 2>/dev/null | cut -d= -f2- | tr '\n' ' ')"
+    # The user manager is what starts krdpserver/afk-krdp-preauth.
+    kv krdp_user_unit "$(runuser -u "$DEV_USER" -- env XDG_RUNTIME_DIR="/run/user/$DEV_UID" systemctl --user is-active app-org.kde.krdpserver.service 2>/dev/null)"
+    kv preauth_user_unit "$(runuser -u "$DEV_USER" -- env XDG_RUNTIME_DIR="/run/user/$DEV_UID" systemctl --user is-active afk-krdp-preauth.service 2>/dev/null)"
+fi
+
+# ----------------------------------------------------------------------- rdp ---
+sec rdp
+kv rdp_listener "$(ss -ltn 2>/dev/null | awk 'NR>1 && $4 ~ /:3389$/ {print $4}' | tr '\n' ' ')"
+kv krdp_installed "$(rpm -q krdp 2>/dev/null || echo missing)"
+kv krdp_cert "$(test -s /home/"$DEV_USER"/.local/share/krdpserver/krdp.crt && echo present || echo missing)"
+kv krdp_key "$(test -s /home/"$DEV_USER"/.local/share/krdpserver/krdp.key && echo present || echo missing)"
+kv krdp_config "$(test -r /etc/xdg/krdpserverrc && echo present || echo missing)"
+kv portal_permission "$(runuser -u "$DEV_USER" -- env XDG_RUNTIME_DIR="/run/user/${DEV_UID:-1000}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${DEV_UID:-1000}/bus" flatpak permission-show kde-authorized remote-desktop org.kde.krdpserver 2>/dev/null | head -n2 | tr '\n' ' ')"
+kv freerdp_libs "$(rpm -q freerdp-libs 2>/dev/null || echo missing)"
+
+# ---------------------------------------------------------------------- logs ---
+sec logs
+kv journal_disk_usage "$(journalctl --disk-usage 2>/dev/null)"
+kv journal_boots "$(journalctl --list-boots --no-pager 2>/dev/null | wc -l)"
+kv pstore_entries "$(ls /sys/fs/pstore 2>/dev/null | wc -l)"
+kv pstore_archived "$(find /var/lib/systemd/pstore -type f 2>/dev/null | wc -l)"
+kv afk_log_dirs "$(find /var/log/afk/boots -maxdepth 1 -type d 2>/dev/null | wc -l)"
+kv coredumps "$(coredumpctl --no-pager list 2>/dev/null | awk 'NR>1' | wc -l)"
+
+# ------------------------------------------------------------------- storage ---
+sec storage
+kv disk_root "$(df -h / 2>/dev/null | tail -n1)"
+kv disk_home "$(df -h /home 2>/dev/null | tail -n1)"
+kv disk_var "$(df -h /var 2>/dev/null | tail -n1)"
+kv meminfo "$(awk '/^(MemTotal|MemAvailable|SwapTotal):/ {printf "%s%s ", $1, $2}' /proc/meminfo 2>/dev/null)"
+kv loadavg "$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)"
+
+# --------------------------------------------------------- thermal / battery ---
+sec power
+kv thermal_zones "$(for z in /sys/class/thermal/thermal_zone*; do [ -e "$z/temp" ] || continue; printf '%s=%s ' "$(cat "$z/type" 2>/dev/null)" "$(cat "$z/temp" 2>/dev/null)"; done)"
+kv battery_capacity "$(for b in /sys/class/power_supply/*/capacity; do [ -e "$b" ] && printf '%s ' "$(cat "$b" 2>/dev/null)"; done)"
+kv battery_status "$(for s in /sys/class/power_supply/*/status; do [ -e "$s" ] && printf '%s ' "$(cat "$s" 2>/dev/null)"; done)"
+kv watchdog_devices "$(ls /sys/class/watchdog 2>/dev/null | tr '\n' ' ')"
+kv watchdog_identity "$(for w in /sys/class/watchdog/watchdog*; do [ -e "$w/identity" ] && printf '%s=%s ' "$(basename "$w")" "$(cat "$w/identity" 2>/dev/null)"; done)"
+kv watchdog_runtime "$(systemctl show -p RuntimeWatchdogUSec 2>/dev/null)"
+
+exit 0

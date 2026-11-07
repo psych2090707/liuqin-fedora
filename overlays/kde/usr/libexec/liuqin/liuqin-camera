@@ -1,0 +1,5 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Upstream v0.6.0 device/gnome-overlay/usr/local/bin/liuqin-camera.
+# Snapshot needs DMA-BUF import; scope the exception to this application.
+exec env GDK_DISABLE= /usr/bin/snapshot "$@"

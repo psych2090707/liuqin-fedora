@@ -1,0 +1,98 @@
+#!/bin/bash
+# AFK channel (TN0048) — screenshot the live Plasma (Wayland) session.
+#
+# Usage:  afk-shot [full|monitor|active] [output.png]
+# Prints the PNG path on stdout and nothing else; diagnostics go to stderr.
+#
+# Why spectacle and not a VNC/RDP screenshot: spectacle is already installed in
+# the delivery rootfs, it captures through KWin's own screencast interface (the
+# exact frames the tablet shows), and it needs no host-side packages.  The host
+# runs this over SSH, then `scp`s the file back (tools/afk/afk.sh shot).
+#
+# Running from an SSH session only works if we borrow the *graphical session's*
+# environment (WAYLAND_DISPLAY / XDG_RUNTIME_DIR / DBUS_SESSION_BUS_ADDRESS)
+# from an existing session process; a plain SSH login has none of them.
+set -u
+
+mode="${1:-full}"
+out="${2:-}"
+
+diag() { printf 'afk-shot: %s\n' "$*" >&2; }
+
+if ! command -v spectacle >/dev/null 2>&1; then
+    diag "spectacle is not installed"
+    exit 127
+fi
+
+# --- find a process that belongs to the graphical session ---------------------
+# KWin is the long-lived one; plasmashell is a good fallback.
+session_pid=""
+for name in plasmashell kwin_wayland plasma_session; do
+    pid="$(pgrep -u "$(id -u)" -x "$name" 2>/dev/null | head -n1)"
+    if [ -n "${pid:-}" ]; then
+        session_pid="$pid"
+        break
+    fi
+done
+
+session_environment=""
+if [ -n "$session_pid" ]; then
+    session_environment="$(cat "/proc/$session_pid/environ" 2>/dev/null | tr '\0' '\n')"
+fi
+if [ -z "$session_environment" ]; then
+    # KWin may disable /proc environment reads even for the same uid. Plasma
+    # imports its display environment into the standard systemd user manager.
+    session_environment="$(systemctl --user show-environment 2>/dev/null)"
+fi
+env_from_session() {
+    printf '%s\n' "$session_environment" | sed -n "s/^$1=//p" | head -n1
+}
+
+if [ -n "$session_environment" ]; then
+    for name in WAYLAND_DISPLAY DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS \
+                XAUTHORITY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP KDE_FULL_SESSION \
+                QT_QPA_PLATFORM QT_WAYLAND_DISABLE_WINDOWDECORATION; do
+        value="$(env_from_session "$name")"
+        [ -n "$value" ] && export "$name=$value"
+    done
+else
+    diag "no plasmashell/kwin_wayland process for uid $(id -u); is the plasma session running?"
+fi
+
+# Last-resort defaults (no session process found, or a partially empty env).
+uid="$(id -u)"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$uid}"
+export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
+
+case "$mode" in
+    full)    capture_flag=-f ;;
+    monitor) capture_flag=-m ;;
+    active)  capture_flag=-a ;;
+    *) diag "unknown mode '$mode' (expected full|monitor|active)"; exit 2 ;;
+esac
+
+out="${out:-/tmp/afk-shot-$(date -u +%Y%m%dT%H%M%SZ).png}"
+mkdir -p "$(dirname "$out")" 2>/dev/null || true
+rm -f "$out"
+
+diag "capturing ($mode) -> $out"
+# -b background (no GUI), -n no notification, -o output file.
+timeout 120 spectacle -b -n "$capture_flag" -o "$out" >&2 2>&1
+rc=$?
+
+# spectacle returns before the file is necessarily flushed in some versions.
+for _ in $(seq 1 30); do
+    [ -s "$out" ] && break
+    sleep 0.5
+done
+
+if [ ! -s "$out" ]; then
+    diag "spectacle failed (exit $rc) and produced no file"
+    exit 1
+fi
+
+printf '%s\n' "$out"
+exit 0

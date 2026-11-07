@@ -1,0 +1,8 @@
+{
+  "uuid": "liuqin-tablet-keyboard@liuqin",
+  "name": "Liuqin tablet keyboard (layout reuse)",
+  "description": "Existing Liuqin v4 tablet keyboard with redundant layout rebuilds removed. Stays loaded through the lock screen; preserves native authentication. Keep the old liuqin-osk-layout@liuqin extension disabled.",
+  "shell-version": ["51"],
+  "session-modes": ["user", "unlock-dialog"],
+  "version": 6
+}

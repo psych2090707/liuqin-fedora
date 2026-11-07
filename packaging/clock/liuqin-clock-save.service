@@ -1,0 +1,23 @@
+[Unit]
+Description=Save a trusted startup time floor for liuqin
+Requires=liuqin-clock-shutdown.service
+After=liuqin-clock-shutdown.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/liuqin/liuqin-clock-save
+TimeoutStartSec=8s
+User=root
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+ProtectClock=yes
+ProtectSystem=strict
+ReadWritePaths=/usr/lib/clock-epoch /run/liuqin-clock /run/chrony
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX

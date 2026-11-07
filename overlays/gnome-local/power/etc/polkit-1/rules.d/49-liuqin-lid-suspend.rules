@@ -1,0 +1,12 @@
+/* SPDX-License-Identifier: MIT
+ * TN0097: the lid service runs as laplus outside the graphical session.
+ * polkit therefore treats its suspend request as non-interactive and requires
+ * authentication. Allow only the suspend action for this single-user device;
+ * do not grant a general polkit bypass.
+ */
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.login1.suspend" &&
+        subject.user == "laplus") {
+        return polkit.Result.YES;
+    }
+});

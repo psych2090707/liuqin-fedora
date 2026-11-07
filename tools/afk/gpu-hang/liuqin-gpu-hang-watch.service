@@ -1,0 +1,27 @@
+[Unit]
+Description=Capture liuqin GPU hang evidence while the kernel is still alive
+Documentation=file:/usr/libexec/liuqin/gpu-hang-watch.py
+ConditionPathExists=/etc/liuqin-slpi-disabled
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -B /usr/libexec/liuqin/gpu-hang-watch.py daemon
+Restart=always
+RestartSec=5
+Nice=10
+IOSchedulingClass=best-effort
+LogsDirectory=liuqin-gpu-hang
+LogsDirectoryMode=0750
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectClock=yes
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=256M
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

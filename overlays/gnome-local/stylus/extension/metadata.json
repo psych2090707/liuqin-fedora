@@ -1,0 +1,7 @@
+{
+  "uuid": "liuqin-stylus-battery@liuqin",
+  "name": "Liuqin stylus battery",
+  "description": "Show Xiaomi Smart Pen charge state from qcom-battmgr-pen in the top bar.",
+  "shell-version": ["51"],
+  "version": 1
+}

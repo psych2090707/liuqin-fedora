@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: yp <yp@e5debian>
+Date: Sun, 27 Sep 2026 19:08:16 +0800
+Subject: [PATCH] drm/msm: expose gpu_busy_percent sysfs attribute
+
+Expose the current GPU busy percentage (as sampled by the devfreq
+governor) on the GPU platform device, so userspace tools can report
+utilization without polling the raw GMU counter themselves.
+
+The busy_percent field is tracked in the devfreq governor and exposed
+as a read-only sysfs attribute on platforms that report a busy counter.
+
+Co-Authored-By: claude-sonnet-4-6 <noreply@anthropic.com>
+
+diff --git a/drivers/gpu/drm/msm/msm_gpu.c b/drivers/gpu/drm/msm/msm_gpu.c
+index c317b25a8..0f61493bf 100644
+--- a/drivers/gpu/drm/msm/msm_gpu.c
++++ b/drivers/gpu/drm/msm/msm_gpu.c
+@@ -958,6 +958,32 @@ msm_gpu_create_private_vm(struct msm_gpu *gpu, struct task_struct *task,
+ 	return vm;
+ }
+ 
++/*
++ * Expose the current GPU busy percentage (as sampled by the devfreq governor)
++ * on the GPU platform device, so userspace tools can report utilization without
++ * polling the raw GMU counter themselves.
++ */
++static ssize_t gpu_busy_percent_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct msm_gpu *gpu = dev_to_gpu(dev);
++
++	if (!gpu)
++		return sysfs_emit(buf, "0\n");
++
++	return sysfs_emit(buf, "%u\n", gpu->devfreq.busy_percent);
++}
++static DEVICE_ATTR_RO(gpu_busy_percent);
++
++static struct attribute *msm_gpu_attrs[] = {
++	&dev_attr_gpu_busy_percent.attr,
++	NULL,
++};
++
++static struct attribute_group msm_gpu_sysfs_group = {
++	.attrs = msm_gpu_attrs,
++};
++
+ int msm_gpu_init(struct drm_device *drm, struct platform_device *pdev,
+ 		struct msm_gpu *gpu, const struct msm_gpu_funcs *funcs,
+ 		const char *name, struct msm_gpu_config *config)
+@@ -1049,6 +1075,19 @@ int msm_gpu_init(struct drm_device *drm, struct platform_device *pdev,
+ 
+ 	msm_devfreq_init(gpu);
+ 
++	/*
++	 * Only platforms that report a busy counter are interesting to userspace
++	 * utilization tools, so expose the attribute conditionally.
++	 */
++	if (funcs->gpu_busy) {
++		int group_ret = devm_device_add_group(&pdev->dev,
++				&msm_gpu_sysfs_group);
++		if (group_ret)
++			DRM_DEV_ERROR(&pdev->dev,
++				"failed to expose gpu_busy_percent: %d\n",
++				group_ret);
++	}
++
+ 	gpu->vm = gpu->funcs->create_vm(gpu, pdev);
+ 	if (IS_ERR(gpu->vm)) {
+ 		ret = PTR_ERR(gpu->vm);
+diff --git a/drivers/gpu/drm/msm/msm_gpu.h b/drivers/gpu/drm/msm/msm_gpu.h
+index b2a96544f..25c332810 100644
+--- a/drivers/gpu/drm/msm/msm_gpu.h
++++ b/drivers/gpu/drm/msm/msm_gpu.h
+@@ -145,6 +145,16 @@ struct msm_gpu_devfreq {
+ 	 */
+ 	u64 busy_cycles;
+ 
++	/**
++	 * busy_percent:
++	 *
++	 * Most recently computed GPU busy percentage (0-100), derived from the
++	 * busy/total time sampled by get_dev_status(). Updated by the devfreq
++	 * governor while the GPU is active and forced to zero when it is
++	 * suspended. Exposed to userspace as the gpu_busy_percent sysfs attr.
++	 */
++	unsigned int busy_percent;
++
+ 	/** time: Time of last sampling period. */
+ 	ktime_t time;
+ 
+diff --git a/drivers/gpu/drm/msm/msm_gpu_devfreq.c b/drivers/gpu/drm/msm/msm_gpu_devfreq.c
+index 2e1d5c343..7d1bd4dbe 100644
+--- a/drivers/gpu/drm/msm/msm_gpu_devfreq.c
++++ b/drivers/gpu/drm/msm/msm_gpu_devfreq.c
+@@ -93,6 +93,7 @@ static int msm_devfreq_get_dev_status(struct device *dev,
+ 	if (df->suspended) {
+ 		mutex_unlock(&df->lock);
+ 		status->busy_time = 0;
++		df->busy_percent = 0;
+ 		return 0;
+ 	}
+ 
+@@ -109,6 +110,14 @@ static int msm_devfreq_get_dev_status(struct device *dev,
+ 
+ 	status->busy_time = busy_time;
+ 
++	if (status->total_time) {
++		u64 pct = div_u64((u64)status->busy_time * 100, status->total_time);
++
++		df->busy_percent = pct > 100 ? 100 : (unsigned int)pct;
++	} else {
++		df->busy_percent = 0;
++	}
++
+ 	return 0;
+ }
+ 
+@@ -237,6 +246,7 @@ void msm_devfreq_resume(struct msm_gpu *gpu)
+ 	df->busy_cycles = gpu->funcs->gpu_busy(gpu, &sample_rate);
+ 	df->time = ktime_get();
+ 	df->suspended = false;
++	df->busy_percent = 0;
+ 	mutex_unlock(&df->lock);
+ 
+ 	devfreq_resume_device(df->devfreq);
+@@ -251,6 +261,7 @@ void msm_devfreq_suspend(struct msm_gpu *gpu)
+ 
+ 	mutex_lock(&df->lock);
+ 	df->suspended = true;
++	df->busy_percent = 0;
+ 	mutex_unlock(&df->lock);
+ 
+ 	devfreq_suspend_device(df->devfreq);

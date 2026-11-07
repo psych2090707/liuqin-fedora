@@ -1,0 +1,180 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Amirreza Zarrabi <amirreza.zarrabi@oss.qualcomm.com>
+Date: Thu, 11 Sep 2025 21:07:43 -0700
+Subject: [PATCH] tee: add close_context to TEE driver operation
+
+The tee_context can be used to manage TEE user resources, including
+those allocated by the driver for the TEE on behalf of the user.
+The release() callback is invoked only when all resources, such as
+tee_shm, are released and there are no references to the tee_context.
+
+When a user closes the device file, the driver should notify the
+TEE to release any resources it may hold and drop the context
+references. To achieve this, a close_context() callback is
+introduced to initiate resource release in the TEE driver when
+the device file is closed.
+
+Relocate teedev_ctx_get, teedev_ctx_put, tee_device_get, and
+tee_device_get functions to tee_core.h to make them accessible
+outside the TEE subsystem.
+
+Reviewed-by: Sumit Garg <sumit.garg@oss.qualcomm.com>
+Tested-by: Neil Armstrong <neil.armstrong@linaro.org>
+Tested-by: Harshal Dev <quic_hdev@quicinc.com>
+Signed-off-by: Amirreza Zarrabi <amirreza.zarrabi@oss.qualcomm.com>
+Signed-off-by: Jens Wiklander <jens.wiklander@linaro.org>
+(backported from commit 0cbaf65c91db0e40a577e8919979dac1963cfcc0)
+[liuqin: v6.18 commit taken unchanged except for the tee_core.h context,
+ which in v6.17 has no protected DMA-heap declarations to anchor on.
+ The QSEECOM TEE driver uses this hook to withdraw its listeners when
+ the supplicant closes the device; it is not otherwise a liuqin change.
+ Drop this commit when the project kernel moves to v6.18 or later.]
+Based-on: https://github.com/yzddmr6/linux-sm8450-liuqin/pull/7 (yuzelingsha)
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+diff --git a/drivers/tee/tee_core.c b/drivers/tee/tee_core.c
+index acc799875..773afa651 100644
+--- a/drivers/tee/tee_core.c
++++ b/drivers/tee/tee_core.c
+@@ -80,6 +80,7 @@ void teedev_ctx_get(struct tee_context *ctx)
+ 
+ 	kref_get(&ctx->refcount);
+ }
++EXPORT_SYMBOL_GPL(teedev_ctx_get);
+ 
+ static void teedev_ctx_release(struct kref *ref)
+ {
+@@ -97,11 +98,15 @@ void teedev_ctx_put(struct tee_context *ctx)
+ 
+ 	kref_put(&ctx->refcount, teedev_ctx_release);
+ }
++EXPORT_SYMBOL_GPL(teedev_ctx_put);
+ 
+ void teedev_close_context(struct tee_context *ctx)
+ {
+ 	struct tee_device *teedev = ctx->teedev;
+ 
++	if (teedev->desc->ops->close_context)
++		teedev->desc->ops->close_context(ctx);
++
+ 	teedev_ctx_put(ctx);
+ 	tee_device_put(teedev);
+ }
+@@ -1038,6 +1043,7 @@ void tee_device_put(struct tee_device *teedev)
+ 	}
+ 	mutex_unlock(&teedev->mutex);
+ }
++EXPORT_SYMBOL_GPL(tee_device_put);
+ 
+ bool tee_device_get(struct tee_device *teedev)
+ {
+@@ -1050,6 +1056,7 @@ bool tee_device_get(struct tee_device *teedev)
+ 	mutex_unlock(&teedev->mutex);
+ 	return true;
+ }
++EXPORT_SYMBOL_GPL(tee_device_get);
+ 
+ /**
+  * tee_device_unregister() - Removes a TEE device
+diff --git a/drivers/tee/tee_private.h b/drivers/tee/tee_private.h
+index 9bc506052..d3f40a03d 100644
+--- a/drivers/tee/tee_private.h
++++ b/drivers/tee/tee_private.h
+@@ -14,12 +14,6 @@
+ 
+ int tee_shm_get_fd(struct tee_shm *shm);
+ 
+-bool tee_device_get(struct tee_device *teedev);
+-void tee_device_put(struct tee_device *teedev);
+-
+-void teedev_ctx_get(struct tee_context *ctx);
+-void teedev_ctx_put(struct tee_context *ctx);
+-
+ struct tee_shm *tee_shm_alloc_user_buf(struct tee_context *ctx, size_t size);
+ struct tee_shm *tee_shm_register_user_buf(struct tee_context *ctx,
+ 					  unsigned long addr, size_t length);
+diff --git a/include/linux/tee_core.h b/include/linux/tee_core.h
+index a38494d6b..284ca6b3e 100644
+--- a/include/linux/tee_core.h
++++ b/include/linux/tee_core.h
+@@ -65,8 +65,9 @@ struct tee_device {
+ /**
+  * struct tee_driver_ops - driver operations vtable
+  * @get_version:	returns version of driver
+- * @open:		called when the device file is opened
+- * @release:		release this open file
++ * @open:		called for a context when the device file is opened
++ * @close_context:	called when the device file is closed
++ * @release:		called to release the context
+  * @open_session:	open a new session
+  * @close_session:	close a session
+  * @system_session:	declare session as a system session
+@@ -76,11 +77,17 @@ struct tee_device {
+  * @supp_send:		called for supplicant to send a response
+  * @shm_register:	register shared memory buffer in TEE
+  * @shm_unregister:	unregister shared memory buffer in TEE
++ *
++ * The context given to @open might last longer than the device file if it is
++ * tied to other resources in the TEE driver. @close_context is called when the
++ * client closes the device file, even if there are existing references to the
++ * context. The TEE driver can use @close_context to start cleaning up.
+  */
+ struct tee_driver_ops {
+ 	void (*get_version)(struct tee_device *teedev,
+ 			    struct tee_ioctl_version_data *vers);
+ 	int (*open)(struct tee_context *ctx);
++	void (*close_context)(struct tee_context *ctx);
+ 	void (*release)(struct tee_context *ctx);
+ 	int (*open_session)(struct tee_context *ctx,
+ 			    struct tee_ioctl_open_session_arg *arg,
+@@ -154,6 +161,24 @@ int tee_device_register(struct tee_device *teedev);
+  */
+ void tee_device_unregister(struct tee_device *teedev);
+ 
++/**
++ * tee_device_get() - Increment the user count for a tee_device
++ * @teedev: Pointer to the tee_device
++ *
++ * If tee_device_unregister() has been called and the final user of @teedev
++ * has already released the device, this function will fail to prevent new users
++ * from accessing the device during the unregistration process.
++ *
++ * Returns: true if @teedev remains valid, otherwise false
++ */
++bool tee_device_get(struct tee_device *teedev);
++
++/**
++ * tee_device_put() - Decrease the user count for a tee_device
++ * @teedev: pointer to the tee_device
++ */
++void tee_device_put(struct tee_device *teedev);
++
+ /**
+  * tee_device_set_dev_groups() - Set device attribute groups
+  * @teedev:	Device to register
+@@ -315,4 +340,25 @@ struct tee_context *teedev_open(struct tee_device *teedev);
+  */
+ void teedev_close_context(struct tee_context *ctx);
+ 
++/**
++ * teedev_ctx_get() - Increment the reference count of a context
++ * @ctx: Pointer to the context
++ *
++ * This function increases the refcount of the context, which is tied to
++ * resources shared by the same tee_device. During the unregistration process,
++ * the context may remain valid even after tee_device_unregister() has returned.
++ *
++ * Users should ensure that the context's refcount is properly decreased before
++ * calling tee_device_put(), typically within the context's release() function.
++ * Alternatively, users can call tee_device_get() and teedev_ctx_get() together
++ * and release them simultaneously (see shm_alloc_helper()).
++ */
++void teedev_ctx_get(struct tee_context *ctx);
++
++/**
++ * teedev_ctx_put() - Decrease reference count on a context
++ * @ctx: pointer to the context
++ */
++void teedev_ctx_put(struct tee_context *ctx);
++
+ #endif /*__TEE_CORE_H*/

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Turn Off Screen
+Name[zh_CN]=熄屏
+Comment=Turn off the display; keep applications running
+Comment[zh_CN]=关闭屏幕，保持应用运行；触屏、键盘或电源键唤亮
+Exec=busctl --user call org.kde.kglobalaccel /component/org_kde_powerdevil org.kde.kglobalaccel.Component invokeShortcut s "Turn Off Screen"
+Icon=system-shutdown
+Terminal=false
+Categories=System;
+Keywords=screen;display;power;dpms;
+Keywords[zh_CN]=熄屏;关屏;显示;电源;

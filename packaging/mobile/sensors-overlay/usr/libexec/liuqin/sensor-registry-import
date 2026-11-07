@@ -1,0 +1,50 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Import a private, per-device SSC registry without ever placing it in git or
+# the release archive.  This is intentionally a separate operator action.
+set -eu
+
+src=${1:?usage: liuqin-sensor-registry-import SOURCE_DIRECTORY}
+dst=/var/lib/liuqin-sensors/registry
+
+die() { printf 'liuqin-sensor-registry-import: %s\n' "$*" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || die 'root privileges are required'
+[ -d "$src" ] || die "source is not a directory: $src"
+[ ! -L "$src" ] || die 'source directory must not be a symlink'
+
+count=$(find "$src" -mindepth 1 -maxdepth 1 -type f -print | wc -l | tr -d ' ')
+[ "$count" -gt 0 ] || die 'source contains no regular registry files'
+if find "$src" -mindepth 1 -maxdepth 1 ! -type f -print -quit | grep -q .; then
+	die 'source contains a symlink, directory, or special file'
+fi
+
+stage=$(mktemp -d /var/lib/liuqin-sensors/.registry-import.XXXXXX)
+trap 'rm -rf "$stage"' EXIT HUP INT TERM
+find "$src" -mindepth 1 -maxdepth 1 -type f -print | LC_ALL=C sort |
+while IFS= read -r file; do
+	name=${file##*/}
+	case $name in ''|.*|*/*) die "unsafe registry filename: $name" ;; esac
+	install -m 0640 -o fastrpc -g fastrpc "$file" "$stage/$name"
+done
+
+manifest=$stage/SHA256SUMS
+(cd "$stage" && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\0' |
+	LC_ALL=C sort -z | xargs -0 sha256sum) >"$manifest"
+chown fastrpc:fastrpc "$manifest"
+chmod 0640 "$manifest"
+chown fastrpc:fastrpc "$stage"
+chmod 0750 "$stage"
+
+backup=
+if [ -e "$dst" ] || [ -L "$dst" ]; then
+	[ -d "$dst" ] && [ ! -L "$dst" ] || die 'existing registry target is not a real directory'
+	if find "$dst" -mindepth 1 -print -quit | grep -q .; then
+		backup=$dst.backup.$(date -u +%Y%m%dT%H%M%SZ)
+		mv "$dst" "$backup"
+	else
+		rmdir "$dst"
+	fi
+fi
+mv "$stage" "$dst"
+trap - EXIT HUP INT TERM
+printf 'imported=%s destination=%s backup=%s\n' "$count" "$dst" "${backup:-none}"

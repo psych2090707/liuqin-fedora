@@ -1,0 +1,38 @@
+From: liuqin Fedora project <liuqin@localhost>
+Subject: [PATCH] ASoC: wcd938x-sdw: avoid RX regmap access after codec IRQ dispatch
+
+Only the TX SoundWire peripheral creates a CSR regmap. Both RX and TX
+register the implementation-defined interrupt callback and both forward
+the same codec IRQ domain. An RX alert therefore dispatches the codec IRQ
+and then dereferences a NULL wcd->regmap in regmap_read().
+
+On liuqin this killed irq/259-soundwi at wcd9380_interrupt_callback+0x70
+before a later suspend attempt. The SoundWire core holds sdw_dev_lock
+across the callback, so the Oops also leaves that mutex locked.
+
+Keep the nested codec IRQ dispatch for both peripherals. Return after it
+when there is no local regmap; the SoundWire core can then unlock the
+peripheral and acknowledge its control-port alert. Preserve the existing
+TX CSR status-drain loop and all interrupt masks and PM policy.
+
+This is a local candidate, not an upstream backport. It fixes the observed
+NULL access; causality for the later suspend failure remains unproven.
+
+Base: fe81794b5e1b8a3f11a165f3acbfdb8fa671dbb3
+---
+--- a/sound/soc/codecs/wcd938x-sdw.c
++++ b/sound/soc/codecs/wcd938x-sdw.c
+@@ -189,6 +189,13 @@
+ 
+ 	do {
+ 		handle_nested_irq(irq_find_mapping(slave_irq, 0));
++		/*
++		 * RX has no regmap, but shares the codec IRQ with TX.
++		 * The SoundWire core acknowledges the RX control-port alert.
++		 */
++		if (!wcd->regmap)
++			return IRQ_HANDLED;
++
+ 		regmap_read(wcd->regmap, WCD938X_DIGITAL_INTR_STATUS_0, &sts1);
+ 		regmap_read(wcd->regmap, WCD938X_DIGITAL_INTR_STATUS_1, &sts2);
+ 		regmap_read(wcd->regmap, WCD938X_DIGITAL_INTR_STATUS_2, &sts3);

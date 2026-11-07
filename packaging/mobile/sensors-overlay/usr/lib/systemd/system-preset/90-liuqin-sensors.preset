@@ -1,0 +1,2 @@
+enable liuqin-slpi.service
+enable liuqin-sensor-proxy-refresh.service

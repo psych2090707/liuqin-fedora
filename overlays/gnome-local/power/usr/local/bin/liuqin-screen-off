@@ -1,0 +1,15 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# TN0086: immediate "screen off" action for GNOME/Wayland (user scope).
+# Locks the session, then asks Mutter to put the panel into PowerSaveMode 3.
+set -u
+/usr/bin/loginctl lock-session 2>/dev/null || true
+/usr/bin/gdbus call \
+	--session \
+	--dest org.gnome.Mutter.DisplayConfig \
+	--object-path /org/gnome/Mutter/DisplayConfig \
+	--method org.freedesktop.DBus.Properties.Set \
+	org.gnome.Mutter.DisplayConfig PowerSaveMode '<3>' >/dev/null 2>&1 ||
+	/usr/bin/busctl --user set-property org.gnome.Mutter.DisplayConfig \
+		/org/gnome/Mutter/DisplayConfig org.gnome.Mutter.DisplayConfig \
+		PowerSaveMode i 3 >/dev/null 2>&1 || true

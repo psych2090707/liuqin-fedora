@@ -1,0 +1,4 @@
+# Correct only a liuqin bound rescue gadget / Type-C device mismatch.
+# --no-block schedules work outside udev; no driver unbind or host network changes.
+ACTION=="add|change", SUBSYSTEM=="usb_role", KERNEL=="a600000.usb-role-switch", RUN+="/usr/bin/systemctl --no-block start afk-usb0-address.service"
+ACTION=="change", SUBSYSTEM=="typec", KERNEL=="port0", RUN+="/usr/bin/systemctl --no-block start afk-usb0-address.service"

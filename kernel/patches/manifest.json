@@ -1,0 +1,1727 @@
+{
+  "schema_version": 1,
+  "kind": "liuqin-kernel-private-patch-queue",
+  "project": "Fedora ARM64 liuqin port",
+  "source": {
+    "repo": "upstream/linux-sm8450-liuqin (read-only shallow clone)",
+    "spec": "upstream/xiaomipad-6pro-mainline/kernel/source.json",
+    "base": {
+      "commit": "a19585977c11fa662435b607cb9ff4ac7133092e",
+      "subject": "compile fix",
+      "date": "2025-08-17T01:39:16+02:00"
+    },
+    "head": {
+      "commit": "fe81794b5e1b8a3f11a165f3acbfdb8fa671dbb3",
+      "subject": "Merge device-tested DP and fingerprint kernel inputs",
+      "date": "2026-10-07T11:29:16+08:00"
+    }
+  },
+  "history_method": "temporary shared clone (/var/tmp/liuqin-patch-export/repo) + git fetch --deepen from upstream origin",
+  "history_limitations": [
+    "The read-only upstream clone is shallow; it is NOT deepened or modified by this tool.",
+    "When the base commit was missing, a temporary shared clone under /var/tmp was fetched with `git fetch --deepen` from the GitHub origin. The queue is therefore derived from network-fetched history on first export; re-exports can reuse the temporary clone.",
+    "Patches are the non-merge commits in base..head plus (only if needed) a synthetic 9999-merge-resolution.patch; merge commits themselves are not exported because format-patch of a merge would duplicate parent content."
+  ],
+  "counts": {
+    "commits_total": 55,
+    "non_merge_commits": 52,
+    "non_merge_exported": 51,
+    "deduplicated_commits": 1,
+    "merges": 3,
+    "files": 107,
+    "insertions": 14398,
+    "deletions": 462
+  },
+  "deduplicated_commits": [
+    {
+      "commit": "fba87d1d7c6f996e813882104f13aa2ed003a64f",
+      "short": "fba87d1d7",
+      "subject": "input: touchscreen: novatek: scale pen coordinates like the fingers",
+      "duplicate_of": "a40b967b3d03afc28d1ae056d8b8611e6df6e9d7"
+    }
+  ],
+  "diffstat": "107 files changed, 14398 insertions(+), 462 deletions(-)",
+  "series": [
+    "queue/0400-audio/0001-asoc-qcom-qdsp6-add-topology-driven-audio-if-support.patch",
+    "queue/0400-audio/0002-asoc-qcom-q6apm-lpass-dais-add-tdm-dai-operations.patch",
+    "queue/0400-audio/0003-asoc-qcom-common-add-dai-node-tdm-slot-helpers.patch",
+    "queue/0400-audio/0004-asoc-qcom-sc8280xp-add-tdm-hw_params-support.patch",
+    "queue/0400-audio/0005-asoc-qcom-common-distinguish-missing-and-invalid-tdm-slot-configuration.patch",
+    "queue/0400-audio/0006-asoc-qcom-sc8280xp-fix-tdm-hw_params-error-handling.patch",
+    "queue/0300-input-touch-hid/0007-arm64-add-xiaomi-pad-6-pro-support.patch",
+    "queue/0999-docs-bindings/0008-ci-build-liuqin-changes-with-the-shared-integration-action.patch",
+    "queue/9999-misc/0009-remoteproc-qcom-allow-userspace-to-own-slpi-startup.patch",
+    "queue/9999-misc/0010-remoteproc-qcom-select-slpi-by-its-processor-name.patch",
+    "queue/0010-dt-board/0011-arm64-dts-qcom-liuqin-wire-the-usb-c-port-as-otg-with-usb3-superspeed.patch",
+    "queue/0300-input-touch-hid/0012-input-touchscreen-novatek-pick-nt36532-firmware-by-panel-module.patch",
+    "queue/0700-usb-dp/0013-phy-qcom-qmp-combo-add-sm8475-diwali-usb3-dp-combo-phy-tables.patch",
+    "queue/0700-usb-dp/0014-usb-dwc3-drd-allow-userspace-control-of-the-role-switch.patch",
+    "queue/0700-usb-dp/0015-usb-typec-ucsi-stop-hammering-ppm_reset-clear-stale-cci-acks.patch",
+    "queue/0010-dt-board/0016-arm64-dts-qcom-liuqin-align-bootargs-with-the-release-cmdline.patch",
+    "queue/0010-dt-board/0017-arm64-dts-qcom-sm8475-xiaomi-liuqin-add-onboard-microphone-chain.patch",
+    "queue/0010-dt-board/0018-arm64-dts-qcom-sm8475-xiaomi-liuqin-enable-lpass_tlmm-for-soundwire.patch",
+    "queue/0010-dt-board/0019-arm64-dts-qcom-sm8475-xiaomi-liuqin-route-the-onboard-mic-into-the-tx-macro.patch",
+    "queue/0800-power-soc/0020-power-supply-qcom_battmgr-expose-the-xiaomi-charger-authentication-interface.patch",
+    "queue/0500-camera/0021-clk-qcom-camcc-sm8450-support-retained-sm8475-camera-power-domains.patch",
+    "queue/0500-camera/0022-media-qcom-camss-enable-the-sm8450-rear-capture-path.patch",
+    "queue/0500-camera/0023-media-liuqin-enable-the-rear-s5kjn1-camera.patch",
+    "queue/0300-input-touch-hid/0024-input-touchscreen-novatek-scale-pen-coordinates-like-the-fingers.patch",
+    "queue/0010-dt-board/0025-arm64-dts-qcom-sm8475-xiaomi-liuqin-tidy-the-rear-camera-nodes.patch",
+    "queue/0999-docs-bindings/0026-media-qcom-camss-use-qcom-sm8475-camss-for-the-liuqin-rear-path.patch",
+    "queue/0500-camera/0027-clk-qcom-camcc-sm8450-correct-sm8475-gdsc-comments-and-drop-dead-code.patch",
+    "queue/0500-camera/0028-media-i2c-s5kjn1-fix-blank-lines-and-argument-alignment.patch",
+    "queue/0010-dt-board/0029-arm64-dts-qcom-sm8475-xiaomi-liuqin-enable-displayport-out-over-usb-c.patch",
+    "queue/0800-power-soc/0030-soc-qcom-pmic_glink-trace-usbc-glink-and-allow-forcing-alt-mode.patch",
+    "queue/0800-power-soc/0031-soc-qcom-pmic_glink_altmode-fix-debugfs-teardown-signature.patch",
+    "queue/0800-power-soc/0032-soc-qcom-pmic_glink_altmode-recognize-the-liuqin-dp-svid-0xff01.patch",
+    "queue/0010-dt-board/0033-arm64-dts-qcom-sm8475-xiaomi-liuqin-apply-the-qmp-phy-port-select-pinctrl.patch",
+    "queue/0200-display/0034-drm-msm-phy-qcom-trace-the-liuqin-dp-alt-mode-plug-path.patch",
+    "queue/0700-usb-dp/0035-phy-qcom-qmp-combo-program-the-sm8475-dp-phy-with-the-diwali-tables.patch",
+    "queue/0200-display/0036-drm-msm-dp-usb-typec-mux-bring-the-dp-phy-up-before-aux-and-trace-the-aux-path.patch",
+    "queue/0800-power-soc/0037-soc-qcom-pmic_glink_altmode-decode-liuqin-s-orientation-enum.patch",
+    "queue/0010-dt-board/0038-arm64-dts-qcom-sm8475-xiaomi-liuqin-fix-the-usb-c-orientation-plumbing.patch",
+    "queue/0900-net-bluetooth/0039-net-rtnetlink-do-not-dereference-an-unnamed-parent-device.patch",
+    "queue/0800-power-soc/0040-soc-qcom-pmic_glink_altmode-decode-the-cable-orientation-generically.patch",
+    "queue/0200-display/0041-drm-msm-dp-phy-qcom-usb-soc-quiet-the-dp-bring-up-instrumentation.patch",
+    "queue/0200-display/0042-drm-adreno-a6xx-force-cold-boot-on-hang-recovery.patch",
+    "queue/0200-display/0043-drm-msm-expose-gpu_busy_percent-sysfs-attribute.patch",
+    "queue/9999-misc/0044-tee-add-close_context-to-tee-driver-operation.patch",
+    "queue/0600-tee-fingerprint/0045-firmware-qcom-scm-add-qseecom-app-loading-and-listener-services.patch",
+    "queue/0800-power-soc/0046-soc-qcom-mdt_loader-assemble-a-split-image-as-one-contiguous-blob.patch",
+    "queue/0600-tee-fingerprint/0047-tee-add-a-qualcomm-qseecom-tee-driver.patch",
+    "queue/0600-tee-fingerprint/0048-misc-add-an-fpc1264-sensor-control-driver-for-liuqin.patch",
+    "queue/0200-display/0049-drm-msm-dp-balance-early-aux-phy-power-and-propagate-setup-errors.patch",
+    "queue/0700-usb-dp/0050-phy-qcom-qmp-combo-return-dp-pll-setup-failures-to-the-caller.patch",
+    "queue/0010-dt-board/0051-arm64-dts-qcom-liuqin-preserve-device-tested-fpc-wiring.patch"
+  ],
+  "groups": [
+    {
+      "prefix": "0010-dt-board",
+      "description": "DT",
+      "commits": [
+        {
+          "sha": "91d37cdb79e4817452039e6b1f30bac5a1933b53",
+          "short": "91d37cdb7",
+          "subject": "arm64: dts: qcom: liuqin: wire the USB-C port as OTG with USB3 SuperSpeed",
+          "date": "2026-09-14T16:49:41+08:00",
+          "files": 1,
+          "insertions": 78,
+          "deletions": 8,
+          "high_risk": false,
+          "patch": "queue/0010-dt-board/0011-arm64-dts-qcom-liuqin-wire-the-usb-c-port-as-otg-with-usb3-superspeed.patch"
+        },
+        {
+          "sha": "d9063dafbf82ebe9356ab5bffb3e76da40bd8ef1",
+          "short": "d9063dafb",
+          "subject": "arm64: dts: qcom: liuqin: align bootargs with the release cmdline",
+          "date": "2026-09-15T08:52:22+08:00",
+          "files": 1,
+          "insertions": 2,
+          "deletions": 2,
+          "high_risk": false,
+          "patch": "queue/0010-dt-board/0016-arm64-dts-qcom-liuqin-align-bootargs-with-the-release-cmdline.patch"
+        },
+        {
+          "sha": "f86bba1fa3f3c114a87d3a1a93e8c208cb9d5bba",
+          "short": "f86bba1fa",
+          "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: add onboard microphone chain",
+          "date": "2026-09-17T10:19:21+08:00",
+          "files": 1,
+          "insertions": 100,
+          "deletions": 0,
+          "high_risk": false,
+          "patch": "queue/0010-dt-board/0017-arm64-dts-qcom-sm8475-xiaomi-liuqin-add-onboard-microphone-chain.patch"
+        },
+        {
+          "sha": "a13157fa07ec176ee6877775b77c5f68d2f8a592",
+          "short": "a13157fa0",
+          "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: enable lpass_tlmm for SoundWire",
+          "date": "2026-09-17T21:42:09+08:00",
+          "files": 1,
+          "insertions": 5,
+          "deletions": 0,
+          "high_risk": false,
+          "patch": "queue/0010-dt-board/0018-arm64-dts-qcom-sm8475-xiaomi-liuqin-enable-lpass_tlmm-for-soundwire.patch"
+        },
+        {
+          "sha": "a974a62a45c5d3ebf1d121eb909db963f7e3c4aa",
+          "short": "a974a62a4",
+          "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: route the onboard mic into the TX macro",
+          "date": "2026-09-19T13:11:15+08:00",
+          "files": 1,
+          "insertions": 13,
+          "deletions": 0,
+          "high_risk": false,
+          "patch": "queue/0010-dt-board/0019-arm64-dts-qcom-sm8475-xiaomi-liuqin-route-the-onboard-mic-into-the-tx-macro.patch"
+        },
+        {
+          "sha": "3206b08bf3ef9a901654736f6a46b7233af88d89",
+          "short": "3206b08bf",
+          "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: tidy the rear camera nodes",
+          "date": "2026-09-24T07:04:05Z",
+          "files": 2,
+          "insertions": 9,
+          "deletions": 40,
+          "high_risk": false,
+          "patch": "queue/0010-dt-board/0025-arm64-dts-qcom-sm8475-xiaomi-liuqin-tidy-the-rear-camera-nodes.patch"
+        },
+        {
+          "sha": "7eece2bf91c7784446ef1aa9fc8183a9c0540379",
+          "short": "7eece2bf9",
+          "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: enable DisplayPort out over USB-C",
+          "date": "2026-09-25T00:27:44+08:00",
+          "files": 1,
+          "insertions": 43,
+          "deletions": 0,
+          "high_risk": false,
+          "patch": "queue/0010-dt-board/0029-arm64-dts-qcom-sm8475-xiaomi-liuqin-enable-displayport-out-over-usb-c.patch"
+        },
+        {
+          "sha": "e74c16b3dc68228ca1f479a510a1ff40a32f66ee",
+          "short": "e74c16b3d",
+          "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: apply the QMP PHY port select pinctrl",
+          "date": "2026-09-25T21:20:59+08:00",
+          "files": 1,
+          "insertions": 14,
+          "deletions": 7,
+          "high_risk": false,
+          "patch": "queue/0010-dt-board/0033-arm64-dts-qcom-sm8475-xiaomi-liuqin-apply-the-qmp-phy-port-select-pinctrl.patch"
+        },
+        {
+          "sha": "5649815b7e609a2c5dd45c331a717f63cad6a444",
+          "short": "5649815b7",
+          "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: fix the USB-C orientation plumbing",
+          "date": "2026-09-26T02:55:37+08:00",
+          "files": 1,
+          "insertions": 27,
+          "deletions": 6,
+          "high_risk": false,
+          "patch": "queue/0010-dt-board/0038-arm64-dts-qcom-sm8475-xiaomi-liuqin-fix-the-usb-c-orientation-plumbing.patch"
+        },
+        {
+          "sha": "7deb78827a94a19aae3070677d7a7a2896f95822",
+          "short": "7deb78827",
+          "subject": "arm64: dts: qcom: liuqin: preserve device-tested FPC wiring",
+          "date": "2026-10-07T11:27:42+08:00",
+          "files": 1,
+          "insertions": 48,
+          "deletions": 1,
+          "high_risk": false,
+          "patch": "queue/0010-dt-board/0051-arm64-dts-qcom-liuqin-preserve-device-tested-fpc-wiring.patch"
+        }
+      ],
+      "paths": [
+        "Documentation/devicetree/bindings/media/qcom,sm8450-camss.yaml",
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts"
+      ],
+      "insertions": 339,
+      "deletions": 64,
+      "depends_on": [
+        "0400-audio",
+        "0300-input-touch-hid",
+        "0999-docs-bindings",
+        "9999-misc"
+      ]
+    },
+    {
+      "prefix": "0200-display",
+      "description": "display/GPU/DRM",
+      "commits": [
+        {
+          "sha": "4ddc7a1684645ff2a6f15891b4766a3ae1fd75e7",
+          "short": "4ddc7a168",
+          "subject": "drm/msm, phy: qcom: trace the liuqin DP alt-mode plug path",
+          "date": "2026-09-25T21:21:11+08:00",
+          "files": 3,
+          "insertions": 16,
+          "deletions": 1,
+          "high_risk": true,
+          "patch": "queue/0200-display/0034-drm-msm-phy-qcom-trace-the-liuqin-dp-alt-mode-plug-path.patch"
+        },
+        {
+          "sha": "f7c302092be01e60da3c2539ba3e3b43d591b41d",
+          "short": "f7c302092",
+          "subject": "drm/msm/dp, usb: typec: mux: bring the DP PHY up before AUX and trace the AUX path",
+          "date": "2026-09-26T02:55:28+08:00",
+          "files": 4,
+          "insertions": 90,
+          "deletions": 6,
+          "high_risk": true,
+          "patch": "queue/0200-display/0036-drm-msm-dp-usb-typec-mux-bring-the-dp-phy-up-before-aux-and-trace-the-aux-path.patch"
+        },
+        {
+          "sha": "7d6b79dd37487de847d8b13d41eca0eb0de7dc74",
+          "short": "7d6b79dd3",
+          "subject": "drm/msm/dp, phy: qcom, usb, soc: quiet the DP bring-up instrumentation",
+          "date": "2026-09-26T03:27:49+08:00",
+          "files": 6,
+          "insertions": 20,
+          "deletions": 28,
+          "high_risk": true,
+          "patch": "queue/0200-display/0041-drm-msm-dp-phy-qcom-usb-soc-quiet-the-dp-bring-up-instrumentation.patch"
+        },
+        {
+          "sha": "355dd22d6a3190a22eea9764a60ac3e756959bec",
+          "short": "355dd22d6",
+          "subject": "drm/adreno/a6xx: force cold boot on hang recovery",
+          "date": "2026-09-27T19:08:02+08:00",
+          "files": 1,
+          "insertions": 12,
+          "deletions": 0,
+          "high_risk": false,
+          "patch": "queue/0200-display/0042-drm-adreno-a6xx-force-cold-boot-on-hang-recovery.patch"
+        },
+        {
+          "sha": "0301490788d9e8939ad672b9f7cc49e8ceb10d94",
+          "short": "030149078",
+          "subject": "drm/msm: expose gpu_busy_percent sysfs attribute",
+          "date": "2026-09-27T19:08:16+08:00",
+          "files": 3,
+          "insertions": 60,
+          "deletions": 0,
+          "high_risk": false,
+          "patch": "queue/0200-display/0043-drm-msm-expose-gpu_busy_percent-sysfs-attribute.patch"
+        },
+        {
+          "sha": "97044efd80ba868c87d39daf162f7e0ea79a4094",
+          "short": "97044efd8",
+          "subject": "drm/msm/dp: balance early AUX PHY power and propagate setup errors",
+          "date": "2026-10-07T10:02:48+08:00",
+          "files": 3,
+          "insertions": 102,
+          "deletions": 22,
+          "high_risk": false,
+          "patch": "queue/0200-display/0049-drm-msm-dp-balance-early-aux-phy-power-and-propagate-setup-errors.patch"
+        }
+      ],
+      "paths": [
+        "drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+        "drivers/gpu/drm/msm/dp/dp_aux.c",
+        "drivers/gpu/drm/msm/dp/dp_ctrl.c",
+        "drivers/gpu/drm/msm/dp/dp_ctrl.h",
+        "drivers/gpu/drm/msm/dp/dp_display.c",
+        "drivers/gpu/drm/msm/msm_gpu.c",
+        "drivers/gpu/drm/msm/msm_gpu.h",
+        "drivers/gpu/drm/msm/msm_gpu_devfreq.c",
+        "drivers/phy/qualcomm/phy-qcom-qmp-combo.c",
+        "drivers/soc/qcom/pmic_glink.c",
+        "drivers/soc/qcom/pmic_glink_altmode.c",
+        "drivers/usb/typec/mux/fsa4480.c"
+      ],
+      "insertions": 300,
+      "deletions": 57,
+      "depends_on": [
+        "0400-audio",
+        "0300-input-touch-hid",
+        "0999-docs-bindings",
+        "9999-misc",
+        "0010-dt-board",
+        "0700-usb-dp",
+        "0800-power-soc",
+        "0500-camera"
+      ]
+    },
+    {
+      "prefix": "0300-input-touch-hid",
+      "description": "touchscreen + HID",
+      "commits": [
+        {
+          "sha": "2cd5a6f8ef674d0dfb1008f90ef728dfadead0b7",
+          "short": "2cd5a6f8e",
+          "subject": "arm64: add Xiaomi Pad 6 Pro support",
+          "date": "2026-09-13T06:19:08+08:00",
+          "files": 58,
+          "insertions": 5681,
+          "deletions": 357,
+          "high_risk": true,
+          "patch": "queue/0300-input-touch-hid/0007-arm64-add-xiaomi-pad-6-pro-support.patch"
+        },
+        {
+          "sha": "4dcb6801404bdac58fb0ade2d0c9cb05e6af4384",
+          "short": "4dcb68014",
+          "subject": "input: touchscreen: novatek: pick NT36532 firmware by panel module",
+          "date": "2026-09-14T21:19:47+08:00",
+          "files": 2,
+          "insertions": 29,
+          "deletions": 0,
+          "high_risk": true,
+          "patch": "queue/0300-input-touch-hid/0012-input-touchscreen-novatek-pick-nt36532-firmware-by-panel-module.patch"
+        },
+        {
+          "sha": "a40b967b3d03afc28d1ae056d8b8611e6df6e9d7",
+          "short": "a40b967b3",
+          "subject": "input: touchscreen: novatek: scale pen coordinates like the fingers",
+          "date": "2026-09-22T20:30:38+08:00",
+          "files": 1,
+          "insertions": 10,
+          "deletions": 9,
+          "high_risk": true,
+          "patch": "queue/0300-input-touch-hid/0024-input-touchscreen-novatek-scale-pen-coordinates-like-the-fingers.patch"
+        }
+      ],
+      "paths": [
+        "Documentation/devicetree/bindings/arm/qcom.yaml",
+        "Documentation/devicetree/bindings/input/nanosic,wn8030.yaml",
+        "Documentation/devicetree/bindings/media/qcom,sm8550-iris.yaml",
+        "Documentation/devicetree/bindings/phy/nxp,ptn3222.yaml",
+        "Documentation/devicetree/bindings/soc/qcom/qcom,pmic-glink.yaml",
+        "Documentation/devicetree/bindings/vendor-prefixes.yaml",
+        "MAINTAINERS",
+        "README.liuqin.md",
+        "arch/arm64/boot/dts/qcom/Makefile",
+        "arch/arm64/boot/dts/qcom/sm8450.dtsi",
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts",
+        "arch/arm64/boot/dts/qcom/sm8475.dtsi",
+        "drivers/firmware/cirrus/cs_dsp.c",
+        "drivers/gpu/drm/msm/adreno/adreno_gpu.c",
+        "drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c",
+        "drivers/gpu/drm/msm/disp/dpu1/dpu_plane.c",
+        "drivers/gpu/drm/msm/dsi/dsi_host.c",
+        "drivers/gpu/drm/panel/panel-novatek-nt36532.c",
+        "drivers/hid/Kconfig",
+        "drivers/hid/Makefile",
+        "drivers/hid/hid-nanosic.c",
+        "drivers/input/touchscreen/nt36523/Kconfig",
+        "drivers/input/touchscreen/nt36523/nt36xxx.c",
+        "drivers/input/touchscreen/nt36523/nt36xxx.h",
+        "drivers/input/touchscreen/nt36523/nt36xxx_fw_update.c",
+        "drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c",
+        "drivers/media/platform/qcom/iris/iris_platform_common.h",
+        "drivers/media/platform/qcom/iris/iris_platform_gen2.c",
+        "drivers/media/platform/qcom/iris/iris_probe.c",
+        "drivers/of/platform.c",
+        "drivers/phy/qualcomm/phy-qcom-qmp-common.h",
+        "drivers/phy/qualcomm/phy-qcom-qmp-pcie.c",
+        "drivers/power/reset/msm-poweroff.c",
+        "drivers/power/reset/nvmem-reboot-mode.c",
+        "drivers/power/reset/qcom-pon.c",
+        "drivers/power/supply/qcom_battmgr.c",
+        "drivers/soc/qcom/pdr_internal.h",
+        "drivers/soc/qcom/pmic_glink.c",
+        "drivers/soc/qcom/qcom_pd_mapper.c",
+        "drivers/soc/qcom/qcom_pdr_msg.c",
+        "drivers/soc/qcom/ubwc_config.c",
+        "drivers/tty/serial/Kconfig",
+        "drivers/tty/serial/Makefile",
+        "drivers/tty/serial/earlycon-simplefb.c",
+        "drivers/usb/typec/ucsi/ucsi_glink.c",
+        "include/drm/drm_mipi_dsi.h",
+        "sound/soc/codecs/cs35l41.c",
+        "sound/soc/codecs/cs35l41.h",
+        "sound/soc/codecs/wm_adsp.c",
+        "sound/soc/codecs/wm_adsp.h",
+        "sound/soc/qcom/common.c",
+        "sound/soc/qcom/qdsp6/audioreach.c",
+        "sound/soc/qcom/qdsp6/audioreach.h",
+        "sound/soc/qcom/qdsp6/q6apm-dai.c",
+        "sound/soc/qcom/qdsp6/q6apm.c",
+        "sound/soc/qcom/qdsp6/topology.c",
+        "sound/soc/qcom/sc8280xp.c",
+        "tools/testing/selftests/hid/nanosic-static.py"
+      ],
+      "insertions": 5720,
+      "deletions": 366,
+      "depends_on": [
+        "0400-audio"
+      ]
+    },
+    {
+      "prefix": "0400-audio",
+      "description": "ASoC/AudioReach",
+      "commits": [
+        {
+          "sha": "5a666ded90788e13dd14e1d392944095d2a72c44",
+          "short": "5a666ded9",
+          "subject": "ASoC: qcom: qdsp6: add topology-driven Audio IF support",
+          "date": "2026-08-04T12:33:01+05:30",
+          "files": 4,
+          "insertions": 350,
+          "deletions": 0,
+          "high_risk": true,
+          "patch": "queue/0400-audio/0001-asoc-qcom-qdsp6-add-topology-driven-audio-if-support.patch"
+        },
+        {
+          "sha": "96cbf0ae8eb55505d4498809d6f082613e121b3d",
+          "short": "96cbf0ae8",
+          "subject": "ASoC: qcom: q6apm-lpass-dais: add TDM DAI operations",
+          "date": "2026-08-04T12:33:02+05:30",
+          "files": 1,
+          "insertions": 63,
+          "deletions": 0,
+          "high_risk": false,
+          "patch": "queue/0400-audio/0002-asoc-qcom-q6apm-lpass-dais-add-tdm-dai-operations.patch"
+        },
+        {
+          "sha": "824a9f5730e2f0afa375b7418cc136865d823833",
+          "short": "824a9f573",
+          "subject": "ASoC: qcom: common: add DAI-node TDM slot helpers",
+          "date": "2026-08-04T12:33:06+05:30",
+          "files": 2,
+          "insertions": 169,
+          "deletions": 0,
+          "high_risk": false,
+          "patch": "queue/0400-audio/0003-asoc-qcom-common-add-dai-node-tdm-slot-helpers.patch"
+        },
+        {
+          "sha": "9806402bee64adeaeddecb1341d4c87df6430aec",
+          "short": "9806402be",
+          "subject": "ASoC: qcom: sc8280xp: add TDM hw_params support",
+          "date": "2026-08-04T12:33:07+05:30",
+          "files": 1,
+          "insertions": 92,
+          "deletions": 1,
+          "high_risk": false,
+          "patch": "queue/0400-audio/0004-asoc-qcom-sc8280xp-add-tdm-hw_params-support.patch"
+        },
+        {
+          "sha": "efdfcebc8d5945228576b89994597496e13a26cb",
+          "short": "efdfcebc8",
+          "subject": "ASoC: qcom: common: Distinguish missing and invalid TDM slot configuration",
+          "date": "2026-08-18T14:16:54+05:30",
+          "files": 1,
+          "insertions": 3,
+          "deletions": 3,
+          "high_risk": false,
+          "patch": "queue/0400-audio/0005-asoc-qcom-common-distinguish-missing-and-invalid-tdm-slot-configuration.patch"
+        },
+        {
+          "sha": "dde5e417f9f6da09da48ac0585c42a0513851005",
+          "short": "dde5e417f",
+          "subject": "ASoC: qcom: sc8280xp: Fix TDM hw_params error handling",
+          "date": "2026-08-18T14:16:55+05:30",
+          "files": 1,
+          "insertions": 1,
+          "deletions": 1,
+          "high_risk": false,
+          "patch": "queue/0400-audio/0006-asoc-qcom-sc8280xp-fix-tdm-hw_params-error-handling.patch"
+        }
+      ],
+      "paths": [
+        "include/uapi/sound/snd_ar_tokens.h",
+        "sound/soc/qcom/common.c",
+        "sound/soc/qcom/common.h",
+        "sound/soc/qcom/qdsp6/audioreach.c",
+        "sound/soc/qcom/qdsp6/audioreach.h",
+        "sound/soc/qcom/qdsp6/q6apm-lpass-dais.c",
+        "sound/soc/qcom/qdsp6/topology.c",
+        "sound/soc/qcom/sc8280xp.c"
+      ],
+      "insertions": 678,
+      "deletions": 5,
+      "depends_on": []
+    },
+    {
+      "prefix": "0500-camera",
+      "description": "CAMSS/S5KJN1/CAMCC",
+      "commits": [
+        {
+          "sha": "3672dd4ad1520987331d21d897ca7c15d7ef9f94",
+          "short": "3672dd4ad",
+          "subject": "clk: qcom: camcc-sm8450: support retained SM8475 camera power domains",
+          "date": "2026-09-20T18:22:34+08:00",
+          "files": 1,
+          "insertions": 164,
+          "deletions": 63,
+          "high_risk": true,
+          "patch": "queue/0500-camera/0021-clk-qcom-camcc-sm8450-support-retained-sm8475-camera-power-domains.patch"
+        },
+        {
+          "sha": "56d073c6a33f964967593ec62f67434da07e2b8a",
+          "short": "56d073c6a",
+          "subject": "media: qcom: camss: enable the SM8450 rear capture path",
+          "date": "2026-09-20T18:22:34+08:00",
+          "files": 6,
+          "insertions": 531,
+          "deletions": 1,
+          "high_risk": true,
+          "patch": "queue/0500-camera/0022-media-qcom-camss-enable-the-sm8450-rear-capture-path.patch"
+        },
+        {
+          "sha": "b363e34ac41a3b63b05376e79dd85d2adc56afc6",
+          "short": "b363e34ac",
+          "subject": "media: liuqin: enable the rear S5KJN1 camera",
+          "date": "2026-09-20T18:22:34+08:00",
+          "files": 5,
+          "insertions": 2154,
+          "deletions": 0,
+          "high_risk": true,
+          "patch": "queue/0500-camera/0023-media-liuqin-enable-the-rear-s5kjn1-camera.patch"
+        },
+        {
+          "sha": "d6b573ff8244c1f4e5ce3c54875d4bbfb888a4bb",
+          "short": "d6b573ff8",
+          "subject": "clk: qcom: camcc-sm8450: correct SM8475 GDSC comments and drop dead code",
+          "date": "2026-09-24T07:05:33Z",
+          "files": 1,
+          "insertions": 13,
+          "deletions": 16,
+          "high_risk": true,
+          "patch": "queue/0500-camera/0027-clk-qcom-camcc-sm8450-correct-sm8475-gdsc-comments-and-drop-dead-code.patch"
+        },
+        {
+          "sha": "e06846ed9d035161298f1d9fe9a7c83e7ef63059",
+          "short": "e06846ed9",
+          "subject": "media: i2c: s5kjn1: fix blank lines and argument alignment",
+          "date": "2026-09-24T07:05:50Z",
+          "files": 1,
+          "insertions": 4,
+          "deletions": 4,
+          "high_risk": true,
+          "patch": "queue/0500-camera/0028-media-i2c-s5kjn1-fix-blank-lines-and-argument-alignment.patch"
+        }
+      ],
+      "paths": [
+        "Documentation/devicetree/bindings/media/i2c/samsung,s5kjn1.yaml",
+        "Documentation/devicetree/bindings/media/qcom,sm8450-camss.yaml",
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts",
+        "drivers/clk/qcom/camcc-sm8450.c",
+        "drivers/media/i2c/Kconfig",
+        "drivers/media/i2c/Makefile",
+        "drivers/media/i2c/s5kjn1.c",
+        "drivers/media/platform/qcom/camss/camss-csid.c",
+        "drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c",
+        "drivers/media/platform/qcom/camss/camss-vfe.c",
+        "drivers/media/platform/qcom/camss/camss.c",
+        "drivers/media/platform/qcom/camss/camss.h"
+      ],
+      "insertions": 2866,
+      "deletions": 84,
+      "depends_on": [
+        "0400-audio",
+        "0300-input-touch-hid",
+        "0999-docs-bindings",
+        "9999-misc",
+        "0010-dt-board",
+        "0700-usb-dp",
+        "0800-power-soc"
+      ]
+    },
+    {
+      "prefix": "0600-tee-fingerprint",
+      "description": "TEE/QSEECOM/FPC",
+      "commits": [
+        {
+          "sha": "e8f8cc13bcb7da277bf9ad25f8148dc932e75b65",
+          "short": "e8f8cc13b",
+          "subject": "firmware: qcom: scm: add QSEECOM app loading and listener services",
+          "date": "2026-10-07T09:02:21+08:00",
+          "files": 2,
+          "insertions": 521,
+          "deletions": 3,
+          "high_risk": true,
+          "patch": "queue/0600-tee-fingerprint/0045-firmware-qcom-scm-add-qseecom-app-loading-and-listener-services.patch"
+        },
+        {
+          "sha": "6640846b3b6e8fde7b79b2a7b1ee0a6309568339",
+          "short": "6640846b3",
+          "subject": "tee: add a Qualcomm QSEECOM TEE driver",
+          "date": "2026-10-07T09:03:40+08:00",
+          "files": 8,
+          "insertions": 2025,
+          "deletions": 0,
+          "high_risk": true,
+          "patch": "queue/0600-tee-fingerprint/0047-tee-add-a-qualcomm-qseecom-tee-driver.patch"
+        },
+        {
+          "sha": "b87eaebbd7b7c031965ea57e4dd2394dedbb146f",
+          "short": "b87eaebbd",
+          "subject": "misc: add an FPC1264 sensor control driver for liuqin",
+          "date": "2026-10-07T09:05:06+08:00",
+          "files": 5,
+          "insertions": 729,
+          "deletions": 0,
+          "high_risk": true,
+          "patch": "queue/0600-tee-fingerprint/0048-misc-add-an-fpc1264-sensor-control-driver-for-liuqin.patch"
+        }
+      ],
+      "paths": [
+        "Documentation/devicetree/bindings/input/fpc,fpc1020.yaml",
+        "Documentation/devicetree/bindings/vendor-prefixes.yaml",
+        "Documentation/tee/index.rst",
+        "Documentation/tee/qseecom.rst",
+        "drivers/firmware/qcom/qcom_scm.c",
+        "drivers/misc/Kconfig",
+        "drivers/misc/Makefile",
+        "drivers/misc/fpc1264_spi_diag.c",
+        "drivers/tee/Kconfig",
+        "drivers/tee/Makefile",
+        "drivers/tee/qseecom/Kconfig",
+        "drivers/tee/qseecom/Makefile",
+        "drivers/tee/qseecom/core.c",
+        "include/linux/firmware/qcom/qcom_scm.h",
+        "include/uapi/linux/tee.h"
+      ],
+      "insertions": 3275,
+      "deletions": 3,
+      "depends_on": [
+        "0400-audio",
+        "0300-input-touch-hid",
+        "0999-docs-bindings",
+        "9999-misc",
+        "0010-dt-board",
+        "0700-usb-dp",
+        "0800-power-soc",
+        "0500-camera",
+        "0200-display",
+        "0900-net-bluetooth"
+      ]
+    },
+    {
+      "prefix": "0700-usb-dp",
+      "description": "USB/Type-C/DP PHY",
+      "commits": [
+        {
+          "sha": "ccee5e821158e62e21e920412fb026038f880ffd",
+          "short": "ccee5e821",
+          "subject": "phy: qcom-qmp-combo: add SM8475 (diwali) USB3/DP combo PHY tables",
+          "date": "2026-09-15T08:52:22+08:00",
+          "files": 1,
+          "insertions": 185,
+          "deletions": 0,
+          "high_risk": true,
+          "patch": "queue/0700-usb-dp/0013-phy-qcom-qmp-combo-add-sm8475-diwali-usb3-dp-combo-phy-tables.patch"
+        },
+        {
+          "sha": "b8f84456a316f0dbeaa8d2333586493ac5435379",
+          "short": "b8f84456a",
+          "subject": "usb: dwc3: drd: allow userspace control of the role switch",
+          "date": "2026-09-15T08:52:22+08:00",
+          "files": 1,
+          "insertions": 1,
+          "deletions": 0,
+          "high_risk": true,
+          "patch": "queue/0700-usb-dp/0014-usb-dwc3-drd-allow-userspace-control-of-the-role-switch.patch"
+        },
+        {
+          "sha": "a610c157c1d0ece92d15e93579f63e6b80dc6a93",
+          "short": "a610c157c",
+          "subject": "usb: typec: ucsi: stop hammering PPM_RESET, clear stale CCI acks",
+          "date": "2026-09-15T08:52:22+08:00",
+          "files": 1,
+          "insertions": 37,
+          "deletions": 7,
+          "high_risk": true,
+          "patch": "queue/0700-usb-dp/0015-usb-typec-ucsi-stop-hammering-ppm_reset-clear-stale-cci-acks.patch"
+        },
+        {
+          "sha": "8d5005650cfd6e313603aa8fd4f504c1af228002",
+          "short": "8d5005650",
+          "subject": "phy: qcom-qmp-combo: program the SM8475 DP PHY with the diwali tables",
+          "date": "2026-09-26T02:55:24+08:00",
+          "files": 1,
+          "insertions": 139,
+          "deletions": 19,
+          "high_risk": true,
+          "patch": "queue/0700-usb-dp/0035-phy-qcom-qmp-combo-program-the-sm8475-dp-phy-with-the-diwali-tables.patch"
+        },
+        {
+          "sha": "68783ed98722488ad31c32f0fd252655f9906a8c",
+          "short": "68783ed98",
+          "subject": "phy: qcom-qmp-combo: return DP PLL setup failures to the caller",
+          "date": "2026-10-07T10:04:33+08:00",
+          "files": 1,
+          "insertions": 8,
+          "deletions": 2,
+          "high_risk": true,
+          "patch": "queue/0700-usb-dp/0050-phy-qcom-qmp-combo-return-dp-pll-setup-failures-to-the-caller.patch"
+        }
+      ],
+      "paths": [
+        "drivers/phy/qualcomm/phy-qcom-qmp-combo.c",
+        "drivers/usb/dwc3/drd.c",
+        "drivers/usb/typec/ucsi/ucsi.c"
+      ],
+      "insertions": 370,
+      "deletions": 28,
+      "depends_on": [
+        "0400-audio",
+        "0300-input-touch-hid",
+        "0999-docs-bindings",
+        "9999-misc",
+        "0010-dt-board"
+      ]
+    },
+    {
+      "prefix": "0800-power-soc",
+      "description": "battmgr/PON/reboot + soc/qcom",
+      "commits": [
+        {
+          "sha": "f2d5ed65ac03b7c14b5e5d51ba4c625eea44ac30",
+          "short": "f2d5ed65a",
+          "subject": "power: supply: qcom_battmgr: expose the Xiaomi charger authentication interface",
+          "date": "2026-09-19T22:32:20+08:00",
+          "files": 1,
+          "insertions": 553,
+          "deletions": 49,
+          "high_risk": true,
+          "patch": "queue/0800-power-soc/0020-power-supply-qcom_battmgr-expose-the-xiaomi-charger-authentication-interface.patch"
+        },
+        {
+          "sha": "7ec2c1f628c00a02987ee3c82869f7cdb34dfe65",
+          "short": "7ec2c1f62",
+          "subject": "soc: qcom: pmic_glink: trace USBC glink and allow forcing alt-mode",
+          "date": "2026-09-25T17:33:15+08:00",
+          "files": 2,
+          "insertions": 142,
+          "deletions": 4,
+          "high_risk": false,
+          "patch": "queue/0800-power-soc/0030-soc-qcom-pmic_glink-trace-usbc-glink-and-allow-forcing-alt-mode.patch"
+        },
+        {
+          "sha": "c7d4d4ca507bd67153c0889601e98fa563a7a38a",
+          "short": "c7d4d4ca5",
+          "subject": "soc: qcom: pmic_glink_altmode: fix debugfs teardown signature",
+          "date": "2026-09-25T17:40:11+08:00",
+          "files": 1,
+          "insertions": 6,
+          "deletions": 1,
+          "high_risk": false,
+          "patch": "queue/0800-power-soc/0031-soc-qcom-pmic_glink_altmode-fix-debugfs-teardown-signature.patch"
+        },
+        {
+          "sha": "95cf27cbc2e7d44c82c8011082d3df0b3ad90ca5",
+          "short": "95cf27cbc",
+          "subject": "soc: qcom: pmic_glink_altmode: recognize the liuqin DP svid (0xff01)",
+          "date": "2026-09-25T18:13:29+08:00",
+          "files": 2,
+          "insertions": 20,
+          "deletions": 105,
+          "high_risk": false,
+          "patch": "queue/0800-power-soc/0032-soc-qcom-pmic_glink_altmode-recognize-the-liuqin-dp-svid-0xff01.patch"
+        },
+        {
+          "sha": "42a085d01c313d02facf9f31f61e9291fa8a8ace",
+          "short": "42a085d01",
+          "subject": "soc: qcom: pmic_glink_altmode: decode liuqin's orientation enum",
+          "date": "2026-09-26T02:55:33+08:00",
+          "files": 1,
+          "insertions": 67,
+          "deletions": 20,
+          "high_risk": false,
+          "patch": "queue/0800-power-soc/0037-soc-qcom-pmic_glink_altmode-decode-liuqin-s-orientation-enum.patch"
+        },
+        {
+          "sha": "cb62545d4f62c22b6d40f5ae4dc893e4afa88143",
+          "short": "cb62545d4",
+          "subject": "soc: qcom: pmic_glink_altmode: decode the cable orientation generically",
+          "date": "2026-09-26T03:27:43+08:00",
+          "files": 1,
+          "insertions": 21,
+          "deletions": 38,
+          "high_risk": false,
+          "patch": "queue/0800-power-soc/0040-soc-qcom-pmic_glink_altmode-decode-the-cable-orientation-generically.patch"
+        },
+        {
+          "sha": "ea63b921c92cfc2f3942cdaec2b32ea44d84c410",
+          "short": "ea63b921c",
+          "subject": "soc: qcom: mdt_loader: assemble a split image as one contiguous blob",
+          "date": "2026-10-07T09:02:57+08:00",
+          "files": 2,
+          "insertions": 304,
+          "deletions": 0,
+          "high_risk": false,
+          "patch": "queue/0800-power-soc/0046-soc-qcom-mdt_loader-assemble-a-split-image-as-one-contiguous-blob.patch"
+        }
+      ],
+      "paths": [
+        "drivers/power/supply/qcom_battmgr.c",
+        "drivers/soc/qcom/mdt_loader.c",
+        "drivers/soc/qcom/pmic_glink.c",
+        "drivers/soc/qcom/pmic_glink_altmode.c",
+        "include/linux/soc/qcom/mdt_loader.h"
+      ],
+      "insertions": 1113,
+      "deletions": 217,
+      "depends_on": [
+        "0400-audio",
+        "0300-input-touch-hid",
+        "0999-docs-bindings",
+        "9999-misc",
+        "0010-dt-board",
+        "0700-usb-dp"
+      ]
+    },
+    {
+      "prefix": "0900-net-bluetooth",
+      "description": "net/wireless/bluetooth",
+      "commits": [
+        {
+          "sha": "e6604d01be72a1e46ed12fd806e5cd93ff4ae153",
+          "short": "e6604d01b",
+          "subject": "net: rtnetlink: do not dereference an unnamed parent device",
+          "date": "2026-09-26T02:55:42+08:00",
+          "files": 1,
+          "insertions": 23,
+          "deletions": 4,
+          "high_risk": false,
+          "patch": "queue/0900-net-bluetooth/0039-net-rtnetlink-do-not-dereference-an-unnamed-parent-device.patch"
+        }
+      ],
+      "paths": [
+        "net/core/rtnetlink.c"
+      ],
+      "insertions": 23,
+      "deletions": 4,
+      "depends_on": [
+        "0400-audio",
+        "0300-input-touch-hid",
+        "0999-docs-bindings",
+        "9999-misc",
+        "0010-dt-board",
+        "0700-usb-dp",
+        "0800-power-soc",
+        "0500-camera",
+        "0200-display"
+      ]
+    },
+    {
+      "prefix": "0999-docs-bindings",
+      "description": "Documentation/dt-bindings/CI",
+      "commits": [
+        {
+          "sha": "44e3fe46683752fe951edf703d14323ab7aae69b",
+          "short": "44e3fe466",
+          "subject": "ci: build liuqin changes with the shared integration action",
+          "date": "2026-09-13T06:48:49+08:00",
+          "files": 1,
+          "insertions": 27,
+          "deletions": 0,
+          "high_risk": false,
+          "patch": "queue/0999-docs-bindings/0008-ci-build-liuqin-changes-with-the-shared-integration-action.patch"
+        },
+        {
+          "sha": "bda414aa595a5afa60ab863f1da08a60e7c22bcc",
+          "short": "bda414aa5",
+          "subject": "media: qcom: camss: use qcom,sm8475-camss for the liuqin rear path",
+          "date": "2026-09-24T07:04:41Z",
+          "files": 3,
+          "insertions": 10,
+          "deletions": 10,
+          "high_risk": false,
+          "patch": "queue/0999-docs-bindings/0026-media-qcom-camss-use-qcom-sm8475-camss-for-the-liuqin-rear-path.patch"
+        }
+      ],
+      "paths": [
+        ".github/workflows/liuqin.yml",
+        "Documentation/devicetree/bindings/media/{qcom,sm8450-camss.yaml => qcom,sm8475-camss.yaml}",
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts",
+        "drivers/media/platform/qcom/camss/camss.c"
+      ],
+      "insertions": 37,
+      "deletions": 10,
+      "depends_on": [
+        "0400-audio",
+        "0300-input-touch-hid"
+      ]
+    },
+    {
+      "prefix": "9999-misc",
+      "description": "other",
+      "commits": [
+        {
+          "sha": "569f79be4a7d85661bdd5c3b22ab1f506878b5d8",
+          "short": "569f79be4",
+          "subject": "remoteproc: qcom: allow userspace to own SLPI startup",
+          "date": "2026-09-13T15:52:05+08:00",
+          "files": 1,
+          "insertions": 6,
+          "deletions": 0,
+          "high_risk": false,
+          "patch": "queue/9999-misc/0009-remoteproc-qcom-allow-userspace-to-own-slpi-startup.patch"
+        },
+        {
+          "sha": "a54c2b5501a7add99229dd82dff27f184c1bed91",
+          "short": "a54c2b550",
+          "subject": "remoteproc: qcom: select SLPI by its processor name",
+          "date": "2026-09-13T16:02:50+08:00",
+          "files": 1,
+          "insertions": 1,
+          "deletions": 1,
+          "high_risk": false,
+          "patch": "queue/9999-misc/0010-remoteproc-qcom-select-slpi-by-its-processor-name.patch"
+        },
+        {
+          "sha": "0b5cd921fb52e03af6f112d5ad881aaf289bfa32",
+          "short": "0b5cd921f",
+          "subject": "tee: add close_context to TEE driver operation",
+          "date": "2025-09-11T21:07:43-07:00",
+          "files": 3,
+          "insertions": 55,
+          "deletions": 8,
+          "high_risk": false,
+          "patch": "queue/9999-misc/0044-tee-add-close_context-to-tee-driver-operation.patch"
+        }
+      ],
+      "paths": [
+        "drivers/remoteproc/qcom_q6v5_pas.c",
+        "drivers/tee/tee_core.c",
+        "drivers/tee/tee_private.h",
+        "include/linux/tee_core.h"
+      ],
+      "insertions": 62,
+      "deletions": 9,
+      "depends_on": [
+        "0400-audio",
+        "0300-input-touch-hid",
+        "0999-docs-bindings"
+      ]
+    }
+  ],
+  "high_risk_groups": [
+    "0200-display",
+    "0300-input-touch-hid",
+    "0700-usb-dp"
+  ],
+  "merge_commits": [
+    {
+      "commit": "fe81794b5e1b8a3f11a165f3acbfdb8fa671dbb3",
+      "subject": "Merge device-tested DP and fingerprint kernel inputs",
+      "parents": [
+        "7deb78827a94a19aae3070677d7a7a2896f95822",
+        "68783ed98722488ad31c32f0fd252655f9906a8c"
+      ]
+    },
+    {
+      "commit": "aa148f3421f8f52fcb2ede684cf31adb20572b1d",
+      "subject": "Merge pull request #4: input: touchscreen: novatek: scale pen coordinates like the fingers",
+      "parents": [
+        "e06846ed9d035161298f1d9fe9a7c83e7ef63059",
+        "a40b967b3d03afc28d1ae056d8b8611e6df6e9d7"
+      ]
+    },
+    {
+      "commit": "b077845366409367c3fc44e9f8c86fdc3957f945",
+      "subject": "Merge pull request #1 from Pd-ch/liuqin-touch-panel-and-hall",
+      "parents": [
+        "d9063dafbf82ebe9356ab5bffb3e76da40bd8ef1",
+        "4dcb6801404bdac58fb0ade2d0c9cb05e6af4384"
+      ]
+    }
+  ],
+  "patches": [
+    {
+      "sha": "5a666ded90788e13dd14e1d392944095d2a72c44",
+      "group": "0400-audio",
+      "patch": "queue/0400-audio/0001-asoc-qcom-qdsp6-add-topology-driven-audio-if-support.patch",
+      "files": [
+        "include/uapi/sound/snd_ar_tokens.h",
+        "sound/soc/qcom/qdsp6/audioreach.c",
+        "sound/soc/qcom/qdsp6/audioreach.h",
+        "sound/soc/qcom/qdsp6/topology.c"
+      ],
+      "insertions": 350,
+      "deletions": 0,
+      "subject": "ASoC: qcom: qdsp6: add topology-driven Audio IF support",
+      "high_risk": true
+    },
+    {
+      "sha": "96cbf0ae8eb55505d4498809d6f082613e121b3d",
+      "group": "0400-audio",
+      "patch": "queue/0400-audio/0002-asoc-qcom-q6apm-lpass-dais-add-tdm-dai-operations.patch",
+      "files": [
+        "sound/soc/qcom/qdsp6/q6apm-lpass-dais.c"
+      ],
+      "insertions": 63,
+      "deletions": 0,
+      "subject": "ASoC: qcom: q6apm-lpass-dais: add TDM DAI operations",
+      "high_risk": false
+    },
+    {
+      "sha": "824a9f5730e2f0afa375b7418cc136865d823833",
+      "group": "0400-audio",
+      "patch": "queue/0400-audio/0003-asoc-qcom-common-add-dai-node-tdm-slot-helpers.patch",
+      "files": [
+        "sound/soc/qcom/common.c",
+        "sound/soc/qcom/common.h"
+      ],
+      "insertions": 169,
+      "deletions": 0,
+      "subject": "ASoC: qcom: common: add DAI-node TDM slot helpers",
+      "high_risk": false
+    },
+    {
+      "sha": "9806402bee64adeaeddecb1341d4c87df6430aec",
+      "group": "0400-audio",
+      "patch": "queue/0400-audio/0004-asoc-qcom-sc8280xp-add-tdm-hw_params-support.patch",
+      "files": [
+        "sound/soc/qcom/sc8280xp.c"
+      ],
+      "insertions": 92,
+      "deletions": 1,
+      "subject": "ASoC: qcom: sc8280xp: add TDM hw_params support",
+      "high_risk": false
+    },
+    {
+      "sha": "efdfcebc8d5945228576b89994597496e13a26cb",
+      "group": "0400-audio",
+      "patch": "queue/0400-audio/0005-asoc-qcom-common-distinguish-missing-and-invalid-tdm-slot-configuration.patch",
+      "files": [
+        "sound/soc/qcom/common.c"
+      ],
+      "insertions": 3,
+      "deletions": 3,
+      "subject": "ASoC: qcom: common: Distinguish missing and invalid TDM slot configuration",
+      "high_risk": false
+    },
+    {
+      "sha": "dde5e417f9f6da09da48ac0585c42a0513851005",
+      "group": "0400-audio",
+      "patch": "queue/0400-audio/0006-asoc-qcom-sc8280xp-fix-tdm-hw_params-error-handling.patch",
+      "files": [
+        "sound/soc/qcom/sc8280xp.c"
+      ],
+      "insertions": 1,
+      "deletions": 1,
+      "subject": "ASoC: qcom: sc8280xp: Fix TDM hw_params error handling",
+      "high_risk": false
+    },
+    {
+      "sha": "2cd5a6f8ef674d0dfb1008f90ef728dfadead0b7",
+      "group": "0300-input-touch-hid",
+      "patch": "queue/0300-input-touch-hid/0007-arm64-add-xiaomi-pad-6-pro-support.patch",
+      "files": [
+        "Documentation/devicetree/bindings/arm/qcom.yaml",
+        "Documentation/devicetree/bindings/input/nanosic,wn8030.yaml",
+        "Documentation/devicetree/bindings/media/qcom,sm8550-iris.yaml",
+        "Documentation/devicetree/bindings/phy/nxp,ptn3222.yaml",
+        "Documentation/devicetree/bindings/soc/qcom/qcom,pmic-glink.yaml",
+        "Documentation/devicetree/bindings/vendor-prefixes.yaml",
+        "MAINTAINERS",
+        "README.liuqin.md",
+        "arch/arm64/boot/dts/qcom/Makefile",
+        "arch/arm64/boot/dts/qcom/sm8450.dtsi",
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts",
+        "arch/arm64/boot/dts/qcom/sm8475.dtsi",
+        "drivers/firmware/cirrus/cs_dsp.c",
+        "drivers/gpu/drm/msm/adreno/adreno_gpu.c",
+        "drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c",
+        "drivers/gpu/drm/msm/disp/dpu1/dpu_plane.c",
+        "drivers/gpu/drm/msm/dsi/dsi_host.c",
+        "drivers/gpu/drm/panel/panel-novatek-nt36532.c",
+        "drivers/hid/Kconfig",
+        "drivers/hid/Makefile",
+        "drivers/hid/hid-nanosic.c",
+        "drivers/input/touchscreen/nt36523/Kconfig",
+        "drivers/input/touchscreen/nt36523/nt36xxx.c",
+        "drivers/input/touchscreen/nt36523/nt36xxx.h",
+        "drivers/input/touchscreen/nt36523/nt36xxx_fw_update.c",
+        "drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c",
+        "drivers/media/platform/qcom/iris/iris_platform_common.h",
+        "drivers/media/platform/qcom/iris/iris_platform_gen2.c",
+        "drivers/media/platform/qcom/iris/iris_probe.c",
+        "drivers/of/platform.c",
+        "drivers/phy/qualcomm/phy-qcom-qmp-common.h",
+        "drivers/phy/qualcomm/phy-qcom-qmp-pcie.c",
+        "drivers/power/reset/msm-poweroff.c",
+        "drivers/power/reset/nvmem-reboot-mode.c",
+        "drivers/power/reset/qcom-pon.c",
+        "drivers/power/supply/qcom_battmgr.c",
+        "drivers/soc/qcom/pdr_internal.h",
+        "drivers/soc/qcom/pmic_glink.c",
+        "drivers/soc/qcom/qcom_pd_mapper.c",
+        "drivers/soc/qcom/qcom_pdr_msg.c",
+        "drivers/soc/qcom/ubwc_config.c",
+        "drivers/tty/serial/Kconfig",
+        "drivers/tty/serial/Makefile",
+        "drivers/tty/serial/earlycon-simplefb.c",
+        "drivers/usb/typec/ucsi/ucsi_glink.c",
+        "include/drm/drm_mipi_dsi.h",
+        "sound/soc/codecs/cs35l41.c",
+        "sound/soc/codecs/cs35l41.h",
+        "sound/soc/codecs/wm_adsp.c",
+        "sound/soc/codecs/wm_adsp.h",
+        "sound/soc/qcom/common.c",
+        "sound/soc/qcom/qdsp6/audioreach.c",
+        "sound/soc/qcom/qdsp6/audioreach.h",
+        "sound/soc/qcom/qdsp6/q6apm-dai.c",
+        "sound/soc/qcom/qdsp6/q6apm.c",
+        "sound/soc/qcom/qdsp6/topology.c",
+        "sound/soc/qcom/sc8280xp.c",
+        "tools/testing/selftests/hid/nanosic-static.py"
+      ],
+      "insertions": 5681,
+      "deletions": 357,
+      "subject": "arm64: add Xiaomi Pad 6 Pro support",
+      "high_risk": true
+    },
+    {
+      "sha": "44e3fe46683752fe951edf703d14323ab7aae69b",
+      "group": "0999-docs-bindings",
+      "patch": "queue/0999-docs-bindings/0008-ci-build-liuqin-changes-with-the-shared-integration-action.patch",
+      "files": [
+        ".github/workflows/liuqin.yml"
+      ],
+      "insertions": 27,
+      "deletions": 0,
+      "subject": "ci: build liuqin changes with the shared integration action",
+      "high_risk": false
+    },
+    {
+      "sha": "569f79be4a7d85661bdd5c3b22ab1f506878b5d8",
+      "group": "9999-misc",
+      "patch": "queue/9999-misc/0009-remoteproc-qcom-allow-userspace-to-own-slpi-startup.patch",
+      "files": [
+        "drivers/remoteproc/qcom_q6v5_pas.c"
+      ],
+      "insertions": 6,
+      "deletions": 0,
+      "subject": "remoteproc: qcom: allow userspace to own SLPI startup",
+      "high_risk": false
+    },
+    {
+      "sha": "a54c2b5501a7add99229dd82dff27f184c1bed91",
+      "group": "9999-misc",
+      "patch": "queue/9999-misc/0010-remoteproc-qcom-select-slpi-by-its-processor-name.patch",
+      "files": [
+        "drivers/remoteproc/qcom_q6v5_pas.c"
+      ],
+      "insertions": 1,
+      "deletions": 1,
+      "subject": "remoteproc: qcom: select SLPI by its processor name",
+      "high_risk": false
+    },
+    {
+      "sha": "91d37cdb79e4817452039e6b1f30bac5a1933b53",
+      "group": "0010-dt-board",
+      "patch": "queue/0010-dt-board/0011-arm64-dts-qcom-liuqin-wire-the-usb-c-port-as-otg-with-usb3-superspeed.patch",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts"
+      ],
+      "insertions": 78,
+      "deletions": 8,
+      "subject": "arm64: dts: qcom: liuqin: wire the USB-C port as OTG with USB3 SuperSpeed",
+      "high_risk": false
+    },
+    {
+      "sha": "4dcb6801404bdac58fb0ade2d0c9cb05e6af4384",
+      "group": "0300-input-touch-hid",
+      "patch": "queue/0300-input-touch-hid/0012-input-touchscreen-novatek-pick-nt36532-firmware-by-panel-module.patch",
+      "files": [
+        "drivers/input/touchscreen/nt36523/nt36xxx.c",
+        "drivers/input/touchscreen/nt36523/nt36xxx.h"
+      ],
+      "insertions": 29,
+      "deletions": 0,
+      "subject": "input: touchscreen: novatek: pick NT36532 firmware by panel module",
+      "high_risk": true
+    },
+    {
+      "sha": "ccee5e821158e62e21e920412fb026038f880ffd",
+      "group": "0700-usb-dp",
+      "patch": "queue/0700-usb-dp/0013-phy-qcom-qmp-combo-add-sm8475-diwali-usb3-dp-combo-phy-tables.patch",
+      "files": [
+        "drivers/phy/qualcomm/phy-qcom-qmp-combo.c"
+      ],
+      "insertions": 185,
+      "deletions": 0,
+      "subject": "phy: qcom-qmp-combo: add SM8475 (diwali) USB3/DP combo PHY tables",
+      "high_risk": true
+    },
+    {
+      "sha": "b8f84456a316f0dbeaa8d2333586493ac5435379",
+      "group": "0700-usb-dp",
+      "patch": "queue/0700-usb-dp/0014-usb-dwc3-drd-allow-userspace-control-of-the-role-switch.patch",
+      "files": [
+        "drivers/usb/dwc3/drd.c"
+      ],
+      "insertions": 1,
+      "deletions": 0,
+      "subject": "usb: dwc3: drd: allow userspace control of the role switch",
+      "high_risk": true
+    },
+    {
+      "sha": "a610c157c1d0ece92d15e93579f63e6b80dc6a93",
+      "group": "0700-usb-dp",
+      "patch": "queue/0700-usb-dp/0015-usb-typec-ucsi-stop-hammering-ppm_reset-clear-stale-cci-acks.patch",
+      "files": [
+        "drivers/usb/typec/ucsi/ucsi.c"
+      ],
+      "insertions": 37,
+      "deletions": 7,
+      "subject": "usb: typec: ucsi: stop hammering PPM_RESET, clear stale CCI acks",
+      "high_risk": true
+    },
+    {
+      "sha": "d9063dafbf82ebe9356ab5bffb3e76da40bd8ef1",
+      "group": "0010-dt-board",
+      "patch": "queue/0010-dt-board/0016-arm64-dts-qcom-liuqin-align-bootargs-with-the-release-cmdline.patch",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts"
+      ],
+      "insertions": 2,
+      "deletions": 2,
+      "subject": "arm64: dts: qcom: liuqin: align bootargs with the release cmdline",
+      "high_risk": false
+    },
+    {
+      "sha": "f86bba1fa3f3c114a87d3a1a93e8c208cb9d5bba",
+      "group": "0010-dt-board",
+      "patch": "queue/0010-dt-board/0017-arm64-dts-qcom-sm8475-xiaomi-liuqin-add-onboard-microphone-chain.patch",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts"
+      ],
+      "insertions": 100,
+      "deletions": 0,
+      "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: add onboard microphone chain",
+      "high_risk": false
+    },
+    {
+      "sha": "a13157fa07ec176ee6877775b77c5f68d2f8a592",
+      "group": "0010-dt-board",
+      "patch": "queue/0010-dt-board/0018-arm64-dts-qcom-sm8475-xiaomi-liuqin-enable-lpass_tlmm-for-soundwire.patch",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts"
+      ],
+      "insertions": 5,
+      "deletions": 0,
+      "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: enable lpass_tlmm for SoundWire",
+      "high_risk": false
+    },
+    {
+      "sha": "a974a62a45c5d3ebf1d121eb909db963f7e3c4aa",
+      "group": "0010-dt-board",
+      "patch": "queue/0010-dt-board/0019-arm64-dts-qcom-sm8475-xiaomi-liuqin-route-the-onboard-mic-into-the-tx-macro.patch",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts"
+      ],
+      "insertions": 13,
+      "deletions": 0,
+      "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: route the onboard mic into the TX macro",
+      "high_risk": false
+    },
+    {
+      "sha": "f2d5ed65ac03b7c14b5e5d51ba4c625eea44ac30",
+      "group": "0800-power-soc",
+      "patch": "queue/0800-power-soc/0020-power-supply-qcom_battmgr-expose-the-xiaomi-charger-authentication-interface.patch",
+      "files": [
+        "drivers/power/supply/qcom_battmgr.c"
+      ],
+      "insertions": 553,
+      "deletions": 49,
+      "subject": "power: supply: qcom_battmgr: expose the Xiaomi charger authentication interface",
+      "high_risk": true
+    },
+    {
+      "sha": "3672dd4ad1520987331d21d897ca7c15d7ef9f94",
+      "group": "0500-camera",
+      "patch": "queue/0500-camera/0021-clk-qcom-camcc-sm8450-support-retained-sm8475-camera-power-domains.patch",
+      "files": [
+        "drivers/clk/qcom/camcc-sm8450.c"
+      ],
+      "insertions": 164,
+      "deletions": 63,
+      "subject": "clk: qcom: camcc-sm8450: support retained SM8475 camera power domains",
+      "high_risk": true
+    },
+    {
+      "sha": "56d073c6a33f964967593ec62f67434da07e2b8a",
+      "group": "0500-camera",
+      "patch": "queue/0500-camera/0022-media-qcom-camss-enable-the-sm8450-rear-capture-path.patch",
+      "files": [
+        "Documentation/devicetree/bindings/media/qcom,sm8450-camss.yaml",
+        "drivers/media/platform/qcom/camss/camss-csid.c",
+        "drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c",
+        "drivers/media/platform/qcom/camss/camss-vfe.c",
+        "drivers/media/platform/qcom/camss/camss.c",
+        "drivers/media/platform/qcom/camss/camss.h"
+      ],
+      "insertions": 531,
+      "deletions": 1,
+      "subject": "media: qcom: camss: enable the SM8450 rear capture path",
+      "high_risk": true
+    },
+    {
+      "sha": "b363e34ac41a3b63b05376e79dd85d2adc56afc6",
+      "group": "0500-camera",
+      "patch": "queue/0500-camera/0023-media-liuqin-enable-the-rear-s5kjn1-camera.patch",
+      "files": [
+        "Documentation/devicetree/bindings/media/i2c/samsung,s5kjn1.yaml",
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts",
+        "drivers/media/i2c/Kconfig",
+        "drivers/media/i2c/Makefile",
+        "drivers/media/i2c/s5kjn1.c"
+      ],
+      "insertions": 2154,
+      "deletions": 0,
+      "subject": "media: liuqin: enable the rear S5KJN1 camera",
+      "high_risk": true
+    },
+    {
+      "sha": "a40b967b3d03afc28d1ae056d8b8611e6df6e9d7",
+      "group": "0300-input-touch-hid",
+      "patch": "queue/0300-input-touch-hid/0024-input-touchscreen-novatek-scale-pen-coordinates-like-the-fingers.patch",
+      "files": [
+        "drivers/input/touchscreen/nt36523/nt36xxx.c"
+      ],
+      "insertions": 10,
+      "deletions": 9,
+      "subject": "input: touchscreen: novatek: scale pen coordinates like the fingers",
+      "high_risk": true
+    },
+    {
+      "sha": "3206b08bf3ef9a901654736f6a46b7233af88d89",
+      "group": "0010-dt-board",
+      "patch": "queue/0010-dt-board/0025-arm64-dts-qcom-sm8475-xiaomi-liuqin-tidy-the-rear-camera-nodes.patch",
+      "files": [
+        "Documentation/devicetree/bindings/media/qcom,sm8450-camss.yaml",
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts"
+      ],
+      "insertions": 9,
+      "deletions": 40,
+      "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: tidy the rear camera nodes",
+      "high_risk": false
+    },
+    {
+      "sha": "bda414aa595a5afa60ab863f1da08a60e7c22bcc",
+      "group": "0999-docs-bindings",
+      "patch": "queue/0999-docs-bindings/0026-media-qcom-camss-use-qcom-sm8475-camss-for-the-liuqin-rear-path.patch",
+      "files": [
+        "Documentation/devicetree/bindings/media/{qcom,sm8450-camss.yaml => qcom,sm8475-camss.yaml}",
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts",
+        "drivers/media/platform/qcom/camss/camss.c"
+      ],
+      "insertions": 10,
+      "deletions": 10,
+      "subject": "media: qcom: camss: use qcom,sm8475-camss for the liuqin rear path",
+      "high_risk": false
+    },
+    {
+      "sha": "d6b573ff8244c1f4e5ce3c54875d4bbfb888a4bb",
+      "group": "0500-camera",
+      "patch": "queue/0500-camera/0027-clk-qcom-camcc-sm8450-correct-sm8475-gdsc-comments-and-drop-dead-code.patch",
+      "files": [
+        "drivers/clk/qcom/camcc-sm8450.c"
+      ],
+      "insertions": 13,
+      "deletions": 16,
+      "subject": "clk: qcom: camcc-sm8450: correct SM8475 GDSC comments and drop dead code",
+      "high_risk": true
+    },
+    {
+      "sha": "e06846ed9d035161298f1d9fe9a7c83e7ef63059",
+      "group": "0500-camera",
+      "patch": "queue/0500-camera/0028-media-i2c-s5kjn1-fix-blank-lines-and-argument-alignment.patch",
+      "files": [
+        "drivers/media/i2c/s5kjn1.c"
+      ],
+      "insertions": 4,
+      "deletions": 4,
+      "subject": "media: i2c: s5kjn1: fix blank lines and argument alignment",
+      "high_risk": true
+    },
+    {
+      "sha": "7eece2bf91c7784446ef1aa9fc8183a9c0540379",
+      "group": "0010-dt-board",
+      "patch": "queue/0010-dt-board/0029-arm64-dts-qcom-sm8475-xiaomi-liuqin-enable-displayport-out-over-usb-c.patch",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts"
+      ],
+      "insertions": 43,
+      "deletions": 0,
+      "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: enable DisplayPort out over USB-C",
+      "high_risk": false
+    },
+    {
+      "sha": "7ec2c1f628c00a02987ee3c82869f7cdb34dfe65",
+      "group": "0800-power-soc",
+      "patch": "queue/0800-power-soc/0030-soc-qcom-pmic_glink-trace-usbc-glink-and-allow-forcing-alt-mode.patch",
+      "files": [
+        "drivers/soc/qcom/pmic_glink.c",
+        "drivers/soc/qcom/pmic_glink_altmode.c"
+      ],
+      "insertions": 142,
+      "deletions": 4,
+      "subject": "soc: qcom: pmic_glink: trace USBC glink and allow forcing alt-mode",
+      "high_risk": false
+    },
+    {
+      "sha": "c7d4d4ca507bd67153c0889601e98fa563a7a38a",
+      "group": "0800-power-soc",
+      "patch": "queue/0800-power-soc/0031-soc-qcom-pmic_glink_altmode-fix-debugfs-teardown-signature.patch",
+      "files": [
+        "drivers/soc/qcom/pmic_glink_altmode.c"
+      ],
+      "insertions": 6,
+      "deletions": 1,
+      "subject": "soc: qcom: pmic_glink_altmode: fix debugfs teardown signature",
+      "high_risk": false
+    },
+    {
+      "sha": "95cf27cbc2e7d44c82c8011082d3df0b3ad90ca5",
+      "group": "0800-power-soc",
+      "patch": "queue/0800-power-soc/0032-soc-qcom-pmic_glink_altmode-recognize-the-liuqin-dp-svid-0xff01.patch",
+      "files": [
+        "drivers/soc/qcom/pmic_glink.c",
+        "drivers/soc/qcom/pmic_glink_altmode.c"
+      ],
+      "insertions": 20,
+      "deletions": 105,
+      "subject": "soc: qcom: pmic_glink_altmode: recognize the liuqin DP svid (0xff01)",
+      "high_risk": false
+    },
+    {
+      "sha": "e74c16b3dc68228ca1f479a510a1ff40a32f66ee",
+      "group": "0010-dt-board",
+      "patch": "queue/0010-dt-board/0033-arm64-dts-qcom-sm8475-xiaomi-liuqin-apply-the-qmp-phy-port-select-pinctrl.patch",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts"
+      ],
+      "insertions": 14,
+      "deletions": 7,
+      "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: apply the QMP PHY port select pinctrl",
+      "high_risk": false
+    },
+    {
+      "sha": "4ddc7a1684645ff2a6f15891b4766a3ae1fd75e7",
+      "group": "0200-display",
+      "patch": "queue/0200-display/0034-drm-msm-phy-qcom-trace-the-liuqin-dp-alt-mode-plug-path.patch",
+      "files": [
+        "drivers/gpu/drm/msm/dp/dp_display.c",
+        "drivers/phy/qualcomm/phy-qcom-qmp-combo.c",
+        "drivers/soc/qcom/pmic_glink_altmode.c"
+      ],
+      "insertions": 16,
+      "deletions": 1,
+      "subject": "drm/msm, phy: qcom: trace the liuqin DP alt-mode plug path",
+      "high_risk": true
+    },
+    {
+      "sha": "8d5005650cfd6e313603aa8fd4f504c1af228002",
+      "group": "0700-usb-dp",
+      "patch": "queue/0700-usb-dp/0035-phy-qcom-qmp-combo-program-the-sm8475-dp-phy-with-the-diwali-tables.patch",
+      "files": [
+        "drivers/phy/qualcomm/phy-qcom-qmp-combo.c"
+      ],
+      "insertions": 139,
+      "deletions": 19,
+      "subject": "phy: qcom-qmp-combo: program the SM8475 DP PHY with the diwali tables",
+      "high_risk": true
+    },
+    {
+      "sha": "f7c302092be01e60da3c2539ba3e3b43d591b41d",
+      "group": "0200-display",
+      "patch": "queue/0200-display/0036-drm-msm-dp-usb-typec-mux-bring-the-dp-phy-up-before-aux-and-trace-the-aux-path.patch",
+      "files": [
+        "drivers/gpu/drm/msm/dp/dp_aux.c",
+        "drivers/gpu/drm/msm/dp/dp_ctrl.c",
+        "drivers/gpu/drm/msm/dp/dp_display.c",
+        "drivers/usb/typec/mux/fsa4480.c"
+      ],
+      "insertions": 90,
+      "deletions": 6,
+      "subject": "drm/msm/dp, usb: typec: mux: bring the DP PHY up before AUX and trace the AUX path",
+      "high_risk": true
+    },
+    {
+      "sha": "42a085d01c313d02facf9f31f61e9291fa8a8ace",
+      "group": "0800-power-soc",
+      "patch": "queue/0800-power-soc/0037-soc-qcom-pmic_glink_altmode-decode-liuqin-s-orientation-enum.patch",
+      "files": [
+        "drivers/soc/qcom/pmic_glink_altmode.c"
+      ],
+      "insertions": 67,
+      "deletions": 20,
+      "subject": "soc: qcom: pmic_glink_altmode: decode liuqin's orientation enum",
+      "high_risk": false
+    },
+    {
+      "sha": "5649815b7e609a2c5dd45c331a717f63cad6a444",
+      "group": "0010-dt-board",
+      "patch": "queue/0010-dt-board/0038-arm64-dts-qcom-sm8475-xiaomi-liuqin-fix-the-usb-c-orientation-plumbing.patch",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts"
+      ],
+      "insertions": 27,
+      "deletions": 6,
+      "subject": "arm64: dts: qcom: sm8475-xiaomi-liuqin: fix the USB-C orientation plumbing",
+      "high_risk": false
+    },
+    {
+      "sha": "e6604d01be72a1e46ed12fd806e5cd93ff4ae153",
+      "group": "0900-net-bluetooth",
+      "patch": "queue/0900-net-bluetooth/0039-net-rtnetlink-do-not-dereference-an-unnamed-parent-device.patch",
+      "files": [
+        "net/core/rtnetlink.c"
+      ],
+      "insertions": 23,
+      "deletions": 4,
+      "subject": "net: rtnetlink: do not dereference an unnamed parent device",
+      "high_risk": false
+    },
+    {
+      "sha": "cb62545d4f62c22b6d40f5ae4dc893e4afa88143",
+      "group": "0800-power-soc",
+      "patch": "queue/0800-power-soc/0040-soc-qcom-pmic_glink_altmode-decode-the-cable-orientation-generically.patch",
+      "files": [
+        "drivers/soc/qcom/pmic_glink_altmode.c"
+      ],
+      "insertions": 21,
+      "deletions": 38,
+      "subject": "soc: qcom: pmic_glink_altmode: decode the cable orientation generically",
+      "high_risk": false
+    },
+    {
+      "sha": "7d6b79dd37487de847d8b13d41eca0eb0de7dc74",
+      "group": "0200-display",
+      "patch": "queue/0200-display/0041-drm-msm-dp-phy-qcom-usb-soc-quiet-the-dp-bring-up-instrumentation.patch",
+      "files": [
+        "drivers/gpu/drm/msm/dp/dp_aux.c",
+        "drivers/gpu/drm/msm/dp/dp_ctrl.c",
+        "drivers/gpu/drm/msm/dp/dp_display.c",
+        "drivers/phy/qualcomm/phy-qcom-qmp-combo.c",
+        "drivers/soc/qcom/pmic_glink.c",
+        "drivers/usb/typec/mux/fsa4480.c"
+      ],
+      "insertions": 20,
+      "deletions": 28,
+      "subject": "drm/msm/dp, phy: qcom, usb, soc: quiet the DP bring-up instrumentation",
+      "high_risk": true
+    },
+    {
+      "sha": "355dd22d6a3190a22eea9764a60ac3e756959bec",
+      "group": "0200-display",
+      "patch": "queue/0200-display/0042-drm-adreno-a6xx-force-cold-boot-on-hang-recovery.patch",
+      "files": [
+        "drivers/gpu/drm/msm/adreno/a6xx_gmu.c"
+      ],
+      "insertions": 12,
+      "deletions": 0,
+      "subject": "drm/adreno/a6xx: force cold boot on hang recovery",
+      "high_risk": false
+    },
+    {
+      "sha": "0301490788d9e8939ad672b9f7cc49e8ceb10d94",
+      "group": "0200-display",
+      "patch": "queue/0200-display/0043-drm-msm-expose-gpu_busy_percent-sysfs-attribute.patch",
+      "files": [
+        "drivers/gpu/drm/msm/msm_gpu.c",
+        "drivers/gpu/drm/msm/msm_gpu.h",
+        "drivers/gpu/drm/msm/msm_gpu_devfreq.c"
+      ],
+      "insertions": 60,
+      "deletions": 0,
+      "subject": "drm/msm: expose gpu_busy_percent sysfs attribute",
+      "high_risk": false
+    },
+    {
+      "sha": "0b5cd921fb52e03af6f112d5ad881aaf289bfa32",
+      "group": "9999-misc",
+      "patch": "queue/9999-misc/0044-tee-add-close_context-to-tee-driver-operation.patch",
+      "files": [
+        "drivers/tee/tee_core.c",
+        "drivers/tee/tee_private.h",
+        "include/linux/tee_core.h"
+      ],
+      "insertions": 55,
+      "deletions": 8,
+      "subject": "tee: add close_context to TEE driver operation",
+      "high_risk": false
+    },
+    {
+      "sha": "e8f8cc13bcb7da277bf9ad25f8148dc932e75b65",
+      "group": "0600-tee-fingerprint",
+      "patch": "queue/0600-tee-fingerprint/0045-firmware-qcom-scm-add-qseecom-app-loading-and-listener-services.patch",
+      "files": [
+        "drivers/firmware/qcom/qcom_scm.c",
+        "include/linux/firmware/qcom/qcom_scm.h"
+      ],
+      "insertions": 521,
+      "deletions": 3,
+      "subject": "firmware: qcom: scm: add QSEECOM app loading and listener services",
+      "high_risk": true
+    },
+    {
+      "sha": "ea63b921c92cfc2f3942cdaec2b32ea44d84c410",
+      "group": "0800-power-soc",
+      "patch": "queue/0800-power-soc/0046-soc-qcom-mdt_loader-assemble-a-split-image-as-one-contiguous-blob.patch",
+      "files": [
+        "drivers/soc/qcom/mdt_loader.c",
+        "include/linux/soc/qcom/mdt_loader.h"
+      ],
+      "insertions": 304,
+      "deletions": 0,
+      "subject": "soc: qcom: mdt_loader: assemble a split image as one contiguous blob",
+      "high_risk": false
+    },
+    {
+      "sha": "6640846b3b6e8fde7b79b2a7b1ee0a6309568339",
+      "group": "0600-tee-fingerprint",
+      "patch": "queue/0600-tee-fingerprint/0047-tee-add-a-qualcomm-qseecom-tee-driver.patch",
+      "files": [
+        "Documentation/tee/index.rst",
+        "Documentation/tee/qseecom.rst",
+        "drivers/tee/Kconfig",
+        "drivers/tee/Makefile",
+        "drivers/tee/qseecom/Kconfig",
+        "drivers/tee/qseecom/Makefile",
+        "drivers/tee/qseecom/core.c",
+        "include/uapi/linux/tee.h"
+      ],
+      "insertions": 2025,
+      "deletions": 0,
+      "subject": "tee: add a Qualcomm QSEECOM TEE driver",
+      "high_risk": true
+    },
+    {
+      "sha": "b87eaebbd7b7c031965ea57e4dd2394dedbb146f",
+      "group": "0600-tee-fingerprint",
+      "patch": "queue/0600-tee-fingerprint/0048-misc-add-an-fpc1264-sensor-control-driver-for-liuqin.patch",
+      "files": [
+        "Documentation/devicetree/bindings/input/fpc,fpc1020.yaml",
+        "Documentation/devicetree/bindings/vendor-prefixes.yaml",
+        "drivers/misc/Kconfig",
+        "drivers/misc/Makefile",
+        "drivers/misc/fpc1264_spi_diag.c"
+      ],
+      "insertions": 729,
+      "deletions": 0,
+      "subject": "misc: add an FPC1264 sensor control driver for liuqin",
+      "high_risk": true
+    },
+    {
+      "sha": "97044efd80ba868c87d39daf162f7e0ea79a4094",
+      "group": "0200-display",
+      "patch": "queue/0200-display/0049-drm-msm-dp-balance-early-aux-phy-power-and-propagate-setup-errors.patch",
+      "files": [
+        "drivers/gpu/drm/msm/dp/dp_ctrl.c",
+        "drivers/gpu/drm/msm/dp/dp_ctrl.h",
+        "drivers/gpu/drm/msm/dp/dp_display.c"
+      ],
+      "insertions": 102,
+      "deletions": 22,
+      "subject": "drm/msm/dp: balance early AUX PHY power and propagate setup errors",
+      "high_risk": false
+    },
+    {
+      "sha": "68783ed98722488ad31c32f0fd252655f9906a8c",
+      "group": "0700-usb-dp",
+      "patch": "queue/0700-usb-dp/0050-phy-qcom-qmp-combo-return-dp-pll-setup-failures-to-the-caller.patch",
+      "files": [
+        "drivers/phy/qualcomm/phy-qcom-qmp-combo.c"
+      ],
+      "insertions": 8,
+      "deletions": 2,
+      "subject": "phy: qcom-qmp-combo: return DP PLL setup failures to the caller",
+      "high_risk": true
+    },
+    {
+      "sha": "7deb78827a94a19aae3070677d7a7a2896f95822",
+      "group": "0010-dt-board",
+      "patch": "queue/0010-dt-board/0051-arm64-dts-qcom-liuqin-preserve-device-tested-fpc-wiring.patch",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts"
+      ],
+      "insertions": 48,
+      "deletions": 1,
+      "subject": "arm64: dts: qcom: liuqin: preserve device-tested FPC wiring",
+      "high_risk": false
+    }
+  ],
+  "generated_at": "2026-10-20T20:37:33+08:00",
+  "tool": "scripts/export-kernel-patches.sh",
+  "reconstruction": {
+    "ok": true,
+    "result": "byte-identical product tree",
+    "series_patches": 51
+  }
+}

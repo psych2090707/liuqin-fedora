@@ -1,0 +1,81 @@
+# SYNTHETIC example root manifest for offline contract generation tests.
+# Every hash below is sha256('example:<path>'), NOT a real file. A contract
+# generated from this file admits nothing real: it exists so the pipeline and
+# the initramfs contract embedding can be exercised before rootfs-builder
+# produces out/rootfs/rootfs.files.sha256. Never ship this contract to a device.
+# Regenerate with: tools/build-root-contract.py --manifest <real manifest> ...
+# contract v2 (ADR-0004 D2) topology paths below are synthetic too: the
+# contract generator refuses to emit a contract for a manifest that lacks
+# the declared PID1/login/Plasma/kernel-identity interface.  With these
+# entries the synthetic manifest yields the same topology-only v2 contract
+# (13 entries, 723 bytes, sha256 502f05f8...) as the real dev-v3 rootfs.
+c24849c4a847c10a1dc0fcea822afc03fa7160c70c0fda480b06e8d1329fe3ef  /etc/chrony.d/00-liuqin-no-rtc.conf
+70767be91c38a1d48abb6ef23737f53a007d3fc14f3dbbb127cf858c46cc50aa  /etc/chrony/conf.d/90-liuqin-no-rtc.conf
+7e6d4071f46def0666998ab8961da8dc5a0a8dbe31ce104726c62ee82c179d39  /etc/environment.d/10-liuqin-session.conf
+e08280b5cd3880bb7e747fe8b0adad711426147291ded06139c42fed7678f842  /etc/fstab
+fdc225812d442869b6952aaf3bdc17ae6ccd192aa2b1d870cc397ca39714a6d3  /etc/hostname
+3c32b153d6dc59ec4752badc5403f1c2df0ef6d88c722508cd08677903cfdda1  /etc/liuqin-fedora-root
+ae32f3cff2633ad7c26ca188ad4dd408af20438a247e7527effee2615bbff3b1  /etc/liuqin/image-contract
+0872ea8844b95855e3d54abe5cd96b6c700d74dccdfb38fbd3278fb969c9730c  /etc/locale.conf
+678f1794569129e698166c8ced77623f1241ad7280f166de3cc0374a5d676c82  /etc/plasmalogin.conf.d/10-liuqin.conf
+2e8a0b7897bff94520c22f039515b2807dab362bfe43ec157aa420a8b96269b0  /etc/selinux/config
+130c61bcd63fa0c3a35a8f099bec979277a20be69363777106a25d59725bf4ad  /etc/skel/.config/kwinoutputconfig.json
+62dbc3681b47ee05ce1da4e24e5860f39f42219e33f00f6725d112249240cb21  /etc/skel/.config/monitors.xml
+11ea2df98a6e326ff34520c0e1893c2c0f9ceafd418722b174e33771dd0bc6af  /etc/vconsole.conf
+751d133f5697963b7c4c095e537987499395ed1a0490420d8a46bfc85a9637d5  /usr/bin/hexagonrpcd
+a4d4e6e15d132b87187f84a685e008ce09ad61970773bc1591f18583aa4c08be  /usr/bin/kwin_wayland
+29a90437fc3c3dd737c3839598bc4148a7afa705f5eaa8fff8ad89b4a408aa3a  /usr/bin/plasmalogin
+1a218dca89924fd22168d06b3aaaefd119e6174e52a0b2a1e1e22c22c57f0ed9  /usr/bin/plasmashell
+8b2f337e84092b3407a450bad3fadb0a744147d80c3632e910bfc853f9617c74  /usr/bin/startplasma-wayland
+58e54b4c01a4a4a95986bb03d13de503d36b90025e0c6894c5a040edd79cefd3  /usr/lib/firmware/novatek/liuqin/novatek_nt36532_m81_fw_csot.bin
+568914243b36d00d8b39f6604304238e48b25e27e34d3e9f095e4afc423a7286  /usr/lib/firmware/novatek/liuqin/novatek_nt36532_m81_fw_tm.bin
+46c227586bb9f53c7091a61948aef6c4062d1bd4f2dc112457d72fd4ec0a15f7  /usr/lib/firmware/qcom/sm8450/Xiaomi-Pad-6-Pro-tplg.bin
+13b2ba46a8a1a0f27721836af05f550f795b4549bbb5f82613c9e7e8b0d5f8d0  /usr/lib/firmware/updates/ath11k/WCN6855/hw2.0/amss.bin
+e714cb704d28a9876c1af92fecd5cf97f9843daaccfec2f54faa77ed300f1ab9  /usr/lib/firmware/updates/ath11k/WCN6855/hw2.0/board-2.bin
+f5d4038d0a5b8ad24aee6ab83a07ba414fb43bad17671f06a4661a2c42e00abc  /usr/lib/firmware/updates/ath11k/WCN6855/hw2.0/m3.bin
+ea04bf56b1d204bd507de78d2bf49b21b15d6e54629115e787fe3c887e5c7a7f  /usr/lib/firmware/updates/ath11k/WCN6855/hw2.0/regdb.bin
+dbfe7510685551ff92baec67cc1cfec5cd163619188a4bc05ac60b9d700cf8a3  /usr/lib/firmware/updates/ath11k/WCN6855/hw2.1/amss.bin
+69d65edfc74d600778ef0653ce6661dff0020beb8a4759842d5f71cd4e7e748e  /usr/lib/firmware/updates/ath11k/WCN6855/hw2.1/board-2.bin
+244938bab1866c8a51ab0ec9c29eb23706a9cebfc15e779fd67d80187d04c174  /usr/lib/firmware/updates/ath11k/WCN6855/hw2.1/m3.bin
+0f079fef5df7787d333f91a6e72c118a52d08982d8be01e40a1b1cf440cdb484  /usr/lib/firmware/updates/ath11k/WCN6855/hw2.1/regdb.bin
+6e891a20cf4cb4c3e61a621a8d7226583be7e682366edb127f00d317728dc966  /usr/lib/firmware/updates/qcom/a730_sqe.fw
+ce64e4acb9b0e9dcc2a730d4a08f03245473c843ecc9e280039bbeb0df91c95f  /usr/lib/firmware/updates/qcom/gmu_gen70000.bin
+c0ed89f0262518ed72c66c7f09450411b28f2e7e90978d885aec19d75652270d  /usr/lib/systemd/system-preset/90-liuqin-sensors.preset
+2c1bb31f5a233c9a5d3b6e5604251ef2d8ffaacf3c0c1952f12e7f013a7a6bb2  /usr/lib/systemd/system/NetworkManager.service.d/20-liuqin-wlan-mac.conf
+d2566714b524454cf2981ce01c8abe269cb3f214bc1ab82d2556c15d229dd201  /usr/lib/systemd/system/bluetooth.service.d/20-liuqin-public-address.conf
+2a55556ae8fa708e10820159e19e93052178706e91b10458a64a18c5c0a718e4  /usr/lib/systemd/system/hexagonrpcd-sdsp.service
+11249de4a6670c1076a93e6564fba597d2e008ea540ee0229eae967fca14008b  /usr/lib/systemd/system/iio-sensor-proxy.service.d/90-liuqin-ssc.conf
+0931fd7b30db309a20c43d0dbf03db3299e19aec451d25dd1b0df6e3f646ad60  /usr/lib/systemd/system/liuqin-backlight-default.service
+242cfb71ac2f8c2e34244b6554177a02fd16303c40b5f0a33df5a1e37deba656  /usr/lib/systemd/system/liuqin-bt-preconfigure.service
+dd07b7500e23ec83c7d5d855e414884351399fcc7c0daa2137ebdc73dac1e7de  /usr/lib/systemd/system/liuqin-hexagonrpcd-sdsp.service
+255b831eaa1a1eff86fb758802972a54687a3316d637f98cf5451e6dde26e9c5  /usr/lib/systemd/system/liuqin-mipps-auth.service
+38078224b697bb050d0af992dbb7d15b3965efb64d4dbbfb0250f91e15c577b7  /usr/lib/systemd/system/liuqin-power-keyd.service
+1df12eec3e4408e3946ffb73c610903b76c520e9a79d169be811f0208e25199c  /usr/lib/systemd/system/liuqin-power-keyd.service.d/20-liuqin-session-runtime.conf
+421ba124e6ba2c20992d00d7193e3bfeb8256f99d0259cd58240897e19d869bd  /usr/lib/systemd/system/liuqin-sensor-stack.target
+031fa229337497332a4d2eeaca5ba6f0f98a08ba6d08c288711a84c44a2fdd04  /usr/lib/systemd/system/liuqin-slpi.service
+0a548f115603786145d438f4b0d2e5b9d28addade2cd2b2a1430ada3e3befffd  /usr/lib/systemd/system/liuqin-ssc-sample-gate.service
+d1feb29093875172ecb9e41db23c5ba5cc94ab18c5a15cf697c71ff73c2bc7cf  /usr/lib/systemd/system/liuqin-wlan-mac.service
+e0fa3716082fa0dd44882e11f9e1110815d72323cfd32f0a103a2e0d6309a1cd  /usr/lib/systemd/system/plasmalogin.service
+9cfafbe773b6763c724da36b05c94a301fce86af205c02f1ada87f6c1fefd3d3  /usr/lib/systemd/systemd
+d68e47a88f886e4955d105e8f6ade7cae0a36896f4cd712aef2a00b8f6d9ebc1  /usr/lib/udev/rules.d/70-liuqin-touchpad-external.rules
+7bdf2c000b28d3003a97a0674b633bae8f743d9eea9a9ae943bb998c6e9c0bb7  /usr/lib/udev/rules.d/80-liuqin-fastrpc.rules
+06e8d9abe76395e12726c2a779c66ef2ea066cd5b6d1cb10ecd8695934d57806  /usr/lib/udev/rules.d/90-liuqin-mipps-auth.rules
+ff194ab0af4c6ea42a3e32360c352682a71423dc5dd6d5030d1264ec72da3b8f  /usr/libexec/iio-sensor-proxy
+5da43dbd86dfa9d6abcbf4f9080c08e0e182cfadc709381d7ffb66d06247b4f9  /usr/libexec/kscreenlocker_greet
+dca0ffa68c5b20ad8e60ac32c33296f35194e335f95adfa92acb2451670055a0  /usr/libexec/liuqin-ssc-sample-gate
+9ad1ddb153993be7881df255355a78a985dca748729579dce5cba8d3c89b1fa2  /usr/libexec/liuqin/liuqin-backlight-default
+b9c9fe6e08b01c8f7a59e9a3b4e6232f6f44e138aef25ece20653a433aec0930  /usr/libexec/liuqin/liuqin-bt-public-addr
+c224112d8ae32f68615f4d4d9bb402dea158aa181b8382f3452ab78ddb792a0a  /usr/libexec/liuqin/liuqin-mipps-auth
+c3edae40d87f7c112984786ec818eb22e569ae9b6f425a4f5be4428554dedea6  /usr/libexec/liuqin/liuqin-power-key-action
+20f9c0a0a4f08975fed2e880db160685819bb4261b235a59d63df350b847c30d  /usr/libexec/liuqin/liuqin-power-keyd
+f41db5eccf34746c985bf922bdb4d64d874862ca223a670c01f2a3e560d74de4  /usr/libexec/liuqin/liuqin-reboot
+63daa032cc266484e14623359272b686e23976f821c6f806272d00db5d64c155  /usr/libexec/liuqin/liuqin-switch
+6bd77ba16c06480ca72358a1bab1d649a752ee2990f4f50769bf3c17fb064ad7  /usr/libexec/liuqin/liuqin-wlan-mac
+b73f9f4fe30873322a2f8a608e81b9f0a9b5a8a2c4f14559340d4bac08de73ec  /usr/libexec/liuqin/slpi
+9c304d20a1788f7c1c7ab56e68fa4ddeaff520c24651c1a131a48da56486c80b  /usr/share/alsa/ucm2/Qualcomm/sm8450/Xiaomi-Pad-6-Pro/HiFi.conf
+cf0846936afb66294d66cbbdde735261e5e4f504bebdaf8158e4ac8b90c491f6  /usr/share/alsa/ucm2/conf.d/sm8450/Xiaomi-Pad-6-Pro.conf
+1e9e198860dd6340e21d8474914e852a679978d97d7bc597db995172df948804  /usr/share/applications/liuqin-reboot-to-android.desktop
+593af9f31e537fc4e0c2fc6e8927d646fac7cf739ee0698e063819e2dcf98189  /usr/share/liuqin/kernel-modules.manifest
+747977ee8693f671454bab12220ff429a57d475f115759001476b969775fe5c8  /usr/share/liuqin/kernel.release
+b7f4063d713f026e28c4f0a6444ffa28b5c476e3c58b460e78a3b19d9fc51dd6  /usr/share/polkit-1/actions/io.github.liuqin.switch.policy
+e046582db6a952c592b5ec88f03e8c91dff7c0fdfac044082b0355f443ab8ba6  /usr/share/polkit-1/rules.d/49-liuqin-sensorproxy.rules

@@ -1,0 +1,25 @@
+{
+  "target_version": "7.3.1",
+  "target_url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.1.tar.xz",
+  "community_repo": "https://github.com/Seeker0472/liuqin-nixos",
+  "community_commit": "eadaad6e032dbc0c3fc96347d5cf5bc78715827c",
+  "community_base_version": "7.2.5",
+  "default_build_changed": false,
+  "target_sha256": "fa595aad93734f829c963c2a90ef7c3673224fd7fdae7b49406e397cde2de231",
+  "original_product_commit": "fe81794b5e1b8a3f11a165f3acbfdb8fa671dbb3",
+  "original_sm8450_base": "a19585977c11fa662435b607cb9ff4ac7133092e",
+  "original_mainline_pre_custom": "90d970cade8e67e20b09bbfdc2f0b52064322921",
+  "original_seed_config": "out/wcd938x-irq/kernel/dist/config",
+  "original_seed_sha256": "ce1e2b2c78096af7e7be68951b9ba64b2b5f740d582997ea4ed6eaf3a4ab063a",
+  "pon_source_origin": "tasks/archive/TN0069-crash-forensics/pon/afk_pon_snapshot.c",
+  "license": "GPL-2.0 Linux-derived patches; MIT build helpers; retained original notices",
+  "additional_upstream_fixes": [
+    {
+      "patch": "0013-upstream-dsi-pll-system-muxes.patch",
+      "source": "https://lists.openwall.net/linux-kernel/2026/10/19/1525",
+      "message_id": "20261019130041.305805-1-xiaqinghuan@mail.ustc.edu.cn",
+      "fixes": "44784327815b",
+      "status": "submitted upstream; local backport, hardware validation pending"
+    }
+  ]
+}

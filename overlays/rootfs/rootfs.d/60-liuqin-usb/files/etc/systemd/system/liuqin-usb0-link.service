@@ -1,0 +1,15 @@
+[Unit]
+Description=liuqin USB NCM link (pin 192.168.7.2/24)
+Documentation=file:/usr/libexec/liuqin/liuqin-usb0-up
+ConditionPathExists=/sys/class/net/usb0
+After=network-pre.target
+Before=network.target sshd.service liuqin-usb0-dhcp.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/liuqin/liuqin-usb0-up
+TimeoutStartSec=20
+
+[Install]
+WantedBy=multi-user.target

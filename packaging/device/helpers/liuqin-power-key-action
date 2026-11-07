@@ -1,0 +1,44 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# Fedora/KDE replacement for upstream's GNOME/Mutter power-key action helper.
+#
+# Upstream (yzddmr6/xiaomipad-6pro-mainline v0.6.0) implements this action for
+# GNOME: Mutter's org.gnome.Mutter.DisplayConfig DBus interface, GNOME Screen
+# Saver DBus, zenity, gnome-session-quit and the GNOME-control-center GSettings
+# schema.  None of that exists on a Fedora KDE image, so this replacement keeps
+# the same contract (short press / long press, never power off directly) using
+# only systemd/loginctl primitives.
+#
+# KDE's powerdevil also handles the power key; the liuqin-power-keyd unit is
+# therefore installed but NOT enabled by default (see docs/maintenance/device-packages.md).
+# If enabled, a short press locks the active seat0 session; a long press is a
+# deliberate no-op so powerdevil/the desktop own the chooser and the daemon can
+# never power the tablet off on its own.
+set -eu
+
+action=${1:-}
+loginctl=${LIUQIN_LOGINCTL:-/usr/bin/loginctl}
+
+case $action in
+short | long) ;;
+*) exit 64 ;;
+esac
+
+session=$("$loginctl" show-seat seat0 --property=ActiveSession --value 2>/dev/null || :)
+[ -n "$session" ] && [ "$session" != n/a ] || {
+	echo "liuqin-power-key-action: no active seat0 session; $action ignored" >&2
+	exit 3
+}
+uid=$("$loginctl" show-session "$session" --property=User --value 2>/dev/null || :)
+active=$("$loginctl" show-session "$session" --property=Active --value 2>/dev/null || :)
+case $uid in '' | *[!0-9]*) exit 3 ;; esac
+[ "$uid" -ge 1000 ] || exit 3
+[ "$active" = yes ] || exit 3
+
+if [ "$action" = short ]; then
+	"$loginctl" lock-sessions
+	printf '%s\n' 'liuqin-power-key-action: short press -> lock-sessions'
+else
+	printf '%s\n' 'liuqin-power-key-action: long press ignored (Fedora/KDE: powerdevil policy)'
+fi

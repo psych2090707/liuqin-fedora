@@ -1,0 +1,50 @@
+From: liuqin Fedora port <noreply@localhost>
+Subject: [PATCH] arm64: dts: qcom: sm8475-xiaomi-liuqin: vote display bandwidth on the apps BCMs
+
+The sm8450 MDSS node votes "mdp0-mem"/"mdp1-mem" on MASTER_MDP_DISP ->
+SLAVE_EBI1_DISP. In the interconnect driver those *_DISP nodes belong to
+BCMs named MM0/MC0/SH0/ACV, i.e. the same RPMh addresses as the apps
+keepalive BCMs, and both sit on the apps BCM voter. The display BCMs have
+identical wake/sleep votes, so after rpmh_invalidate() they are sent only as
+AMC requests, while the apps keepalive BCMs program sleep=0/wake=1 for the
+same addresses. Every APSS power collapse (cluster-sleep-1) therefore drops
+the DDR/NoC votes that the video-mode DPU still needs; the CTL enters
+hardware recovery and never finishes (CTL_SW_RESET stuck at 1, CTL_FLUSH
+0x4200c1 pending), and the panel shows garbage until reboot.
+
+Voting on MASTER_MDP -> SLAVE_EBI1 aggregates display bandwidth into the
+apps BCMs themselves, so it is carried in their sleep/wake sets.
+
+Verified on liuqin (TN0050): deep idle enabled, cluster-sleep-1 entered
+>26k times, default KWin (AR30, UBWC) + Firefox, 0 DPU errors in 1300 s;
+the unpatched DTB failed within 115-190 s idle on four boots.
+
+---
+diff --git a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+index c874446..0c9f513 100644
+--- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
++++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+@@ -1119,6 +1119,23 @@
+  * nothing now that telnet and a full dmesg are available on this board.
+  */
+ &mdss {
++	/*
++	 * Vote display bandwidth on the apps BCM nodes, not the *_DISP ones.
++	 * The *_DISP BCMs share the MM0/MC0/SH0 RPMh addresses with the apps
++	 * keepalive BCMs on the same (apps) voter but are never written to the
++	 * sleep/wake sets, so every APSS power collapse dropped the display's
++	 * DDR/NoC votes while video mode was still fetching. The DPU then hung
++	 * in CTL hardware recovery (CTL_SW_RESET stuck at 1) and the panel
++	 * showed garbage until reboot.
++	 */
++	interconnects = <&mmss_noc MASTER_MDP 0 &mc_virt SLAVE_EBI1 0>,
++			<&mmss_noc MASTER_MDP 0 &mc_virt SLAVE_EBI1 0>,
++			<&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
++			 &config_noc SLAVE_DISPLAY_CFG QCOM_ICC_TAG_ACTIVE_ONLY>;
++	interconnect-names = "mdp0-mem",
++			     "mdp1-mem",
++			     "cpu-cfg";
++
+ 	status = "okay";
+ };
+ 

@@ -1,0 +1,24 @@
+# CRITICAL — do not delete this file.
+#
+# Fedora's first boot runs `systemctl preset-all`.  The vendor file
+# /usr/lib/systemd/system-preset/99-default-disable.preset contains "disable *",
+# so any unit that is only enabled with `systemctl enable` in the image is
+# turned OFF again on the first real boot.  This is exactly what happened to
+# liuqin-lid-policy.service and liuqin-power-keyd.service on 2026-11-06:
+# the image had the enable symlinks, but /etc was repopulated from the preset
+# policy and both units came up disabled.
+#
+# The preset files are sorted by filename and the FIRST matching line wins.
+# "90-liuqin-power.preset" therefore beats "99-default-disable.preset".
+# Keep the names in sync with the units in overlays/gnome-local/power.
+#
+# 2026-11-07 phase 3: liuqin-powerd replaces the separate C power-key daemon
+# and Python lid service.  The old units stay installed for rollback but are
+# explicitly disabled here so a first boot cannot run two policy owners.
+#
+# Any new service that must be on at boot has to be added here as well.
+# See overlays/gnome-local/README.md ("首启 preset 陷阱").
+
+enable liuqin-powerd.service
+disable liuqin-lid-policy.service
+disable liuqin-power-keyd.service

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=立即熄屏
+Comment=锁屏并关闭显示
+Exec=/usr/local/bin/liuqin-screen-off
+Icon=video-display-symbolic
+Terminal=false
+Categories=Utility;
+Keywords=blank;screen;off;熄屏;
+StartupNotify=false

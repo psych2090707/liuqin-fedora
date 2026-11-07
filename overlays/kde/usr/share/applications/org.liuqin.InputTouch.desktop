@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Touch keyboard input
+Name[zh_CN]=屏幕键盘输入（中文/English）
+Comment=Use the native touch keyboard; reopen existing apps on first use
+Comment[zh_CN]=使用系统触屏键盘；首次切换后请重新打开原先运行的应用
+Exec=/usr/libexec/liuqin/input-mode touch
+Icon=input-keyboard-virtual
+Terminal=false
+Categories=Settings;Accessibility;
+StartupNotify=false

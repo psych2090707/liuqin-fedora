@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Date: Tue, 15 Sep 2026 08:52:22 +0800
+Subject: [PATCH] usb: dwc3: drd: allow userspace control of the role switch
+
+Every other dual-role controller driver in the tree (dwc2, cdns3, mtu3,
+musb, chipidea, renesas_usb3, intel-xhci, even dwc3-rtk) sets
+allow_userspace_control; dwc3 is the only one that does not, which
+leaves the role sysfs attribute invisible and makes the switch
+impossible to drive for debugging or for products whose role manager
+lives in userspace.
+
+Set it, matching the rest of the tree.
+
+diff --git a/drivers/usb/dwc3/drd.c b/drivers/usb/dwc3/drd.c
+index 797786093..f202cffec 100644
+--- a/drivers/usb/dwc3/drd.c
++++ b/drivers/usb/dwc3/drd.c
+@@ -513,6 +513,7 @@ static int dwc3_setup_role_switch(struct dwc3 *dwc)
+ 	dwc3_role_switch.fwnode = dev_fwnode(dwc->dev);
+ 	dwc3_role_switch.set = dwc3_usb_role_switch_set;
+ 	dwc3_role_switch.get = dwc3_usb_role_switch_get;
++	dwc3_role_switch.allow_userspace_control = true;
+ 	dwc3_role_switch.driver_data = dwc;
+ 	dwc->role_sw = usb_role_switch_register(dwc->dev, &dwc3_role_switch);
+ 	if (IS_ERR(dwc->role_sw))

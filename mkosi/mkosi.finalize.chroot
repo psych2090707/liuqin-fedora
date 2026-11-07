@@ -1,0 +1,93 @@
+#!/bin/bash
+# liuqin Fedora rootfs — mkosi finalize script (chrooted, LAST build step).
+#
+# mkosi runs this after the package installation, the postinst script, the
+# systemd-presets and volatile-file steps, so anything set here wins. It exists
+# because two postinst settings are intentionally reverted by mkosi's own
+# "Applying presets" step:
+#   * /etc/systemd/system/default.target created by `systemctl set-default`
+#     (presets removes and does not recreate it),
+#   * firstboot/first-boot state that presets would re-enable.
+# It also re-asserts the greeter display config for whichever login manager the
+# profile installed.
+#
+# Docs: docs/build/rootfs-build.md
+
+set -euo pipefail
+
+say() { printf 'liuqin-finalize: %s\n' "$*"; }
+
+# ---------------------------------------------------------- default target ---
+systemctl set-default graphical.target >/dev/null
+say "default target: $(readlink /etc/systemd/system/default.target)"
+
+# ------------------------------------------------------- no systemd-firstboot --
+# The image comes up unattended: hostname/locale/timezone are pre-provisioned
+# and systemd generates /etc/machine-id on first boot (systemd-machine-id-commit
+# is present in the image). Mask + drop the sysinit.target wants link after the
+# preset step so the interactive "Please configure the system!" cannot appear.
+rm -f /usr/lib/systemd/system/sysinit.target.wants/systemd-firstboot.service
+rm -f /etc/systemd/system/sysinit.target.wants/systemd-firstboot.service
+systemctl mask systemd-firstboot.service >/dev/null 2>&1 || true
+say "systemd-firstboot masked: $(readlink -f /etc/systemd/system/systemd-firstboot.service)"
+
+# ------------------------------------------------ greeter rotation/scale ------
+# GDM reads the gdm user's home; KDE's greeter reads its own user home.  Keep
+# both paths so this finalize script stays valid for either profile.
+if [ -f /etc/skel/.config/monitors.xml ]; then
+    install -d /etc/xdg
+    cp -f /etc/skel/.config/monitors.xml /etc/xdg/monitors.xml
+fi
+if [ -f /usr/lib/systemd/system/gdm.service ] && id gdm >/dev/null 2>&1; then
+    home="$(getent passwd gdm | cut -d: -f6)"
+    install -d -o gdm -g gdm "$home/.config"
+    cp -f /etc/skel/.config/monitors.xml "$home/.config/" 2>/dev/null || true
+    chown -R gdm:gdm "$home/.config" 2>/dev/null || true
+    say "gdm display config: $home/.config/monitors.xml"
+fi
+for greeter in plasmalogin sddm; do
+    id "$greeter" >/dev/null 2>&1 || continue
+    home="$(getent passwd "$greeter" | cut -d: -f6)"
+    [ -n "$home" ] || continue
+    mkdir -p "$home/.config"
+    cp -f /etc/skel/.config/kwinoutputconfig.json "$home/.config/" 2>/dev/null || true
+    cp -f /etc/skel/.config/monitors.xml "$home/.config/" 2>/dev/null || true
+    chown -R "$greeter:" "$home" 2>/dev/null || chown -R "$greeter:$greeter" "$home"
+    say "greeter '$greeter': $home/.config"
+done
+
+# ------------------------------------------------------------- SELinux -------
+# Packages are installed after mkosi.skeleton; reassert the bring-up decision
+# on the final tree instead of relying on RPM %config ordering. Not enforcing.
+sed -i 's/^SELINUX=.*/SELINUX=permissive/' /etc/selinux/config
+grep -qx 'SELINUX=permissive' /etc/selinux/config
+say 'SELinux config: permissive (device policy/labels remain unvalidated)'
+
+# ------------------------------------------------------------- image hygiene --
+# update-desktop-database (package scriptlets) writes a mimeinfo cache into
+# /usr/local during the chroot install; it is generated state, not part of the
+# image contract (desktop databases live under /usr/share). Drop it so the
+# release rootfs has no RPM-unowned files under /usr/local.
+rm -f /usr/local/share/applications/mimeinfo.cache
+
+# ------------------------------------------------------------- display mgr ---
+# Re-assert the display-manager alias in case presets touched it.
+if [ -f /usr/lib/systemd/system/gdm.service ]; then
+    systemctl enable gdm.service >/dev/null 2>&1 || true
+    install -d -m 0755 /etc/systemd/system/graphical.target.wants
+    ln -sfn /usr/lib/systemd/system/gdm.service \
+        /etc/systemd/system/graphical.target.wants/gdm.service
+    say "display-manager.service -> $(readlink /etc/systemd/system/display-manager.service)"
+elif [ -f /usr/lib/systemd/system/plasmalogin.service ]; then
+    systemctl enable plasmalogin.service >/dev/null 2>&1 || true
+    install -d -m 0755 /etc/systemd/system/graphical.target.wants
+    ln -sfn /usr/lib/systemd/system/plasmalogin.service \
+        /etc/systemd/system/graphical.target.wants/plasmalogin.service
+    say "display-manager.service -> $(readlink /etc/systemd/system/display-manager.service)"
+fi
+
+# ------------------------------------------------------------- bluetooth -----
+# presets normally enable this; re-assert (dev image boots with BT usable).
+systemctl enable bluetooth.service >/dev/null 2>&1 || true
+
+say "done"

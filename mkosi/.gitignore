@@ -1,0 +1,9 @@
+# mkosi 27 build caches/artifacts that must never be committed.
+mkosi.tools/
+mkosi.output/
+mkosi.cache/
+mkosi.local.conf
+mkosi.local/
+mkosi.packages/*.rpm
+mkosi.extra/
+mkosi.tools.manifest

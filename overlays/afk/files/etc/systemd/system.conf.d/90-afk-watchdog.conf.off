@@ -1,0 +1,17 @@
+# AFK channel (TN0048) — opt-in systemd hardware watchdog.
+#
+# INSTALLED ONLY WITH: install.sh --watchdog   (shipped as .off otherwise)
+#
+# Why off by default:
+#   * whether liuqin exposes a usable hardware watchdog (qcom/pmic wdt) is
+#     pending-device; systemd logs a warning and simply does not arm one if no
+#     /dev/watchdog exists, but a partial/broken watchdog driver can reboot the
+#     tablet in a loop with no console to fix it.
+#   * an unattended reboot loop directly fights the "don't brick it" constraint.
+#
+# What it buys: if the kernel hangs (GPU/ADSP stall) the tablet reboots itself
+# and comes back with usb0 + sshd, so the AFK channel recovers without a human.
+# Check first on the device:  cat /sys/class/watchdog/watchdog*/identity
+[Manager]
+RuntimeWatchdogSec=30s
+RebootWatchdogSec=60s

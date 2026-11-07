@@ -1,0 +1,4 @@
+[org.maliit.keyboard.maliit]
+enabled-languages=['en', 'zh-hans']
+active-language='zh-hans'
+device='tablet'

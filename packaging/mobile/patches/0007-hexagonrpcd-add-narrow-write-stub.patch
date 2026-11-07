@@ -1,0 +1,393 @@
+diff --git a/hexagonrpcd/apps_std.c b/hexagonrpcd/apps_std.c
+index 7172bf0..81df602 100644
+--- a/hexagonrpcd/apps_std.c
++++ b/hexagonrpcd/apps_std.c
+@@ -39,6 +39,14 @@ struct apps_std_ctx {
+ 	struct hexagonfs_fd *fds[HEXAGONFS_MAX_FD];
+ };
+ 
++/*
++ * Minimal write stub for the liuqin sensors DSP.  The DSP opens registry
++ * temp files for writing during initialization.  The real HexagonFS is
++ * read-only, so answer those writes with a single in-memory/discard fd and
++ * report success; no file is created or modified on the host.
++ */
++#define APPS_STD_STUB_FD 99
++
+ static const int apps_std_whence_table[] = {
+ 	SEEK_SET,
+ 	SEEK_CUR,
+@@ -73,6 +81,12 @@ static uint32_t apps_std_fclose(void *data,
+ 	const uint32_t *first_in = inbufs[0].p;
+ 	int ret;
+ 
++	if (*first_in == APPS_STD_STUB_FD) {
++		fprintf(stderr, "stub: closing write-only fd %u (discarded)\n",
++			*first_in);
++		return 0;
++	}
++
+ 	ret = hexagonfs_close(ctx->fds, *first_in);
+ 	if (ret) {
+ 		fprintf(stderr, "Could not close: %s\n", strerror(-ret));
+@@ -101,6 +115,12 @@ static uint32_t apps_std_fread(void *data,
+ 	} *first_out = outbufs[0].p;
+ 	ssize_t ret;
+ 
++	if (first_in->fd == APPS_STD_STUB_FD) {
++		first_out->written = 0;
++		first_out->is_eof = 1;
++		return 0;
++	}
++
+ 	ret = hexagonfs_read(ctx->fds, first_in->fd,
+ 			     first_in->buf_size, outbufs[1].p);
+ 	if (ret < 0) {
+@@ -120,6 +140,96 @@ static uint32_t apps_std_fread(void *data,
+ 	return 0;
+ }
+ 
++/*
++ * Stub write: accept and discard the DSP's registry temp data.  The DSP only
++ * needs the call to succeed during initialization; the host-side registry is
++ * deliberately left untouched.
++ */
++static uint32_t apps_std_fwrite(void *data,
++				const struct fastrpc_io_buffer *inbufs,
++				struct fastrpc_io_buffer *outbufs)
++{
++	const struct {
++		uint32_t fd;
++		uint32_t buf_size;
++	} *first_in = inbufs[0].p;
++	struct {
++		uint32_t written;
++		uint32_t is_eof;
++	} *first_out = outbufs[0].p;
++
++	if (first_in->fd != APPS_STD_STUB_FD) {
++		fprintf(stderr, "stub: refusing write to fd %u\n", first_in->fd);
++		return AEE_EFAILED;
++	}
++
++	fprintf(stderr, "stub: accepting %u bytes for write-only fd %u (discarded)\n",
++		first_in->buf_size, first_in->fd);
++	first_out->written = first_in->buf_size;
++	first_out->is_eof = 0;
++
++	return 0;
++}
++
++static uint32_t apps_std_fremove(void *data,
++				 const struct fastrpc_io_buffer *inbufs,
++				 struct fastrpc_io_buffer *outbufs)
++{
++	const char *path = inbufs[1].p;
++
++	if (inbufs[1].s == 0 || path[inbufs[1].s - 1] != 0)
++		return AEE_EBADPARM;
++
++	fprintf(stderr, "stub: accepting remove of %s (ignored)\n", path);
++	return 0;
++}
++
++static uint32_t apps_std_frename(void *data,
++				 const struct fastrpc_io_buffer *inbufs,
++				 struct fastrpc_io_buffer *outbufs)
++{
++	const char *oldpath = inbufs[1].p;
++	const char *newpath = inbufs[2].p;
++
++	if (inbufs[1].s == 0 || oldpath[inbufs[1].s - 1] != 0
++	 || inbufs[2].s == 0 || newpath[inbufs[2].s - 1] != 0)
++		return AEE_EBADPARM;
++
++	fprintf(stderr, "stub: accepting rename %s -> %s (ignored)\n",
++		oldpath, newpath);
++	return 0;
++}
++
++static uint32_t apps_std_fclose_fd(void *data,
++				   const struct fastrpc_io_buffer *inbufs,
++				   struct fastrpc_io_buffer *outbufs)
++{
++	return 0;
++}
++
++static uint32_t apps_std_fopen_with_env_fd(void *data,
++					   const struct fastrpc_io_buffer *inbufs,
++					   struct fastrpc_io_buffer *outbufs)
++{
++	struct {
++		uint32_t fd;
++		uint32_t len;
++	} *first_out = outbufs[0].p;
++
++	if (inbufs[1].s == 0 || ((const char *) inbufs[1].p)[inbufs[1].s - 1] != 0
++	 || inbufs[2].s == 0 || ((const char *) inbufs[2].p)[inbufs[2].s - 1] != 0
++	 || inbufs[3].s == 0 || ((const char *) inbufs[3].p)[inbufs[3].s - 1] != 0
++	 || inbufs[4].s == 0 || ((const char *) inbufs[4].p)[inbufs[4].s - 1] != 0)
++		return AEE_EBADPARM;
++
++	fprintf(stderr, "stub: fopen_with_env_fd %s -> fake fd %d\n",
++		(const char *) inbufs[3].p, APPS_STD_STUB_FD);
++	first_out->fd = APPS_STD_STUB_FD;
++	first_out->len = 42;
++
++	return 0;
++}
++
+ static uint32_t apps_std_fseek(void *data,
+ 			       const struct fastrpc_io_buffer *inbufs,
+ 			       struct fastrpc_io_buffer *outbufs)
+@@ -133,6 +243,9 @@ static uint32_t apps_std_fseek(void *data,
+ 	int ret;
+ 	int whence;
+ 
++	if (first_in->fd == APPS_STD_STUB_FD)
++		return 0;
++
+ 	whence = apps_std_whence_table[first_in->whence];
+ 
+ 	ret = hexagonfs_lseek(ctx->fds, first_in->fd, first_in->pos, whence);
+@@ -167,9 +280,10 @@ static uint32_t apps_std_fopen_with_env(void *data,
+ 
+ 	rw_mode = ((const char *) inbufs[4].p)[0];
+ 	if (rw_mode == 'w' || rw_mode == 'a') {
+-		fprintf(stderr, "Tried to open %s for writing\n",
+-				(const char *) inbufs[3].p);
+-		return AEE_EUNSUPPORTED;
++		fprintf(stderr, "stub: accepting write open %s -> fake fd %d\n",
++				(const char *) inbufs[3].p, APPS_STD_STUB_FD);
++		*out = APPS_STD_STUB_FD;
++		return 0;
+ 	}
+ 
+ 	if (!strcmp(inbufs[1].p, "ADSP_LIBRARY_PATH")) {
+@@ -420,7 +534,10 @@ static const struct fastrpc_function_impl apps_std_procs[] = {
+ 		.def = &apps_std_fread_def,
+ 		.impl = apps_std_fread,
+ 	},
+-	{ .def = NULL, .impl = NULL, },
++	{
++		.def = &apps_std_fwrite_def,
++		.impl = apps_std_fwrite,
++	},
+ 	{ .def = NULL, .impl = NULL, },
+ 	{ .def = NULL, .impl = NULL, },
+ 	{ .def = NULL, .impl = NULL, },
+@@ -445,7 +562,10 @@ static const struct fastrpc_function_impl apps_std_procs[] = {
+ 	{ .def = NULL, .impl = NULL, },
+ 	{ .def = NULL, .impl = NULL, },
+ 	{ .def = NULL, .impl = NULL, },
+-	{ .def = NULL, .impl = NULL, },
++	{
++		.def = &apps_std_fremove_def,
++		.impl = apps_std_fremove,
++	},
+ 	{ .def = NULL, .impl = NULL, },
+ 	{
+ 		.def = &apps_std_opendir_def,
+@@ -465,10 +585,24 @@ static const struct fastrpc_function_impl apps_std_procs[] = {
+ 		.def = &apps_std_stat_def,
+ 		.impl = apps_std_stat,
+ 	},
++	{ .def = NULL, .impl = NULL, },
++	{
++		.def = &apps_std_frename_def,
++		.impl = apps_std_frename,
++	},
++	{ .def = NULL, .impl = NULL, },
++	{
++		.def = &apps_std_fclose_fd_def,
++		.impl = apps_std_fclose_fd,
++	},
++	{
++		.def = &apps_std_fopen_with_env_fd_def,
++		.impl = apps_std_fopen_with_env_fd,
++	},
+ };
+ 
+ const struct fastrpc_interface apps_std_interface = {
+ 	.name = "apps_std",
+-	.n_procs = 32,
++	.n_procs = 37,
+ 	.procs = apps_std_procs,
+ };
+diff --git a/hexagonrpcd/interface/apps_std.c b/hexagonrpcd/interface/apps_std.c
+index 67b3ace..ea54c57 100644
+--- a/hexagonrpcd/interface/apps_std.c
++++ b/hexagonrpcd/interface/apps_std.c
+@@ -182,3 +182,74 @@ const struct hrpc_method_def_interp4 apps_std_stat_def = {
+ 	.n_inner_types = 0,
+ 	.inner_types = NULL,
+ };
++
++static struct hrpc_arg_def_interp4 apps_std_fwrite_args[] = {
++	{ HRPC_ARG_WORD, sizeof(uint32_t) },
++	{ HRPC_ARG_BLOB_SEQ, sizeof(char) },
++	{ HRPC_ARG_OUT_BLOB, sizeof(uint32_t) },
++	{ HRPC_ARG_OUT_BLOB, sizeof(uint32_t) },
++};
++
++const struct hrpc_method_def_interp4 apps_std_fwrite_def = {
++	.msg_id = 5,
++	.n_args = HRPC_ARRAY_SIZE(apps_std_fwrite_args),
++	.args = apps_std_fwrite_args,
++	.n_inner_types = 0,
++	.inner_types = NULL,
++};
++
++static struct hrpc_arg_def_interp4 apps_std_fremove_args[] = {
++	{ HRPC_ARG_BLOB_SEQ, sizeof(char) },
++};
++
++const struct hrpc_method_def_interp4 apps_std_fremove_def = {
++	.msg_id = 24,
++	.n_args = HRPC_ARRAY_SIZE(apps_std_fremove_args),
++	.args = apps_std_fremove_args,
++	.n_inner_types = 0,
++	.inner_types = NULL,
++};
++
++static struct hrpc_arg_def_interp4 apps_std_fclose_fd_args[] = {
++	{ HRPC_ARG_WORD, sizeof(uint32_t) },
++	{ HRPC_ARG_WORD, sizeof(uint32_t) },
++};
++
++const struct hrpc_method_def_interp4 apps_std_fclose_fd_def = {
++	.msg_id = 35,
++	.n_args = HRPC_ARRAY_SIZE(apps_std_fclose_fd_args),
++	.args = apps_std_fclose_fd_args,
++	.n_inner_types = 0,
++	.inner_types = NULL,
++};
++
++static struct hrpc_arg_def_interp4 apps_std_fopen_with_env_fd_args[] = {
++	{ HRPC_ARG_WORD, sizeof(uint32_t) },
++	{ HRPC_ARG_BLOB_SEQ, sizeof(char) },
++	{ HRPC_ARG_BLOB_SEQ, sizeof(char) },
++	{ HRPC_ARG_BLOB_SEQ, sizeof(char) },
++	{ HRPC_ARG_BLOB_SEQ, sizeof(char) },
++	{ HRPC_ARG_OUT_BLOB, sizeof(uint32_t) },
++	{ HRPC_ARG_OUT_BLOB, sizeof(uint32_t) },
++};
++
++const struct hrpc_method_def_interp4 apps_std_fopen_with_env_fd_def = {
++	.msg_id = 36,
++	.n_args = HRPC_ARRAY_SIZE(apps_std_fopen_with_env_fd_args),
++	.args = apps_std_fopen_with_env_fd_args,
++	.n_inner_types = 0,
++	.inner_types = NULL,
++};
++
++static struct hrpc_arg_def_interp4 apps_std_frename_args[] = {
++	{ HRPC_ARG_BLOB_SEQ, sizeof(char) },
++	{ HRPC_ARG_BLOB_SEQ, sizeof(char) },
++};
++
++const struct hrpc_method_def_interp4 apps_std_frename_def = {
++	.msg_id = 33,
++	.n_args = HRPC_ARRAY_SIZE(apps_std_frename_args),
++	.args = apps_std_frename_args,
++	.n_inner_types = 0,
++	.inner_types = NULL,
++};
+diff --git a/hexagonrpcd/interface/apps_std.h b/hexagonrpcd/interface/apps_std.h
+index b80a1ca..7a8fc96 100644
+--- a/hexagonrpcd/interface/apps_std.h
++++ b/hexagonrpcd/interface/apps_std.h
+@@ -28,6 +28,7 @@ extern struct hrpc_method_def_interp4 apps_std_freopen_def;
+ extern struct hrpc_method_def_interp4 apps_std_fflush_def;
+ extern struct hrpc_method_def_interp4 apps_std_fclose_def;
+ extern struct hrpc_method_def_interp4 apps_std_fread_def;
++extern struct hrpc_method_def_interp4 apps_std_fwrite_def;
+ extern struct hrpc_method_def_interp4 apps_std_fseek_def;
+ extern struct hrpc_method_def_interp4 apps_std_fopen_with_env_def;
+ extern struct hrpc_method_def_interp4 apps_std_opendir_def;
+@@ -35,5 +36,9 @@ extern struct hrpc_method_def_interp4 apps_std_closedir_def;
+ extern struct hrpc_method_def_interp4 apps_std_readdir_def;
+ extern struct hrpc_method_def_interp4 apps_std_mkdir_def;
+ extern struct hrpc_method_def_interp4 apps_std_stat_def;
++extern struct hrpc_method_def_interp4 apps_std_fremove_def;
++extern struct hrpc_method_def_interp4 apps_std_frename_def;
++extern struct hrpc_method_def_interp4 apps_std_fclose_fd_def;
++extern struct hrpc_method_def_interp4 apps_std_fopen_with_env_fd_def;
+ 
+ #endif /* INTERFACE_APPS_STD_H */
+diff --git a/hexagonrpcd/listener.c b/hexagonrpcd/listener.c
+index 20d72b7..cf3f48e 100644
+--- a/hexagonrpcd/listener.c
++++ b/hexagonrpcd/listener.c
+@@ -425,12 +425,19 @@ static int return_for_next_invoke(int fd,
+ 				  struct fastrpc_io_buffer **decoded)
+ {
+ 	struct fastrpc_decoder_context *ctx;
+-	char inbufs[256];
++	char *inbufs = NULL;
+ 	char *outbufs = NULL;
+ 	uint32_t inbufs_len;
++	uint32_t inbufs_size = 1024 * 1024;
+ 	uint32_t outbufs_len;
+ 	int ret;
+ 
++	inbufs = malloc(inbufs_size);
++	if (inbufs == NULL) {
++		perror("Could not allocate input buffer");
++		return -1;
++	}
++
+ 	outbufs_len = outbufs_calculate_size(REMOTE_SCALARS_OUTBUFS(*sc), returned);
+ 
+ 	if (outbufs_len) {
+@@ -447,7 +454,7 @@ static int return_for_next_invoke(int fd,
+ 				  *rctx, result,
+ 				  outbufs_len, outbufs,
+ 				  rctx, handle, sc,
+-				  &inbufs_len, 256, inbufs);
++				  &inbufs_len, inbufs_size, inbufs);
+ 	if (ret) {
+ 		if (ret == -1)
+ 			perror("Could not fetch next FastRPC message");
+@@ -457,8 +464,9 @@ static int return_for_next_invoke(int fd,
+ 		goto err_free_outbufs;
+ 	}
+ 
+-	if (inbufs_len > 256) {
+-		fprintf(stderr, "Large (>256B) input buffers aren't implemented\n");
++	if (inbufs_len > inbufs_size) {
++		fprintf(stderr, "Input buffer too large: %u > %u\n",
++			inbufs_len, inbufs_size);
+ 		ret = -1;
+ 		goto err_free_outbufs;
+ 	}
+@@ -486,6 +494,7 @@ static int return_for_next_invoke(int fd,
+ 
+ err_free_outbufs:
+ 	free(outbufs);
++	free(inbufs);
+ 	return ret;
+ }
+ 
+diff --git a/hexagonrpcd/sns_registry.c b/hexagonrpcd/sns_registry.c
+index af68193..2290b0c 100644
+--- a/hexagonrpcd/sns_registry.c
++++ b/hexagonrpcd/sns_registry.c
+@@ -28,8 +28,15 @@ static const char property1[] = "persist.vendor.sensors.enable.property1";
+ 
+ static int property_is_allowed(const void *name, size_t len)
+ {
+-	return (len == sizeof(property0) && !memcmp(name, property0, len))
+-	    || (len == sizeof(property1) && !memcmp(name, property1, len));
++	/*
++	 * Experimental: accept every property name and return an empty value.
++	 * The liuqin firmware enumerates more names than the pinned ROM config;
++	 * rejecting them may abort sensor initialization.  This remains a
++	 * read-only shim and never exposes a generic Android property bridge.
++	 */
++	(void)name;
++	(void)len;
++	return 1;
+ }
+ 
+ static uint32_t sns_registry_get_property(void *data,

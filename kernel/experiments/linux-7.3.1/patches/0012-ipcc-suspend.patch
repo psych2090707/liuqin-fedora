@@ -1,0 +1,22 @@
+From: liuqin Fedora experiment <liuqin@localhost>
+Subject: [PATCH] liuqin 7.3.1: ipcc-suspend
+
+Experimental offline port, not device acceptance. Retains copyright notices.
+Source: https://github.com/Seeker0472/liuqin-nixos/tree/eadaad6e032dbc0c3fc96347d5cf5bc78715827c/pkgs/kernel/patches
+Original device base: yzddmr6/linux-sm8450-liuqin fe81794b5e1b8a3f11a165f3acbfdb8fa671dbb3
+Local decisions and original patch coverage: tasks/kernel-7.3.1/RESULT.md and PATCH-INVENTORY.md.
+Apply to the verified pristine kernel.org Linux 7.3.1 tree in series order.
+---
+diff --git a/drivers/mailbox/qcom-ipcc.c b/drivers/mailbox/qcom-ipcc.c
+index 185b63f72..f2e5b9505 100644
+--- a/drivers/mailbox/qcom-ipcc.c
++++ b/drivers/mailbox/qcom-ipcc.c
+@@ -326,7 +326,7 @@ static int qcom_ipcc_probe(struct platform_device *pdev)
+ 		goto err_mbox;
+ 
+ 	ret = devm_request_irq(&pdev->dev, ipcc->irq, qcom_ipcc_irq_fn,
+-			       IRQF_TRIGGER_HIGH | IRQF_NO_SUSPEND |
++			       IRQF_TRIGGER_HIGH |
+ 			       IRQF_NO_THREAD, name, ipcc);
+ 	if (ret < 0)
+ 		goto err_req_irq;

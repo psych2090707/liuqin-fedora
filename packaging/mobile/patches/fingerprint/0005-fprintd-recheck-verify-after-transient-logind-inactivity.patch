@@ -1,0 +1,160 @@
+--- a/src/device.c
++++ b/src/device.c
+@@ -813,6 +813,97 @@
+   return TRUE;
+ }
+ 
++/* liuqin: the kernel switches VTs around system suspend, so for a moment
++ * after resume logind reports the local seat session, and the user, as
++ * "online" instead of "active". polkit's allow_active verify policy denies
++ * requests that arrive in that window, and the KDE lock screen then disables
++ * its fingerprint authenticator until it is restarted. For the verify action
++ * only, while the caller's display session is reported online (or for a
++ * short settle time once active), ask polkit again for a bounded time. The
++ * policy and the final polkit answer are unchanged. */
++#define LIUQIN_TRANSIENT_WAIT_MS 5000
++#define LIUQIN_TRANSIENT_STEP_MS 100
++#define LIUQIN_TRANSIENT_SETTLE_MS 1000
++
++static gboolean
++liuqin_caller_uid (GDBusMethodInvocation *invocation,
++                   guint32               *uid)
++{
++  g_autoptr(GVariant) ret = NULL;
++
++  ret = g_dbus_connection_call_sync (g_dbus_method_invocation_get_connection (invocation),
++                                     "org.freedesktop.DBus",
++                                     "/org/freedesktop/DBus",
++                                     "org.freedesktop.DBus",
++                                     "GetConnectionUnixUser",
++                                     g_variant_new ("(s)", g_dbus_method_invocation_get_sender (invocation)),
++                                     G_VARIANT_TYPE ("(u)"),
++                                     G_DBUS_CALL_FLAGS_NONE, 1000, NULL, NULL);
++  if (ret == NULL)
++    return FALSE;
++
++  g_variant_get (ret, "(u)", uid);
++  return TRUE;
++}
++
++typedef enum {
++  LIUQIN_DISPLAY_NONE,
++  LIUQIN_DISPLAY_ONLINE,
++  LIUQIN_DISPLAY_ACTIVE,
++} LiuqinDisplayState;
++
++static LiuqinDisplayState
++liuqin_display_session_state (GDBusConnection *connection,
++                              guint32          uid)
++{
++  g_autoptr(GVariant) user = NULL;
++  g_autoptr(GVariant) props = NULL;
++  g_autoptr(GVariant) dict = NULL;
++  g_autoptr(GVariant) display = NULL;
++  const char *path = NULL;
++  const char *state = NULL;
++  const char *display_path = NULL;
++
++  user = g_dbus_connection_call_sync (connection,
++                                      "org.freedesktop.login1",
++                                      "/org/freedesktop/login1",
++                                      "org.freedesktop.login1.Manager",
++                                      "GetUser",
++                                      g_variant_new ("(u)", uid),
++                                      G_VARIANT_TYPE ("(o)"),
++                                      G_DBUS_CALL_FLAGS_NONE, 1000, NULL, NULL);
++  if (user == NULL)
++    return LIUQIN_DISPLAY_NONE;
++  g_variant_get (user, "(&o)", &path);
++
++  props = g_dbus_connection_call_sync (connection,
++                                       "org.freedesktop.login1",
++                                       path,
++                                       "org.freedesktop.DBus.Properties",
++                                       "GetAll",
++                                       g_variant_new ("(s)", "org.freedesktop.login1.User"),
++                                       G_VARIANT_TYPE ("(a{sv})"),
++                                       G_DBUS_CALL_FLAGS_NONE, 1000, NULL, NULL);
++  if (props == NULL)
++    return LIUQIN_DISPLAY_NONE;
++  dict = g_variant_get_child_value (props, 0);
++
++  display = g_variant_lookup_value (dict, "Display", G_VARIANT_TYPE ("(so)"));
++  if (display == NULL)
++    return LIUQIN_DISPLAY_NONE;
++  g_variant_get (display, "(&s&o)", NULL, &display_path);
++  if (display_path == NULL || g_strcmp0 (display_path, "/") == 0)
++    return LIUQIN_DISPLAY_NONE;
++
++  if (!g_variant_lookup (dict, "State", "&s", &state))
++    return LIUQIN_DISPLAY_NONE;
++  if (g_strcmp0 (state, "online") == 0)
++    return LIUQIN_DISPLAY_ONLINE;
++  if (g_strcmp0 (state, "active") == 0)
++    return LIUQIN_DISPLAY_ACTIVE;
++  return LIUQIN_DISPLAY_NONE;
++}
++
+ static gboolean
+ _fprint_device_check_polkit_for_action (FprintDevice          *rdev,
+                                         GDBusMethodInvocation *invocation,
+@@ -821,6 +912,8 @@
+ {
+   FprintDevicePrivate *priv = fprint_device_get_instance_private (rdev);
+   const char *sender;
++  guint32 uid = 0;
++  guint waited = 0;
+ 
+   g_autoptr(GError) local_error = NULL;
+   g_autoptr(PolkitAuthorizationResult) result = NULL;
+@@ -836,6 +929,50 @@
+                                                       NULL,
+                                                       POLKIT_CHECK_AUTHORIZATION_FLAGS_ALLOW_USER_INTERACTION,
+                                                       NULL, &local_error);
++
++  if (result != NULL &&
++      !polkit_authorization_result_get_is_authorized (result) &&
++      g_strcmp0 (action, "net.reactivated.fprint.device.verify") == 0 &&
++      liuqin_caller_uid (invocation, &uid))
++    {
++      GDBusConnection *connection = g_dbus_method_invocation_get_connection (invocation);
++      guint settled = 0;
++
++      while (waited < LIUQIN_TRANSIENT_WAIT_MS)
++        {
++          LiuqinDisplayState state = liuqin_display_session_state (connection, uid);
++
++          if (state == LIUQIN_DISPLAY_NONE)
++            break;
++          /* logind's live state can turn active before polkit sees it; allow
++           * only a short settle time once active so real denials stay fast. */
++          if (state == LIUQIN_DISPLAY_ACTIVE)
++            {
++              if (settled >= LIUQIN_TRANSIENT_SETTLE_MS)
++                break;
++              settled += LIUQIN_TRANSIENT_STEP_MS;
++            }
++          g_usleep (LIUQIN_TRANSIENT_STEP_MS * 1000);
++          waited += LIUQIN_TRANSIENT_STEP_MS;
++          g_clear_object (&result);
++          result = polkit_authority_check_authorization_sync (priv->auth,
++                                                              subject,
++                                                              action,
++                                                              NULL,
++                                                              POLKIT_CHECK_AUTHORIZATION_FLAGS_NONE,
++                                                              NULL, &local_error);
++          if (result == NULL || polkit_authorization_result_get_is_authorized (result))
++            break;
++        }
++
++      if (waited > 0)
++        g_message ("liuqin: %s for %s %s after waiting %u ms for the display session",
++                   action, sender,
++                   result != NULL && polkit_authorization_result_get_is_authorized (result) ?
++                   "authorized" : "still denied",
++                   waited);
++    }
++
+   if (result == NULL)
+     {
+       g_set_error (error, FPRINT_ERROR,

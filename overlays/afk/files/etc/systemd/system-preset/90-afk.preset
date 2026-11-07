@@ -1,0 +1,14 @@
+# AFK maintenance layer — first-boot keepalive.
+#
+# Fedora first boot runs `systemctl preset-all`; 99-default-disable.preset is
+# "disable *".  These units are maintenance-only and must never be copied into
+# the clean product image.  They are enabled here only when this overlay is
+# applied to a maintenance image.
+#
+# On a base that already ships the product liuqin-usb0-link/dhcp units, do NOT
+# enable these AFK USB units: two address/DHCP owners would fight.  install.sh
+# skips them when liuqin-usb0-link.service is present.
+
+enable afk-usb0-address.service
+enable afk-usb0-address.timer
+enable afk-usb0-dhcp.service

@@ -1,0 +1,6 @@
+# The pogo keyboard MCU (nanosic WN8030, i2c "liuqin-keyboard") pulses its wake
+# GPIO every time the system enters suspend.  With wake enabled this aborts
+# s2idle at once and is a candidate for spontaneous wakeups in deep sleep.
+# Keyboard open/close still wakes the tablet through the Hall sensors
+# (gpio-keys) and the power key; only key presses stop waking it.
+ACTION=="add|change", SUBSYSTEM=="i2c", ATTR{name}=="liuqin-keyboard", ATTR{power/wakeup}="disabled"

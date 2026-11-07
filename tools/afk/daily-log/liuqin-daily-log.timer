@@ -1,0 +1,11 @@
+[Unit]
+Description=Low-frequency liuqin daily-use logging, without wakeups
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+AccuracySec=1min
+WakeSystem=false
+
+[Install]
+WantedBy=timers.target

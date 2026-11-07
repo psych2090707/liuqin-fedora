@@ -1,0 +1,3 @@
+# Python bytecode from host-side helpers (e.g. build-root-contract.py)
+__pycache__/
+*.pyc

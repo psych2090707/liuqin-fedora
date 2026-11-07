@@ -1,0 +1,554 @@
+From: liuqin Fedora experiment <liuqin@localhost>
+Subject: [PATCH] liuqin 7.3.1: audio
+
+Experimental offline port, not device acceptance. Retains copyright notices.
+Source: https://github.com/Seeker0472/liuqin-nixos/tree/eadaad6e032dbc0c3fc96347d5cf5bc78715827c/pkgs/kernel/patches
+Original device base: yzddmr6/linux-sm8450-liuqin fe81794b5e1b8a3f11a165f3acbfdb8fa671dbb3
+Local decisions and original patch coverage: tasks/kernel-7.3.1/RESULT.md and PATCH-INVENTORY.md.
+Apply to the verified pristine kernel.org Linux 7.3.1 tree in series order.
+---
+diff --git a/drivers/firmware/cirrus/cs_dsp.c b/drivers/firmware/cirrus/cs_dsp.c
+index bb93b24c6..1de78a36f 100644
+--- a/drivers/firmware/cirrus/cs_dsp.c
++++ b/drivers/firmware/cirrus/cs_dsp.c
+@@ -900,6 +900,7 @@ static int cs_dsp_coeff_read_ctrl_raw(struct cs_dsp_coeff_ctl *ctl,
+ 	return 0;
+ }
+ 
++
+ /**
+  * cs_dsp_coeff_read_ctrl() - Reads the given coefficient control into the given buffer
+  * @ctl: pointer to coefficient control
+@@ -2964,6 +2965,7 @@ int cs_dsp_run(struct cs_dsp *dsp)
+ 		dsp->ops->stop_core(dsp);
+ 	if (dsp->ops->disable_core)
+ 		dsp->ops->disable_core(dsp);
++	dsp->running = false;
+ 	mutex_unlock(&dsp->pwr_lock);
+ 
+ 	return ret;
+diff --git a/sound/soc/codecs/cs35l41.c b/sound/soc/codecs/cs35l41.c
+index b2a076706..431cf7d7f 100644
+--- a/sound/soc/codecs/cs35l41.c
++++ b/sound/soc/codecs/cs35l41.c
+@@ -16,6 +16,7 @@
+ #include <linux/moduleparam.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/property.h>
++#include <linux/unaligned.h>
+ #include <sound/initval.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+@@ -326,7 +327,26 @@ static SOC_VALUE_ENUM_SINGLE_DECL(cs35l41_dsprx2_enum,
+ static const struct snd_kcontrol_new dsp_rx2_mux =
+ 	SOC_DAPM_ENUM("DSPRX2 SRC", cs35l41_dsprx2_enum);
+ 
++static int cs35l41_calibrated_get(struct snd_kcontrol *kcontrol,
++				struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
++	struct cs35l41_private *cs35l41 = snd_soc_component_get_drvdata(component);
++
++	ucontrol->value.integer.value[0] = READ_ONCE(cs35l41->liuqin_calibration_loaded);
++	return 0;
++}
++
+ static const struct snd_kcontrol_new cs35l41_aud_controls[] = {
++	{
++		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++		.name = "Speaker Calibration Loaded",
++		.access = SNDRV_CTL_ELEM_ACCESS_READ,
++		.info = snd_ctl_boolean_mono_info,
++		.get = cs35l41_calibrated_get,
++	},
++	SOC_SINGLE("ASPTX1 Diagnostic Switch", CS35L41_SP_ENABLES,
++		   CS35L41_ASP_TX1_EN_SHIFT, 1, 0),
+ 	SOC_SINGLE_SX_TLV("Digital PCM Volume", CS35L41_AMP_DIG_VOL_CTRL,
+ 			  3, 0x4CF, 0x391, dig_vol_tlv),
+ 	SOC_SINGLE_TLV("Analog PCM Volume", CS35L41_AMP_GAIN_CTRL, 5, 0x14, 0,
+@@ -510,10 +530,37 @@ static int cs35l41_main_amp_event(struct snd_soc_dapm_widget *w,
+ {
+ 	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
+ 	struct cs35l41_private *cs35l41 = snd_soc_component_get_drvdata(component);
++	bool post_pmu = component->card &&
++		!strcmp(component->card->name, "Xiaomi-Pad-6-Pro");
++	unsigned int source;
+ 	int ret = 0;
+ 
+ 	switch (event) {
+ 	case SND_SOC_DAPM_PRE_PMU:
++		if (post_pmu)
++			break;
++		goto enable_sync;
++	case SND_SOC_DAPM_POST_PMU:
++		if (!post_pmu)
++			break;
++		ret = regmap_read(cs35l41->regmap, CS35L41_DAC_PCM1_SRC, &source);
++		if (ret || !READ_ONCE(cs35l41->liuqin_calibration_loaded) ||
++		    (source & CS35L41_ASP_SOURCE_MASK) != CS35L41_INPUT_DSP_TX1) {
++			regmap_update_bits(cs35l41->regmap, CS35L41_AMP_DIG_VOL_CTRL,
++					   CS35L41_AMP_PCM_VOL_MASK,
++					   CS35L41_AMP_PCM_VOL_MUTE << CS35L41_AMP_PCM_VOL_SHIFT);
++			return ret ? ret : -EACCES;
++		}
++		regmap_multi_reg_write_bypassed(cs35l41->regmap,
++						cs35l41_pup_patch,
++						ARRAY_SIZE(cs35l41_pup_patch));
++		ret = regmap_update_bits(cs35l41->regmap, CS35L41_PWR_CTRL1,
++					 CS35L41_GLOBAL_EN_MASK,
++					 1 << CS35L41_GLOBAL_EN_SHIFT);
++		if (!ret)
++			usleep_range(1000, 1100);
++		break;
++enable_sync:
+ 		regmap_multi_reg_write_bypassed(cs35l41->regmap,
+ 						cs35l41_pup_patch,
+ 						ARRAY_SIZE(cs35l41_pup_patch));
+@@ -577,7 +624,8 @@ static const struct snd_soc_dapm_widget cs35l41_dapm_widgets[] = {
+ 
+ 	SND_SOC_DAPM_OUT_DRV_E("Main AMP", CS35L41_PWR_CTRL2, 0, 0, NULL, 0,
+ 			       cs35l41_main_amp_event,
+-			       SND_SOC_DAPM_POST_PMD |	SND_SOC_DAPM_PRE_PMU),
++			       SND_SOC_DAPM_POST_PMD | SND_SOC_DAPM_PRE_PMU |
++			       SND_SOC_DAPM_POST_PMU),
+ 
+ 	SND_SOC_DAPM_MUX("ASP TX1 Source", SND_SOC_NOPM, 0, 0, &asp_tx1_mux),
+ 	SND_SOC_DAPM_MUX("ASP TX2 Source", SND_SOC_NOPM, 0, 0, &asp_tx2_mux),
+@@ -758,7 +806,7 @@ static int cs35l41_pcm_hw_params(struct snd_pcm_substream *substream,
+ {
+ 	struct cs35l41_private *cs35l41 = snd_soc_component_get_drvdata(dai->component);
+ 	unsigned int rate = params_rate(params);
+-	u8 asp_wl;
++	u8 asp_wl, asp_width;
+ 	int i;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(cs35l41_fs_rates); i++) {
+@@ -772,6 +820,9 @@ static int cs35l41_pcm_hw_params(struct snd_pcm_substream *substream,
+ 	}
+ 
+ 	asp_wl = params_width(params);
++	asp_width = asp_wl;
++	if (!strcmp(dai->component->card->name, "Xiaomi-Pad-6-Pro"))
++		asp_width = params_physical_width(params);
+ 
+ 	regmap_update_bits(cs35l41->regmap, CS35L41_GLOBAL_CLK_CTRL,
+ 			   CS35L41_GLOBAL_FS_MASK,
+@@ -780,7 +831,7 @@ static int cs35l41_pcm_hw_params(struct snd_pcm_substream *substream,
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+ 		regmap_update_bits(cs35l41->regmap, CS35L41_SP_FORMAT,
+ 				   CS35L41_ASP_WIDTH_RX_MASK,
+-				   asp_wl << CS35L41_ASP_WIDTH_RX_SHIFT);
++				   asp_width << CS35L41_ASP_WIDTH_RX_SHIFT);
+ 		regmap_update_bits(cs35l41->regmap, CS35L41_SP_RX_WL,
+ 				   CS35L41_ASP_RX_WL_MASK,
+ 				   asp_wl << CS35L41_ASP_RX_WL_SHIFT);
+@@ -1079,6 +1130,131 @@ static int cs35l41_handle_pdata(struct device *dev, struct cs35l41_hw_cfg *hw_cf
+ 	return 0;
+ }
+ 
++static int cs35l41_liuqin_load_calibration(struct wm_adsp *dsp);
++
++static int cs35l41_liuqin_pre_run(struct wm_adsp *dsp)
++{
++	struct cs35l41_private *cs35l41 = container_of(dsp, struct cs35l41_private, dsp);
++	struct cs_dsp_coeff_ctl *ctl;
++	__be32 delay = cpu_to_be32(0x20);
++	int ret;
++
++	if (dsp->fw != 9 || strcmp(dsp->component->card->name, "Xiaomi-Pad-6-Pro"))
++		return 0;
++
++	WRITE_ONCE(cs35l41->liuqin_calibration_loaded, false);
++	/* Vendor Protection initialization, before coefficient sync/core start.
++	 * cs_dsp_run() already holds pwr_lock here.
++	 */
++	ctl = cs_dsp_get_ctl(&dsp->cs_dsp, "MAX_LRCLK_DELAY", WMFW_ADSP2_XM, 0x400a4);
++	ret = cs_dsp_coeff_write_ctrl(ctl, 0, &delay, sizeof(delay));
++
++	return ret < 0 ? ret : cs35l41_liuqin_load_calibration(dsp);
++}
++
++static void cs35l41_liuqin_post_stop(struct wm_adsp *dsp)
++{
++	struct cs35l41_private *cs35l41 = container_of(dsp, struct cs35l41_private, dsp);
++
++	WRITE_ONCE(cs35l41->liuqin_calibration_loaded, false);
++}
++
++static int cs35l41_liuqin_load_calibration(struct wm_adsp *dsp)
++{
++	static const char * const names[] = { "CAL_R", "CAL_CHECKSUM", "CAL_STATUS" };
++	struct cs35l41_private *cs35l41 = container_of(dsp, struct cs35l41_private, dsp);
++	const char *prefix = dsp->component->name_prefix;
++	struct cs_dsp_coeff_ctl *ctl[ARRAY_SIZE(names)];
++	const struct firmware *fw;
++	__be32 want[ARRAY_SIZE(names)];
++	char filename[64];
++	u32 calr;
++	int i, ret;
++
++	if (strcmp(dsp->component->card->name, "Xiaomi-Pad-6-Pro"))
++		return 0;
++	WRITE_ONCE(cs35l41->liuqin_calibration_loaded, false);
++	if (dsp->fw != 9 || !prefix ||
++	    (strcmp(prefix, "TL") && strcmp(prefix, "TR") &&
++	     strcmp(prefix, "BL") && strcmp(prefix, "BR"))) {
++		ret = -EINVAL;
++		goto mute;
++	}
++	/* Per-device factory data, provisioned separately from distributable tuning. */
++	snprintf(filename, sizeof(filename), "cirrus/cs35l41-liuqin-%s-calr.bin", prefix);
++	ret = request_firmware_direct(&fw, filename, cs35l41->dev);
++	if (ret)
++		goto mute;
++	if (fw->size != sizeof(u32)) {
++		ret = -EINVAL;
++		release_firmware(fw);
++		goto mute;
++	}
++	calr = get_unaligned_le32(fw->data);
++	release_firmware(fw);
++	if (!calr || calr > INT_MAX) {
++		ret = -ERANGE;
++		goto mute;
++	}
++	want[0] = cpu_to_be32(calr);
++	want[1] = cpu_to_be32(calr + 1);
++	want[2] = cpu_to_be32(1);
++	/* Vendor applies these before core start. Writing after start races the
++	 * firmware's selection of factory versus default speaker calibration.
++	 * STATUS is committed last; post_run verifies the completed memory sync.
++	 */
++	for (i = 0; i < ARRAY_SIZE(names); i++) {
++		ctl[i] = cs_dsp_get_ctl(&dsp->cs_dsp, names[i], WMFW_ADSP2_XM, 0xcd);
++		/* These three legacy controls have flags=0 in v0.60 WMFW.
++		 * Cache here; cs_dsp_run synchronizes them before start_core.
++		 */
++		ret = cs_dsp_coeff_write_ctrl(ctl[i], 0, &want[i], sizeof(want[i]));
++		if (ret < 0)
++			goto mute;
++	}
++	cs35l41->liuqin_calr = calr;
++	return 0;
++
++mute:
++	regmap_update_bits(cs35l41->regmap, CS35L41_AMP_DIG_VOL_CTRL,
++			   CS35L41_AMP_PCM_VOL_MASK,
++			   CS35L41_AMP_PCM_VOL_MUTE << CS35L41_AMP_PCM_VOL_SHIFT);
++	dev_err(cs35l41->dev, "Speaker calibration not ready: %d\n", ret);
++	return ret;
++}
++
++static int cs35l41_liuqin_post_run(struct wm_adsp *dsp)
++{
++	static const char * const names[] = { "CAL_R", "CAL_CHECKSUM", "CAL_STATUS" };
++	struct cs35l41_private *cs35l41 = container_of(dsp, struct cs35l41_private, dsp);
++	struct cs_dsp_coeff_ctl *ctl;
++	__be32 want[] = { cpu_to_be32(cs35l41->liuqin_calr),
++			cpu_to_be32(cs35l41->liuqin_calr + 1), cpu_to_be32(1) };
++	__be32 got;
++	int i, ret;
++
++	if (strcmp(dsp->component->card->name, "Xiaomi-Pad-6-Pro"))
++		return 0;
++	/* These flags=0 controls read hardware once running. Verify the pre-core
++	 * sync, not firmware adoption: that follows the complete playback start.
++	 * Blocking on CAL_R_SELECTED here prevents that later lifecycle stage.
++	 */
++	for (i = 0; i < ARRAY_SIZE(names); i++) {
++		ctl = cs_dsp_get_ctl(&dsp->cs_dsp, names[i], WMFW_ADSP2_XM, 0xcd);
++		ret = cs_dsp_coeff_read_ctrl(ctl, 0, &got, sizeof(got));
++		if (ret || got != want[i]) {
++			regmap_update_bits(cs35l41->regmap, CS35L41_AMP_DIG_VOL_CTRL,
++					   CS35L41_AMP_PCM_VOL_MASK,
++					   CS35L41_AMP_PCM_VOL_MUTE << CS35L41_AMP_PCM_VOL_SHIFT);
++			dev_err(cs35l41->dev, "Speaker calibration load not verified: %d\n",
++				ret ? ret : -EIO);
++			return ret ? ret : -EIO;
++		}
++	}
++	WRITE_ONCE(cs35l41->liuqin_calibration_loaded, true);
++	return 0;
++}
++
+ static int cs35l41_dsp_init(struct cs35l41_private *cs35l41)
+ {
+ 	struct wm_adsp *dsp;
+@@ -1088,6 +1264,9 @@ static int cs35l41_dsp_init(struct cs35l41_private *cs35l41)
+ 	dsp = &cs35l41->dsp;
+ 	dsp->part = "cs35l41";
+ 	dsp->fw = 9; /* 9 is WM_ADSP_FW_SPK_PROT in wm_adsp.c */
++	dsp->pre_run = cs35l41_liuqin_pre_run;
++	dsp->post_run = cs35l41_liuqin_post_run;
++	dsp->post_stop = cs35l41_liuqin_post_stop;
+ 	dsp->toggle_preload = true;
+ 
+ 	cs35l41_configure_cs_dsp(cs35l41->dev, cs35l41->regmap, &dsp->cs_dsp);
+@@ -1496,3 +1675,4 @@ EXPORT_GPL_DEV_PM_OPS(cs35l41_pm_ops) = {
+ MODULE_DESCRIPTION("ASoC CS35L41 driver");
+ MODULE_AUTHOR("David Rhodes, Cirrus Logic Inc, <david.rhodes@cirrus.com>");
+ MODULE_LICENSE("GPL");
++MODULE_IMPORT_NS("FW_CS_DSP");
+diff --git a/sound/soc/codecs/cs35l41.h b/sound/soc/codecs/cs35l41.h
+index c85cbc1dd..7e9d14521 100644
+--- a/sound/soc/codecs/cs35l41.h
++++ b/sound/soc/codecs/cs35l41.h
+@@ -33,6 +33,8 @@ struct cs35l41_private {
+ 	int irq;
+ 	/* GPIO for /RST */
+ 	struct gpio_desc *reset_gpio;
++	bool liuqin_calibration_loaded;
++	u32 liuqin_calr;
+ };
+ 
+ int cs35l41_probe(struct cs35l41_private *cs35l41, const struct cs35l41_hw_cfg *hw_cfg);
+diff --git a/sound/soc/codecs/wcd938x-sdw.c b/sound/soc/codecs/wcd938x-sdw.c
+index e5ad36841..eb0091295 100644
+--- a/sound/soc/codecs/wcd938x-sdw.c
++++ b/sound/soc/codecs/wcd938x-sdw.c
+@@ -145,6 +145,12 @@ static int wcd9380_interrupt_callback(struct sdw_slave *slave,
+ {
+ 	struct wcd938x_sdw_priv *wcd = dev_get_drvdata(&slave->dev);
+ 
++	/* RX shares the codec IRQ domain but has no CSR regmap. */
++	if (!wcd->regmap) {
++		handle_nested_irq(irq_find_mapping(wcd->slave_irq, 0));
++		return IRQ_HANDLED;
++	}
++
+ 	return wcd_interrupt_callback(slave, wcd->slave_irq, WCD938X_DIGITAL_INTR_STATUS_0,
+ 				WCD938X_DIGITAL_INTR_STATUS_1, WCD938X_DIGITAL_INTR_STATUS_2);
+ }
+diff --git a/sound/soc/codecs/wm_adsp.c b/sound/soc/codecs/wm_adsp.c
+index b8f3035af..dc65479cd 100644
+--- a/sound/soc/codecs/wm_adsp.c
++++ b/sound/soc/codecs/wm_adsp.c
+@@ -1085,9 +1085,15 @@ static int wm_adsp_pre_run(struct cs_dsp *cs_dsp)
+ static int wm_adsp_event_post_run(struct cs_dsp *cs_dsp)
+ {
+ 	struct wm_adsp *dsp = container_of(cs_dsp, struct wm_adsp, cs_dsp);
++	int ret;
+ 
+-	if (wm_adsp_fw[dsp->fw].num_caps != 0)
+-		return wm_adsp_buffer_init(dsp);
++	if (wm_adsp_fw[dsp->fw].num_caps != 0) {
++		ret = wm_adsp_buffer_init(dsp);
++		if (ret)
++			return ret;
++	}
++	if (dsp->post_run)
++		return dsp->post_run(dsp);
+ 
+ 	return 0;
+ }
+@@ -1096,6 +1102,9 @@ static void wm_adsp_event_post_stop(struct cs_dsp *cs_dsp)
+ {
+ 	struct wm_adsp *dsp = container_of(cs_dsp, struct wm_adsp, cs_dsp);
+ 
++	if (dsp->post_stop)
++		dsp->post_stop(dsp);
++
+ 	if (wm_adsp_fw[dsp->fw].num_caps != 0)
+ 		wm_adsp_buffer_free(dsp);
+ 
+diff --git a/sound/soc/codecs/wm_adsp.h b/sound/soc/codecs/wm_adsp.h
+index 892273247..3eef443ac 100644
+--- a/sound/soc/codecs/wm_adsp.h
++++ b/sound/soc/codecs/wm_adsp.h
+@@ -41,6 +41,8 @@ struct wm_adsp {
+ 	struct work_struct boot_work;
+ 	int (*control_add)(struct wm_adsp *dsp, struct cs_dsp_coeff_ctl *cs_ctl);
+ 	int (*pre_run)(struct wm_adsp *dsp);
++	int (*post_run)(struct wm_adsp *dsp);
++	void (*post_stop)(struct wm_adsp *dsp);
+ 
+ 	bool preloaded;
+ 	bool fatal_error;
+diff --git a/sound/soc/qcom/qdsp6/audioreach.c b/sound/soc/qcom/qdsp6/audioreach.c
+index cce0ad31f..acff4d279 100644
+--- a/sound/soc/qcom/qdsp6/audioreach.c
++++ b/sound/soc/qcom/qdsp6/audioreach.c
+@@ -1211,8 +1211,9 @@ static int audioreach_pcm_set_media_format(struct q6apm_graph *graph,
+ 	media_cfg->endianness = PCM_LITTLE_ENDIAN;
+ 	media_cfg->interleaved = module->interleave_type;
+ 	media_cfg->num_channels = mcfg->num_channels;
+-	media_cfg->q_factor = mcfg->bit_width - 1;
+-	media_cfg->bits_per_sample = mcfg->bit_width;
++	/* Retain the daily topology Q27/S24_LE 32-bit storage contract. */
++	media_cfg->q_factor = mcfg->bit_width == 24 ? 27 : mcfg->bit_width - 1;
++	media_cfg->bits_per_sample = mcfg->bit_width == 24 ? 32 : mcfg->bit_width;
+ 	/* Convert the physical mapping to a logical mapping of the channels */
+ 	for (i = 0, j = 0; i < AR_PCM_MAX_NUM_CHANNEL && j < mcfg->num_channels; i++) {
+ 		if (!mcfg->channel_map[i])
+@@ -1304,7 +1305,7 @@ static int audioreach_shmem_set_media_format(struct q6apm_graph *graph,
+ 		cfg->sample_rate = mcfg->sample_rate;
+ 		cfg->bit_width = mcfg->bit_width;
+ 		cfg->alignment = PCM_LSB_ALIGNED;
+-		cfg->bits_per_sample = mcfg->bit_width;
++		cfg->bits_per_sample = mcfg->bit_width == 24 ? 32 : mcfg->bit_width;
+ 		cfg->q_factor = mcfg->bit_width - 1;
+ 		cfg->endianness = PCM_LITTLE_ENDIAN;
+ 		cfg->num_channels = mcfg->num_channels;
+diff --git a/sound/soc/qcom/qdsp6/q6apm-dai.c b/sound/soc/qcom/qdsp6/q6apm-dai.c
+index 033197bdd..06d9c32a2 100644
+--- a/sound/soc/qcom/qdsp6/q6apm-dai.c
++++ b/sound/soc/qcom/qdsp6/q6apm-dai.c
+@@ -305,7 +305,7 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
+ 		}
+ 	}
+ 
+-	/* Now that graph as been prepared and started update the internal state accordingly */
++	/* The DSP graph is running: allow the client's initial buffer prefill. */
+ 	prtd->state = Q6APM_STREAM_RUNNING;
+ 
+ 	return 0;
+@@ -321,6 +321,9 @@ static int q6apm_dai_ack(struct snd_soc_component *component, struct snd_pcm_sub
+ 		return 0;
+ 
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
++		if (prtd->state != Q6APM_STREAM_RUNNING)
++			return 0;
++
+ 		avail_periods = (runtime->control->appl_ptr - prtd->queue_ptr)/runtime->period_size;
+ 		for (i = 0; i < avail_periods; i++) {
+ 			ret = q6apm_write_async(prtd->graph, prtd->pcm_count, 0, 0, NO_TIMESTAMP);
+@@ -346,6 +349,7 @@ static int q6apm_dai_trigger(struct snd_soc_component *component,
+ 	case SNDRV_PCM_TRIGGER_START:
+ 	case SNDRV_PCM_TRIGGER_RESUME:
+ 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		prtd->state = Q6APM_STREAM_RUNNING;
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_STOP:
+ 		/* TODO support be handled via SoftPause Module */
+diff --git a/sound/soc/qcom/qdsp6/q6apm.c b/sound/soc/qcom/qdsp6/q6apm.c
+index f167b9dae..f9896f846 100644
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -42,7 +42,7 @@ static struct audioreach_graph *q6apm_get_audioreach_graph(struct q6apm *apm, ui
+ {
+ 	struct audioreach_graph_info *info;
+ 	struct audioreach_graph *graph;
+-	int id;
++	int id, ret;
+ 
+ 	mutex_lock(&apm->lock);
+ 	graph = idr_find(&apm->graph_idr, graph_id);
+@@ -87,7 +87,15 @@ static struct audioreach_graph *q6apm_get_audioreach_graph(struct q6apm *apm, ui
+ 
+ 	kref_init(&graph->refcount);
+ 
+-	q6apm_send_cmd_sync(apm, graph->graph, 0);
++	ret = q6apm_send_cmd_sync(apm, graph->graph, 0);
++	if (ret) {
++		mutex_lock(&apm->lock);
++		idr_remove(&apm->graph_idr, graph->id);
++		mutex_unlock(&apm->lock);
++		kfree(graph->graph);
++		kfree(graph);
++		return ERR_PTR(ret);
++	}
+ 
+ 	return graph;
+ }
+diff --git a/sound/soc/qcom/sc8280xp.c b/sound/soc/qcom/sc8280xp.c
+index 4d48e1012..796dd4c68 100644
+--- a/sound/soc/qcom/sc8280xp.c
++++ b/sound/soc/qcom/sc8280xp.c
+@@ -8,6 +8,7 @@
+ #include <sound/soc-dapm.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
++#include <sound/cs35l41.h>
+ #include <linux/soundwire/sdw.h>
+ #include <sound/jack.h>
+ #include <linux/input-event-codes.h>
+@@ -115,6 +116,9 @@ static int sc8280xp_tdm_hw_params(struct snd_pcm_substream *substream,
+ 	struct snd_soc_dai *codec_dai;
+ 	struct qcom_snd_tdm_slot_cfg cpu_cfg;
+ 	struct qcom_snd_tdm_slot_cfg codec_cfg;
++	bool liuqin_speakers = !strcmp(rtd->card->name, "Xiaomi-Pad-6-Pro") &&
++			       cpu_dai->id == TERTIARY_TDM_RX_0;
++	unsigned int codec_fmt = data->priv->codec_dai_fmt;
+ 	int bclk_freq;
+ 	int ret;
+ 	int i;
+@@ -130,10 +134,15 @@ static int sc8280xp_tdm_hw_params(struct snd_pcm_substream *substream,
+ 	if (ret && ret != -ENOTSUPP)
+ 		return ret;
+ 
+-	if (data->priv->codec_dai_fmt) {
++	/* Keep the daily liuqin CS35L41 DSP_A speaker wire format. */
++	if (liuqin_speakers)
++		codec_fmt = SND_SOC_DAIFMT_BC_FC | SND_SOC_DAIFMT_NB_NF |
++			    SND_SOC_DAIFMT_DSP_A;
++
++	if (codec_fmt) {
+ 		for_each_rtd_codec_dais(rtd, i, codec_dai) {
+ 			ret = snd_soc_dai_set_fmt(codec_dai,
+-						  data->priv->codec_dai_fmt);
++						  codec_fmt);
+ 			if (ret && ret != -ENOTSUPP)
+ 				return ret;
+ 		}
+@@ -157,6 +166,16 @@ static int sc8280xp_tdm_hw_params(struct snd_pcm_substream *substream,
+ 		}
+ 	}
+ 
++	if (liuqin_speakers) {
++		for_each_rtd_codec_dais(rtd, i, codec_dai) {
++			ret = snd_soc_component_set_sysclk(codec_dai->component,
++						   CS35L41_CLKID_SCLK, 0,
++						   bclk_freq, SND_SOC_CLOCK_IN);
++			if (ret)
++				return ret;
++		}
++	}
++
+ 	if (data->priv->codec_sysclk_set) {
+ 		for_each_rtd_codec_dais(rtd, i, codec_dai) {
+ 			ret = snd_soc_dai_set_sysclk(codec_dai, 0, bclk_freq,
+@@ -226,18 +245,34 @@ static int sc8280xp_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
+ 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
+ 
+ 	rate->min = rate->max = 48000;
+-	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
+ 	channels->min = 2;
+ 	channels->max = 2;
+-	switch (cpu_dai->id) {
+-	case TX_CODEC_DMA_TX_0:
+-	case TX_CODEC_DMA_TX_1:
+-	case TX_CODEC_DMA_TX_2:
+-	case TX_CODEC_DMA_TX_3:
+-		channels->min = 1;
+-		break;
+-	default:
+-		break;
++	if (of_device_is_compatible(rtd->card->dev->of_node,
++				    "qcom,sm8450-sndcard") &&
++	    cpu_dai->id == TERTIARY_TDM_RX_0) {
++		/*
++		 * liuqin's four CS35L41 speakers use the vendor's 48 kHz,
++		 * 4-channel S24_LE tertiary-TDM group.  Keep the generic
++		 * SC8280XP restrictions for every other TDM backend.
++		 */
++		channels->min = 4;
++		channels->max = 4;
++		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S24_LE);
++	} else {
++		switch (cpu_dai->id) {
++		case PRIMARY_TDM_RX_0 ... QUINARY_TDM_TX_7:
++			snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
++			break;
++		case TX_CODEC_DMA_TX_0:
++		case TX_CODEC_DMA_TX_1:
++		case TX_CODEC_DMA_TX_2:
++		case TX_CODEC_DMA_TX_3:
++			channels->min = 1;
++			break;
++		default:
++			snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
++			break;
++		}
+ 	}
+ 
+ 

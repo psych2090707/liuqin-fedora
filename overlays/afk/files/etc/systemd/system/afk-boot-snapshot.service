@@ -1,0 +1,18 @@
+[Unit]
+Description=AFK: snapshot the previous boot (journal/dmesg/pstore/failed units)
+Documentation=file:/usr/local/sbin/afk-boot-snapshot
+# Run after the persistent journal is available and after most units have
+# started (so this boot's early failures are already logged), but do not gate
+# the graphical session on it.
+After=multi-user.target systemd-journald.service systemd-pstore.service
+Wants=systemd-pstore.service
+ConditionPathIsReadWrite=/var
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/afk-boot-snapshot --reason=boot
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

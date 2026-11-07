@@ -1,0 +1,154 @@
+#!/bin/bash
+# AFK channel (TN0048) — capture "what happened in the last boot(s)".
+#
+# Runs at boot (afk-boot-snapshot.service) and at shutdown/reboot
+# (afk-shutdown-snapshot.service) as root.  Everything lands under
+# /var/log/afk/boots/s<sequence>-<utc-timestamp>-<reason>-<boot-id-prefix>/ and is pulled to
+# the host by `tools/afk/afk.sh logs`.
+#
+# Rationale: persistent journald already keeps the loop, but it is easy to lose
+# the interesting window after the tablet boots again; this freezes the previous
+# boot's errors, the pstore records and this boot's dmesg at a stable place.
+set -u
+
+reason=boot
+force=0
+log_root="${AFK_LOG_ROOT:-/var/log/afk}"
+
+usage() {
+    cat <<'EOF'
+usage: afk-boot-snapshot [--reason boot|shutdown|manual] [--force]
+
+Captures the previous boot's journal errors, current dmesg, pstore records,
+failed units and afk-health output into /var/log/afk/boots/s<seq>-<ts>-<reason>-<boot>/.
+Keeps the newest 12 snapshots.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --reason) reason="${2:-boot}"; shift 2 ;;
+        --reason=*) reason="${1#*=}"; shift ;;
+        --force) force=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "afk-boot-snapshot: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
+    esac
+done
+
+case "$reason" in
+    boot|shutdown|manual) ;;
+    *) echo "afk-boot-snapshot: invalid reason: $reason" >&2; exit 2 ;;
+esac
+
+if [ "$(id -u)" != 0 ]; then
+    echo "afk-boot-snapshot: must run as root" >&2
+    exit 1
+fi
+
+# Wall time resets on liuqin at each boot. Serialize captures and persist their
+# order independently of both directory names and filesystem timestamps.
+mkdir -p "$log_root/boots" || exit 1
+exec 9>"$log_root/.snapshot.lock" || exit 1
+flock -x 9 || exit 1
+
+boot_id="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo unknown)"
+boot_short="${boot_id:0:8}"
+ts="$(date -u +%Y%m%dT%H%M%SZ)"
+
+# One snapshot per boot+reason is enough; boot happens once, shutdown once.
+existing="$(find "$log_root/boots" -maxdepth 1 -type d -name "*-$reason-$boot_short" 2>/dev/null | head -n1)"
+if [ -n "$existing" ] && [ "$force" != 1 ]; then
+    echo "afk-boot-snapshot: already captured $reason for boot $boot_short ($existing)"
+    exit 0
+fi
+
+sequence=0
+if [ -e "$log_root/.snapshot-sequence" ]; then
+    read -r sequence <"$log_root/.snapshot-sequence" || exit 1
+    if [[ ! "$sequence" =~ ^[0-9]{1,18}$ ]]; then
+        echo "afk-boot-snapshot: invalid snapshot sequence; preserving all logs" >&2
+        exit 1
+    fi
+fi
+sequence=$((10#$sequence))
+# After an abrupt reset the counter's last rename may not have reached disk.
+# Existing snapshot names provide a second durable lower bound for the order.
+for previous in "$log_root"/boots/s*; do
+    [ -d "$previous" ] || continue
+    previous_name="${previous##*/}"
+    previous_prefix="${previous_name%%-*}"
+    [[ "$previous_prefix" =~ ^s00([0-9]{18})$ ]] || continue
+    previous_sequence=$((10#${BASH_REMATCH[1]}))
+    [ "$previous_sequence" -le "$sequence" ] || sequence="$previous_sequence"
+done
+sequence=$((sequence + 1))
+printf '%s\n' "$sequence" >"$log_root/.snapshot-sequence.tmp" || exit 1
+mv -f "$log_root/.snapshot-sequence.tmp" "$log_root/.snapshot-sequence" || exit 1
+printf -v sequence_prefix 's%020d' "$sequence"
+dir="$log_root/boots/$sequence_prefix-$ts-$reason-$boot_short"
+
+mkdir -p "$dir/pstore" "$dir/pstore-archive" || exit 1
+
+# ------------------------------------------------------------------- identity ---
+{
+    uname -a
+    echo "boot_id=$boot_id"
+    echo "reason=$reason"
+    echo "captured_utc=$ts"
+    echo "uptime_sec=$(cut -d' ' -f1 /proc/uptime 2>/dev/null)"
+    echo "cmdline=$(cat /proc/cmdline 2>/dev/null)"
+} >"$dir/identity.txt" 2>&1
+cat /etc/os-release >"$dir/os-release.txt" 2>&1 || true
+
+# ---------------------------------------------------------------------- dmesg ---
+dmesg --time-format iso >"$dir/dmesg.txt" 2>&1 || dmesg >"$dir/dmesg.txt" 2>&1 || true
+
+# -------------------------------------------------------------------- journal ---
+journalctl --list-boots --no-pager >"$dir/journal-boots.txt" 2>&1 || true
+# Previous boot (the one that ended right before this boot).
+journalctl -b -1 -p warning --no-pager -o short-precise >"$dir/prev-boot-warning.log" 2>&1 || true
+journalctl -b -1 --no-pager -o short-precise 2>/dev/null | tail -n 2000 >"$dir/prev-boot-tail.log" 2>&1 || true
+# This boot: early failures are what usually matter for a black-screen bring-up.
+journalctl -b 0 -p warning --no-pager -o short-precise >"$dir/current-boot-warning.log" 2>&1 || true
+
+# ---------------------------------------------------------------- unit state ---
+systemctl --failed --no-pager >"$dir/failed-units.txt" 2>&1 || true
+systemctl list-units --state=running --no-pager >"$dir/running-units.txt" 2>&1 || true
+
+# --------------------------------------------------------------------- pstore ---
+{
+    echo "listing:"
+    ls -la /sys/fs/pstore 2>&1
+    echo
+    echo "contents:"
+    for f in /sys/fs/pstore/*; do
+        [ -f "$f" ] || continue
+        printf '\n===== %s =====\n' "$f"
+        cat "$f" 2>&1
+    done
+} >"$dir/pstore/contents.txt" 2>&1 || true
+# systemd-pstore already moved crash records to /var/lib/systemd/pstore.
+if [ -d /var/lib/systemd/pstore ]; then
+    cp -a /var/lib/systemd/pstore/. "$dir/pstore-archive/" 2>/dev/null || true
+fi
+
+# --------------------------------------------------------------------- health ---
+if [ -x /usr/local/sbin/afk-health ]; then
+    /usr/local/sbin/afk-health >"$dir/health.txt" 2>&1 || true
+fi
+
+# ---------------------------------------------------------------------- prune ---
+# Sequence-prefixed snapshots sort ahead of legacy timestamp-only snapshots.
+# Only prune names owned by this script; leave other directories untouched.
+find "$log_root/boots" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' |
+    LC_ALL=C sort -r | {
+    kept=0
+    while IFS= read -r name; do
+        [[ "$name" =~ ^(s[0-9]{20}-)?[0-9]{8}T[0-9]{6}Z-(boot|shutdown|manual)-[[:xdigit:]]{8}$ ]] || continue
+        kept=$((kept + 1))
+        [ "$kept" -le 12 ] || rm -rf -- "$log_root/boots/$name"
+    done
+}
+
+echo "afk-boot-snapshot: wrote $dir"
+exit 0

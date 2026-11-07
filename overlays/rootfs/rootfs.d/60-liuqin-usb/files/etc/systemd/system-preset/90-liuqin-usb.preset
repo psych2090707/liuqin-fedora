@@ -1,0 +1,14 @@
+# CRITICAL — do not delete this file.
+#
+# Fedora's first boot runs `systemctl preset-all`.  The vendor file
+# /usr/lib/systemd/system-preset/99-default-disable.preset contains "disable *",
+# so a unit that is only enabled with `systemctl enable` in the image is turned
+# OFF again on the first real boot.  This bit the lid/power units on 2026-11-06.
+#
+# Preset files are sorted by filename and the FIRST matching line wins.
+# "90-liuqin-usb.preset" therefore beats "99-default-disable.preset".
+#
+# Keep this in sync with liuqin-usb0-link.service / liuqin-usb0-dhcp.service.
+
+enable liuqin-usb0-link.service
+enable liuqin-usb0-dhcp.service

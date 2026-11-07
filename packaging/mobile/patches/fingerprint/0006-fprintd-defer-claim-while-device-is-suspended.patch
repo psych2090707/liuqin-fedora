@@ -1,0 +1,78 @@
+--- a/src/device.c
++++ b/src/device.c
+@@ -1162,6 +1162,50 @@
+     }
+ }
+ 
++static void dev_open_cb (FpDevice     *dev,
++                         GAsyncResult *res,
++                         void         *user_data);
++
++/* liuqin: a lock screen started for suspend claims the device right after
++ * fprintd has suspended it, and libfprint answers FP_DEVICE_ERROR_BUSY until
++ * resume. pam_fprintd reports that as "unavailable", which the KDE lock screen
++ * never retries. Keep the Claim pending and reopen for a bounded fprintd run
++ * time; suspended time does not count, the client is frozen meanwhile. */
++#define LIUQIN_OPEN_RETRY_MS 250
++#define LIUQIN_OPEN_RETRIES 40
++
++static gboolean
++liuqin_retry_open (gpointer user_data)
++{
++  FprintDevice *rdev = user_data;
++  FprintDevicePrivate *priv = fprint_device_get_instance_private (rdev);
++
++  fp_device_open (priv->dev, NULL, (GAsyncReadyCallback) dev_open_cb, rdev);
++  return G_SOURCE_REMOVE;
++}
++
++static gboolean
++liuqin_defer_busy_open (FprintDevice *rdev,
++                        const GError *error)
++{
++  FprintDevicePrivate *priv = fprint_device_get_instance_private (rdev);
++  guint retries = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (rdev), "liuqin-open-retries"));
++
++  g_autoptr(SessionData) session = session_data_get (priv);
++
++  if (!g_error_matches (error, FP_DEVICE_ERROR, FP_DEVICE_ERROR_BUSY) ||
++      session == NULL || session->invocation == NULL ||
++      retries >= LIUQIN_OPEN_RETRIES)
++    return FALSE;
++
++  if (retries == 0)
++    g_message ("liuqin: device busy (suspend/resume); keeping Claim from %s pending",
++               session->sender);
++  g_object_set_data (G_OBJECT (rdev), "liuqin-open-retries", GUINT_TO_POINTER (retries + 1));
++  g_timeout_add (LIUQIN_OPEN_RETRY_MS, liuqin_retry_open, rdev);
++  return TRUE;
++}
++
+ static void
+ dev_open_cb (FpDevice *dev, GAsyncResult *res, void *user_data)
+ {
+@@ -1172,12 +1216,23 @@
+   g_autoptr(SessionData) session = NULL;
+   g_autoptr(GDBusMethodInvocation) invocation = NULL;
+   g_autoptr(FprintDeviceActionUnset) action_unset = NULL;
++  gboolean opened;
++  guint retries;
++
++  opened = fp_device_open_finish (dev, res, &error);
++  if (!opened && liuqin_defer_busy_open (rdev, error))
++    return;
++
++  retries = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (rdev), "liuqin-open-retries"));
++  g_object_set_data (G_OBJECT (rdev), "liuqin-open-retries", NULL);
++  if (retries > 0)
++    g_message ("liuqin: deferred Claim %s after %u retries", opened ? "opened" : "failed", retries);
+ 
+   action_unset = rdev;
+   session = session_data_get (priv);
+   invocation = g_steal_pointer (&session->invocation);
+ 
+-  if (!fp_device_open_finish (dev, res, &error))
++  if (!opened)
+     {
+       g_autoptr(GError) dbus_error = NULL;
+ 

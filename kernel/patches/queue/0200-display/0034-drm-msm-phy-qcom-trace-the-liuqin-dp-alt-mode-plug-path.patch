@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: yp <yp@e5debian>
+Date: Fri, 25 Sep 2026 21:21:11 +0800
+Subject: [PATCH] drm/msm, phy: qcom: trace the liuqin DP alt-mode plug path
+
+Low-rate dev_info markers on the path the external DP connector takes:
+the pmic_glink altmode worker's hpd bridge notify, the DP plug handler
+entry and its phy/DPCD/link-train result, the DPCD caps read failure,
+and QMP PHY typec orientation changes.  AUX transfer failures otherwise
+log at debug level only, so a dead AUX channel is invisible by default.
+
+diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_display.c
+index d87d47cc7..7b648a119 100644
+--- a/drivers/gpu/drm/msm/dp/dp_display.c
++++ b/drivers/gpu/drm/msm/dp/dp_display.c
+@@ -398,8 +398,10 @@ static int msm_dp_display_process_hpd_high(struct msm_dp_display_private *dp)
+ 	u8 dpcd[DP_RECEIVER_CAP_SIZE];
+ 
+ 	rc = drm_dp_read_dpcd_caps(dp->aux, dpcd);
+-	if (rc)
++	if (rc) {
++		DRM_ERROR("failed to read DPCD caps, rc=%d\n", rc);
+ 		goto end;
++	}
+ 
+ 	dp->link->lttpr_count = msm_dp_display_lttpr_init(dp, dpcd);
+ 
+@@ -593,6 +595,8 @@ static int msm_dp_hpd_plug_handle(struct msm_dp_display_private *dp, u32 data)
+ 	state =  dp->hpd_state;
+ 	drm_dbg_dp(dp->drm_dev, "Before, type=%d hpd_state=%d\n",
+ 			dp->msm_dp_display.connector_type, state);
++	dev_info(dp->drm_dev->dev, "hpd plug: type=%d hpd_state=%d\n",
++			dp->msm_dp_display.connector_type, state);
+ 
+ 	if (state == ST_DISPLAY_OFF) {
+ 		mutex_unlock(&dp->event_mutex);
+@@ -619,6 +623,8 @@ static int msm_dp_hpd_plug_handle(struct msm_dp_display_private *dp, u32 data)
+ 	}
+ 
+ 	ret = msm_dp_display_usbpd_configure_cb(&pdev->dev);
++	dev_info(dp->drm_dev->dev, "hpd plug: configure_cb ret=%d hpd_state=%d\n",
++		 ret, dp->hpd_state);
+ 	if (ret) {	/* link train failed */
+ 		dp->hpd_state = ST_DISCONNECTED;
+ 		pm_runtime_put_sync(&pdev->dev);
+diff --git a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+index be8e3e062..6bdfb97b1 100644
+--- a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+@@ -3931,6 +3931,9 @@ static int qmp_combo_typec_switch_set(struct typec_switch_dev *sw,
+ 	if (orientation == qmp->orientation || orientation == TYPEC_ORIENTATION_NONE)
+ 		return 0;
+ 
++	dev_info(qmp->dev, "typec orientation: %d -> %d\n",
++		 qmp->orientation, orientation);
++
+ 	mutex_lock(&qmp->phy_mutex);
+ 	qmp->orientation = orientation;
+ 
+diff --git a/drivers/soc/qcom/pmic_glink_altmode.c b/drivers/soc/qcom/pmic_glink_altmode.c
+index 653a43913..c744601cf 100644
+--- a/drivers/soc/qcom/pmic_glink_altmode.c
++++ b/drivers/soc/qcom/pmic_glink_altmode.c
+@@ -261,6 +261,12 @@ static void pmic_glink_altmode_worker(struct work_struct *work)
+ 		conn_status = (alt_port->mode == 0xff) ?
+ 			connector_status_disconnected : connector_status_connected;
+ 
++		dev_info(altmode->dev,
++			 "dp hpd bridge notify: svid=%#06x mode=%u orient=%d hpd_state=%u -> %s\n",
++			 alt_port->svid, alt_port->mode, (int)alt_port->orientation,
++			 alt_port->hpd_state,
++			 conn_status == connector_status_connected ? "connected" : "disconnected");
++
+ 		drm_aux_hpd_bridge_notify(&alt_port->bridge->dev, conn_status);
+ 	} else {
+ 		pmic_glink_altmode_enable_usb(altmode, alt_port);

@@ -1,0 +1,8 @@
+[package]
+name = "liuqin-power-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure power-key and lid state machine for the liuqin tablet"
+
+[dependencies]

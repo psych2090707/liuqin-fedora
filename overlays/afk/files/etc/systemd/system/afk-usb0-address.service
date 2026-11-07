@@ -1,0 +1,19 @@
+[Unit]
+Description=AFK: pin usb0 to 192.168.7.2/24 (NetworkManager leaves it unmanaged)
+Documentation=file:/usr/local/sbin/afk-usb0-up
+ConditionPathExists=/sys/class/net/usb0
+# Runs as early as the netdev exists; sshd is already enabled in the rootfs and
+# must find a working address the moment someone plugs the cable in.
+After=network-pre.target
+Before=network.target sshd.service afk-usb0-dhcp.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/afk-usb0-up
+# No RemainAfterExit: the timer below re-runs this to re-assert the address if
+# anything ever flushes the interface.
+RemainAfterExit=no
+TimeoutStartSec=20
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+856b046e572209b5f13c54ef100e685463aba23eefb850d0f3389c4c7ac6fa90  packaging/mobile/patches/0001-hexagonrpcd-expose-the-SSC-registry-version-sibling.patch
+7826943d36a93bbddf1746e96b831bbc2efd5e7c7ff1f0d8460fe2f2acf7a1a5  packaging/mobile/patches/0002-hexagonrpcd-add-a-narrow-sns_registry-property-shim.patch
+84bd7c4986d5e1ad68a6edfe241147e41262db3c95f69b054e464a95846ac808  packaging/mobile/patches/0003-iio-sensor-proxy-start-preclaimed-coldplug-sensor.patch
+978b9d168584890e576ac6cee4b27fb75260d0117da4b0d68813a25fe15fa738  packaging/mobile/patches/0004-iio-sensor-proxy-serialize-ssc-accel-polling.patch
+c46633a0ff858cd4d28fcdc14226f473a874c7fc6073970a215bc77b1be11aaf  packaging/mobile/patches/0005-iio-sensor-proxy-cancel-released-pending-claims.patch
+c260ff38fc9f08e0ac9e84e0c661a3c692166f8969e2402f9ad50108cd6dc35c  packaging/mobile/patches/0006-iio-sensor-proxy-broadcast-sensor-availability.patch
+032de36ec3e33528cc6c8baad03d9749d8bd0f9dead0a9531d1fa15e70311b53  packaging/mobile/patches/0007-hexagonrpcd-add-narrow-write-stub.patch

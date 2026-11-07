@@ -1,0 +1,83 @@
+{
+  "artifact": "boot-liuqin-dev.img",
+  "artifact_sha256": "0435aaf5e515a763e73d8e2f0f2ea9aaacc92933c66038765961a574b34f7dec",
+  "artifact_bytes": 19623936,
+  "format": "Android boot image v2 (pagesize 4096)",
+  "device": "liuqin (Xiaomi Pad 6 Pro, SM8475)",
+  "partition_bytes": 201326592,
+  "partition_headroom_bytes": 181702656,
+  "fits_partition": true,
+  "header": {
+    "version": 2,
+    "pagesize": 4096,
+    "kernel_offset": "0x00008000",
+    "ramdisk_offset": "0x01000000",
+    "tags_offset": "0x00000100",
+    "dtb_offset": "0x01f00000",
+    "cmdline": "",
+    "second": null,
+    "recovery_dtbo": null
+  },
+  "payload": {
+    "kernel": {
+      "source": "kernel-build",
+      "image_sha256": "94a7e680dbc90ad43cfa58007029434a8c7d6219c782da38462c2f8ac9937acd",
+      "image_bytes": 47909376,
+      "gzip_sha256": "753f826e352d447bed9a3b7e8620875f99c3039340678be0645f4bc2db1b8058",
+      "gzip_bytes": 17392901,
+      "release": "6.17.0-rc1-gfe81794b5e1b"
+    },
+    "ramdisk": {
+      "path": "/home/laplus/Agent Studio/Fedora/out/boot/initramfs/liuqin-firstboot.cpio.gz",
+      "sha256": "d51c7bbe359c442ac2172cf31dab117f8745f92b3f015d3d6ada05db4941dbc3",
+      "bytes": 1998639,
+      "mode": "persistent",
+      "description": "Fedora-fied stage-1 initramfs (PID 1 /init, BusyBox 1.36.1)"
+    },
+    "dtb": {
+      "source": "upstream-artifact",
+      "provenance": "upstream release v0.6.0 boot.img (sha256 7a368e58291f974f1cebd1e91e81ce8edc7256a19f75c4baea3fffd883157900) final DTB (sha256 885faaab7dad9de85a2f4fd89307ed57459e4893d8d83477cfdc918950aa8619)",
+      "sha256": "885faaab7dad9de85a2f4fd89307ed57459e4893d8d83477cfdc918950aa8619",
+      "bytes": 224672,
+      "cmdline_source": "DTB /chosen/bootargs",
+      "dt_bootargs": "earlycon=simplefb keep_bootcon console=drm_log console=tty0 initcall_blacklist=simplefb_driver_init initcall_debug ignore_loglevel clk_ignore_unused pd_ignore_unused rootwait mtdoops.dump_oops=1 hung_task_panic=1 softlockup_panic=1 panic=0 qcom_q6v5_pas.slpi_auto_boot=0",
+      "header_cmdline_empty": true,
+      "canonical_stock_rom_rebuild": false
+    }
+  },
+  "kernel_source_commit": {
+    "project_lock_commit": "fe81794b5e1b8a3f11a165f3acbfdb8fa671dbb3",
+    "project_lock_config_sha256": "29a4fd23019bd1179770485b9507b418b357f141ac9e0f949f120fdc4ea4639f",
+    "release_kernel_commit": "fe81794b5e1b8a3f11a165f3acbfdb8fa671dbb3",
+    "release_project_commit": "4d67adad85ba87115217579def4cf43126498ce8",
+    "match": true,
+    "raw_kernel_dtb_comparison": "raw kernel DTB present (sha256 bbb3e271b965a49fb50e18bde32ba647ae801acd6a6bf6e706272993f8a2d4ea, 124152 bytes); __symbols__=no (upstream injects the union from 44 DTBO entries + 14 base DTBs); qcom,msm-id=no (upstream identity overlay injects it); /chosen bootargs matches native-bootargs=yes; identity-overlay cross-check=pass"
+  },
+  "release_structure_reference": {
+    "bootimg": "/home/laplus/Agent Studio/Fedora/cache/upstream-v0.6.0/boot.img",
+    "bootimg_sha256": "7a368e58291f974f1cebd1e91e81ce8edc7256a19f75c4baea3fffd883157900",
+    "kernel_gzip_bytes": "18120557",
+    "ramdisk_bytes": "31864730",
+    "dtb_bytes": "224672",
+    "compared": true
+  },
+  "verification": {
+    "unpack_bootimg.py": "06b54dd9a07c5281778e29e234e76f6e3faee8bf0c904a5ef88fdee30eeed12e",
+    "mkbootimg.py": "37d84b3d162e0bc62e36c1f4e1c63c85ea0caa9f29be023eb2f8efe006ad948c",
+    "checks": [
+      "header v2, page size 4096, offsets and dtb address",
+      "header cmdline empty, additional cmdline empty",
+      "kernel/ramdisk/dtb sizes match the fields",
+      "unpacked payload byte-identical to inputs (kernel .gz, decompressed Image, DTB, ramdisk)",
+      "ramdisk re-extracts and carries /init, BusyBox, Fedora root contract, helpers",
+      "DTB board identity, /chosen bootargs, __symbols__ sink, framebuffer, /chosen cells",
+      "image fits the 192 MiB boot partition"
+    ],
+    "device_write": "none: this image was assembled and verified offline only"
+  },
+  "device_ready": false,
+  "_provenance": {
+    "recorded_from": "out/boot/build-info.json (scripts/build-bootimg.sh, 2026-10-20 offline build)",
+    "note": "verbatim real boot-builder document; used by tests only as the recorded field structure. Hash/path values refer to the recorded dev artifact and are rewritten for test artifacts; device_ready=false there because the offline build uses the upstream-artifact DTB (the user's stock ROM is required for a release build)."
+  }
+}

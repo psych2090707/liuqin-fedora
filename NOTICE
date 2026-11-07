@@ -1,0 +1,46 @@
+Third-party components and their licenses
+=========================================
+
+This project reuses and adapts work from the following upstream projects.
+Original project files are MIT-licensed unless stated otherwise; every
+third-party component retains its own license. See docs/maintenance/upstream-tracking.md
+for pinned revisions and docs/research/ for provenance.
+
+- Xiaomi Pad 6 Pro mainline port (yzddmr6/xiaomipad-6pro-mainline)
+  MIT-licensed project code. Device documentation, installation tooling and
+  userspace integration are reused/adapted for Fedora with attribution.
+  https://github.com/yzddmr6/xiaomipad-6pro-mainline
+
+- liuqin Linux kernel (yzddmr6/linux-sm8450-liuqin), based on
+  sm8450-mainline/linux and upstream Linux: GPL-2.0. Kernel source is built
+  from the pinned upstream repository; GPL obligations apply to distributed
+  kernel binaries.
+
+- pipa Fedora builder (rr1111/pipa-fedora-builder-43, tx0xyz/pipa-fedora-builder,
+  nik012003/nabu-fedora-builder): build system concepts/scripts adapted.
+  https://github.com/rr1111/pipa-fedora-builder-43
+
+- Pocketblue project: Fedora-on-Qualcomm components (e.g. qbootctl) when used
+  from their COPR repositories remain under their own licenses.
+  https://github.com/pocketblue
+
+- Fedora Linux packages, AOSP mkbootimg, AudioReach topology sources,
+  qca-swiss-army-knife and other tools: used per their upstream licenses;
+  binaries are not vendored here unless their license permits redistribution.
+
+- Device firmware (Qualcomm/Xiaomi/Cirrus/Novatek/etc.): copyright their
+  respective owners. **This repository does not redistribute device
+  firmware.** Locally assembled private development bundles may include
+  firmware files copied from the upstream device tree or from the device
+  owner's own device / matching stock ROM for local testing; such bundles are
+  explicitly marked private/local-only in `bundle.json` and **must not be
+  redistributed**. Distribution terms remain with the firmware owner. See
+  docs/research/liuqin-assets.json and docs/maintenance/device-packages.md.
+
+
+Additional source notices
+-------------------------
+The original liuqin device-project and Asahi Linux builder copyright notices are retained in LICENSES/.
+GNOME-derived layouts/resources retain GPL licensing; the optional extension helpers do not relicense those resources.
+The 7.3.1 device adaptation also uses Seeker0472/liuqin-nixos at eadaad6e032dbc0c3fc96347d5cf5bc78715827c; original file notices apply.
+The release source archives provide corresponding upstream source, patches and build materials. See SOURCES.md.

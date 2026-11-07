@@ -1,0 +1,32 @@
+[Unit]
+Description=Save liuqin time before chronyd stops on normal shutdown
+Wants=chronyd.service
+After=chronyd.service
+Before=liuqin-clock-save.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
+ExecStop=/usr/libexec/liuqin/liuqin-clock-save
+TimeoutStopSec=8s
+User=root
+UMask=0077
+RuntimeDirectory=liuqin-clock
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+ProtectClock=yes
+ProtectSystem=strict
+ReadWritePaths=/usr/lib/clock-epoch /run/liuqin-clock /run/chrony
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

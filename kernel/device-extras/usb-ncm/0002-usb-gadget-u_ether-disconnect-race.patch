@@ -1,0 +1,40 @@
+From: Kuen-Han Tsai <khtsai@google.com>
+Subject: [PATCH] usb: gadget: u_ether: Fix race between gether_disconnect and eth_stop
+Date: Wed, 11 Mar 2026 17:12:15 +0800
+Link: https://github.com/torvalds/linux/commit/e1eabb072c75681f78312c484ccfffb7430f206e
+
+Clear dev->port_usb at the start of gether_disconnect(), while holding
+dev->lock, so a concurrent eth_stop() cannot re-enable torn-down
+endpoints and hard-lock the same lock.
+
+Fixes: 2b3d942c4878 ("usb ethernet gadget: split out network core")
+Cc: stable@kernel.org
+---
+diff --git a/drivers/usb/gadget/function/u_ether.c b/drivers/usb/gadget/function/u_ether.c
+index dabaa66..da07b9f 100644
+--- a/drivers/usb/gadget/function/u_ether.c
++++ b/drivers/usb/gadget/function/u_ether.c
+@@ -1222,6 +1222,11 @@ void gether_disconnect(struct gether *link)
+ 
+ 	DBG(dev, "%s\n", __func__);
+ 
++	spin_lock(&dev->lock);
++	dev->port_usb = NULL;
++	link->is_suspend = false;
++	spin_unlock(&dev->lock);
++
+ 	netif_stop_queue(dev->net);
+ 	netif_carrier_off(dev->net);
+ 
+@@ -1259,11 +1264,6 @@ void gether_disconnect(struct gether *link)
+ 	dev->header_len = 0;
+ 	dev->unwrap = NULL;
+ 	dev->wrap = NULL;
+-
+-	spin_lock(&dev->lock);
+-	dev->port_usb = NULL;
+-	link->is_suspend = false;
+-	spin_unlock(&dev->lock);
+ }
+ EXPORT_SYMBOL_GPL(gether_disconnect);
+ 

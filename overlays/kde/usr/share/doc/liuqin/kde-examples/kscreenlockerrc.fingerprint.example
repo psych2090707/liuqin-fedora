@@ -1,0 +1,14 @@
+# EXAMPLE ONLY - not installed. See docs/kde-tablet.md §5.
+# KScreenLocker 6.7 supports a non-interactive fingerprint authenticator
+# (kwin/../kscreenlocker greeter/pamauthenticatormodel.cpp: group
+# [Authenticators] key Fingerprint, default false; PAM service name comes from
+# the build-time KSCREENLOCKER_PAM_FINGERPRINT_SERVICE, Fedora="kde-fingerprint").
+# Enabling it additionally requires:
+#   * /etc/pam.d/kde-fingerprint to authenticate via pam_fprintd
+#     (Fedora authselect: /etc/authselect/fingerprint-auth is currently
+#      "auth required pam_debug.so auth=authinfo_unavail" -> enable via
+#      `authselect select local with-fingerprint`, or override the PAM file);
+#   * a working FPC1264 libfprint TOD driver plus verified enrollment/matching.
+# Uncomment in /etc/xdg/kscreenlockerrc only after both are verified.
+[Authenticators]
+#Fingerprint=true

@@ -1,0 +1,18 @@
+[Unit]
+Description=AFK: capture final dmesg/journal before shutdown or reboot
+Documentation=file:/usr/local/sbin/afk-boot-snapshot
+DefaultDependencies=no
+After=local-fs.target systemd-journald.service
+Before=shutdown.target reboot.target kexec.target
+ConditionPathIsReadWrite=/var
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/afk-boot-snapshot --reason=shutdown
+# Never delay or hang a shutdown because of log collection.
+TimeoutStartSec=20
+
+[Install]
+WantedBy=shutdown.target reboot.target

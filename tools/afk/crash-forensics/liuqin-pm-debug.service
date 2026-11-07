@@ -1,0 +1,14 @@
+[Unit]
+Description=Enable verbose PM suspend/resume messages (opt-in marker)
+Documentation=file:/etc/liuqin/pm-debug
+ConditionPathExists=/etc/liuqin/pm-debug
+After=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'echo 1 >/sys/power/pm_debug_messages'
+ExecStop=/bin/sh -c 'echo 0 >/sys/power/pm_debug_messages'
+
+[Install]
+WantedBy=multi-user.target

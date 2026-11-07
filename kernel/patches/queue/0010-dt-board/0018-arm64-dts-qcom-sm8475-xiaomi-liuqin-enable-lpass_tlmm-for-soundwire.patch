@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Date: Thu, 17 Sep 2026 21:42:09 +0800
+Subject: [PATCH] arm64: dts: qcom: sm8475-xiaomi-liuqin: enable lpass_tlmm for
+ SoundWire
+
+The SWR pinctrl states (tx_swr_active/rx_swr_active) live under the
+LPASS-local TLMM (pinctrl@3440000).  With lpass_tlmm left disabled its
+state nodes never appear, fw_devlink keeps both SoundWire controllers
+in 'wait for supplier', the WCD938x never enumerates and the whole
+sound card defers.  Found on the first RAM boot of the mic chain.
+
+diff --git a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+index f04ffd542..5c08b8053 100644
+--- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
++++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+@@ -974,6 +974,11 @@
+ 	status = "okay";
+ };
+ 
++/* SWR pinctrl states live under the LPASS-local TLMM; it must probe first. */
++&lpass_tlmm {
++	status = "okay";
++};
++
+ &rxmacro {
+ 	status = "okay";
+ };

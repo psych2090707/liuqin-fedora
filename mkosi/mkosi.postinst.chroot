@@ -1,0 +1,165 @@
+#!/bin/bash
+# liuqin Fedora rootfs — mkosi post-installation script.
+#
+# mkosi runs this CHROOTED INSIDE the target image (mkosi.postinst.chroot), as
+# root, after all packages and mkosi.extra trees have been installed and before
+# the output tree is finalized. It must stay offline/idempotent: no network, no
+# dbus, no running services.
+#
+# Responsibilities:
+#   * development user (NOT for release images) + wheel sudo + password
+#   * service enablement / default target / login manager selection
+#   * greeter display defaults (GDM or plasmalogin)
+#   * first-boot and image-hygiene cleanup (no machine-specific state)
+#
+# The same script supports the Fedora Workstation/GNOME profile (default since
+# Fedora 45) and the retained KDE Plasma profile.
+#
+# Docs: docs/build/rootfs-build.md
+
+set -euo pipefail
+
+DEV_USER="${LIUQIN_DEV_USER:-user}"
+DEV_PASS="${LIUQIN_DEV_PASS:-147147}"
+
+say() { printf 'liuqin-postinst: %s\n' "$*"; }
+
+enable_unit() {
+    if [ -f "/usr/lib/systemd/system/$1" ] || [ -f "/etc/systemd/system/$1" ]; then
+        systemctl enable "$1" >/dev/null 2>&1 && say "enabled $1" || say "WARN: could not enable $1"
+    else
+        say "skip $1 (unit not installed)"
+    fi
+}
+
+# ---------------------------------------------------------------- desktop ----
+if [ -x /usr/bin/gnome-shell ] || [ -f /usr/lib/systemd/system/gdm.service ]; then
+    DESKTOP=gnome
+elif [ -x /usr/bin/plasmashell ] || [ -f /usr/lib/systemd/system/plasmalogin.service ]; then
+    DESKTOP=plasma
+else
+    say "ERROR: neither GNOME/GDM nor KDE/plasmalogin is installed"
+    exit 1
+fi
+say "detected desktop: $DESKTOP"
+
+# ---------------------------------------------------------------- dev user ---
+say "creating development user '$DEV_USER' (NOT for release images)"
+if ! id "$DEV_USER" >/dev/null 2>&1; then
+    useradd --create-home --shell /bin/bash \
+            --groups wheel,audio,video,render,input,cdrom "$DEV_USER"
+fi
+echo "$DEV_USER:$DEV_PASS" | chpasswd
+# Fedora's stock /etc/sudoers already grants wheel (with password); assert it so
+# a future sudoers change cannot silently lock the dev user out of sudo.
+grep -Eq '^[[:space:]]*%wheel[[:space:]]+ALL' /etc/sudoers || \
+    printf '%%wheel ALL=(ALL:ALL) ALL\n' > /etc/sudoers.d/10-liuqin-wheel
+chmod 0440 /etc/sudoers.d/10-liuqin-wheel 2>/dev/null || true
+
+# --------------------------------------------------------------- services ---
+say "enabling system services"
+enable_unit NetworkManager.service
+enable_unit systemd-resolved.service
+enable_unit bluetooth.service
+enable_unit chronyd.service
+enable_unit sshd.service            # dev-only convenience; disable before release
+enable_unit systemd-oomd.service
+enable_unit fstrim.timer
+enable_unit tuned.service           # if installed
+enable_unit tuned-ppd.service       # power-profiles backend used by GNOME/KDE
+enable_unit iio-sensor-proxy.service
+
+# ----------------------------------------------------------- login manager ---
+# Fedora Workstation uses GDM.  The retained KDE profile uses plasmalogin
+# (SDDM is only a graceful fallback).
+LOGIN_MANAGER=""
+if [ "$DESKTOP" = gnome ] && [ -f /usr/lib/systemd/system/gdm.service ]; then
+    enable_unit gdm.service
+    LOGIN_MANAGER=gdm
+elif [ -f /usr/lib/systemd/system/plasmalogin.service ]; then
+    enable_unit plasmalogin.service
+    LOGIN_MANAGER=plasmalogin
+elif [ -f /usr/lib/systemd/system/sddm.service ]; then
+    enable_unit sddm.service
+    LOGIN_MANAGER=sddm
+else
+    say "ERROR: no login manager unit found (expected gdm, plasmalogin or sddm)"
+    exit 1
+fi
+systemctl set-default graphical.target >/dev/null
+say "default target: graphical.target, login manager: $LOGIN_MANAGER"
+
+# Give the greeter the tablet rotation/scale defaults.  GDM reads its monitor
+# configuration from the gdm user's home; a system-wide /etc/xdg/monitors.xml
+# covers sessions that do not have a per-user file yet.
+install -d /etc/xdg
+if [ -f /etc/skel/.config/monitors.xml ]; then
+    cp -f /etc/skel/.config/monitors.xml /etc/xdg/monitors.xml
+fi
+if [ "$LOGIN_MANAGER" = gdm ]; then
+    if id gdm >/dev/null 2>&1; then
+        home="$(getent passwd gdm | cut -d: -f6)"
+        install -d -o gdm -g gdm "$home/.config"
+        cp -f /etc/skel/.config/monitors.xml "$home/.config/" 2>/dev/null || true
+        chown -R gdm:gdm "$home/.config" 2>/dev/null || true
+        say "installed rotation/scale defaults for gdm ($home)"
+    fi
+else
+    for greeter in plasmalogin sddm; do
+        id "$greeter" >/dev/null 2>&1 || continue
+        home="$(getent passwd "$greeter" | cut -d: -f6)"
+        [ -n "$home" ] || continue
+        mkdir -p "$home/.config"
+        cp -f /etc/skel/.config/kwinoutputconfig.json "$home/.config/" 2>/dev/null || true
+        cp -f /etc/skel/.config/monitors.xml "$home/.config/" 2>/dev/null || true
+        chown -R "$greeter:$greeter" "$home"
+        say "installed rotation/scale defaults for greeter '$greeter' ($home)"
+    done
+fi
+
+# ------------------------------------------------------- image contract ------
+install -d /etc/liuqin
+cat >/etc/liuqin/image-contract <<EOF
+IMAGE_ID=liuqin-fedora-gnome
+DEVICE=liuqin
+DEVICE_NAME=Xiaomi Pad 6 Pro
+ARCH=aarch64
+DESKTOP=$DESKTOP
+LOGIN_MANAGER=$LOGIN_MANAGER
+ROOT_LABEL=LIUQIN_ROOT
+# Flat image layout (ADR-0004 D4): /home is a directory inside the root
+# partition, not a separate LIUQIN_HOME filesystem.
+HOME_LABEL=none
+ROOT_LAYOUT=flat
+DISPLAY_CONNECTOR=DSI-1
+DISPLAY_MODE=1800x2880@120
+DISPLAY_SCALE=2.5
+DISPLAY_ROTATION=right
+EOF
+chmod 0644 /etc/liuqin/image-contract
+# Device safety: starting SLPI resets this tablet.  The unit's
+# ConditionPathExists=!/etc/liuqin-slpi-disabled then skips it.
+install -m 0644 -o 0 -g 0 /dev/null /etc/liuqin-slpi-disabled
+
+# ------------------------------------------------------------- first boot ---
+# No interactive systemd-firstboot: hostname/locale/machine-id are provisioned
+# here, and the image must come up unattended. systemd replaces the
+# "uninitialized" machine-id with a fresh one on first boot.
+rm -f /usr/lib/systemd/system/sysinit.target.wants/systemd-firstboot.service
+rm -f /etc/systemd/system/sysinit.target.wants/systemd-firstboot.service
+systemctl mask systemd-firstboot.service >/dev/null 2>&1 || true
+ln -sf ../usr/share/zoneinfo/UTC /etc/localtime
+ln -sf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+
+# ------------------------------------------------------- image hygiene ------
+# Nothing machine-specific may be baked into a distributable image: ssh host
+# keys, random seed, package-manager caches.
+rm -f /var/lib/systemd/random-seed 2>/dev/null || true
+rm -f /etc/ssh/ssh_host_* 2>/dev/null || true
+# These may still be bind-mounted by the package-install sandbox; never let a
+# cleanup failure break the image build.
+rm -rf /var/cache/dnf /var/cache/libdnf5 /var/cache/PackageKit /var/cache/yum 2>/dev/null || true
+find /etc/skel -type d -exec chmod 755 {} \;
+find /etc/skel -type f -exec chmod 644 {} \;
+
+say "done"

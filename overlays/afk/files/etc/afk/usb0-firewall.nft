@@ -1,0 +1,21 @@
+# AFK channel (TN0048) — optional nftables restriction (install.sh --firewall).
+#
+# The tablet has no Wi-Fi firmware, so usb0 is its only network interface and
+# these ports are already unreachable without the cable.  This ruleset is
+# defence in depth for the day another interface appears: AFK services answer
+# only on usb0, and are dropped everywhere else.
+#
+# Applied by afk-firewall.service; remove with:
+#   nft delete table inet afk
+table inet afk {
+    chain input {
+        type filter hook input priority 0; policy accept;
+
+        iifname "usb0" tcp dport { 22, 3389 } accept
+        tcp dport { 22, 3389 } drop
+
+        # DHCP client traffic on the USB link (the device is the server, so this
+        # is only for completeness / future host-side DHCP on other links).
+        iifname "usb0" udp dport 67 accept
+    }
+}

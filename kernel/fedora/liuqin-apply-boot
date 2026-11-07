@@ -1,0 +1,1819 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+#
+# liuqin-apply-boot — explicitly apply a STAGED boot.img to the tablet's boot_a
+# partition, or roll back to a verified backup.  Offline-first, dry-run by
+# default.  (Python 3 stdlib only; installed at /usr/sbin/liuqin-apply-boot by
+# the kernel-liuqin RPM.)
+#
+# ============================ SAFETY MODEL ================================
+# * Default command is a DRY-RUN: validate everything and print the plan, write
+#   nothing.
+# * A real write needs ALL of:
+#       --yes-write                          explicit operator intent
+#       LIUQIN_EXPERIMENTAL_DEVICE_WRITE=1   Phase-6 arming gate
+#       euid 0                               root (test hook may bypass)
+# * NEVER calls qbootctl / fastboot / `--set-active`, NEVER edits the GPT or
+#   slot attribute bits.  On liuqin boot_a/boot_b live on a separate GPT (sde);
+#   upstream testing showed qbootctl-style attribute edits leave the device
+#   unbootable.  This tool only replaces the bytes of boot_a.
+# * The whole 192 MiB boot partition is written: the staged image followed by
+#   zeros, so a stale AVB footer or an old image tail can never survive.  After
+#   the write the entire partition is read back and its sha256 compared with the
+#   expected padded image.
+# * Before writing, the current boot_a contents are copied to
+#   <staging>/backup/boot_a-<timestamp>-<sha>.img (fsynced and verified by
+#   sha256), and apply-state.json journals the phase before every destructive
+#   step.  If the write or read-back fails the tool restores that backup and
+#   prints manual recovery commands.  If power is lost mid-write the journal
+#   still says phase=writing; `status` reports it and `recover` restores.
+# * boot_b is never written.  Before an apply, boot_a and boot_b must hold the
+#   same bytes (the dual-boot fallback invariant).  If they differ the tool
+#   refuses unless the operator explicitly passes --allow-differing-boot-b.
+# * Apply-time identity gate (staged image must belong to the installed rootfs):
+#   - staging manifest + build-info + SHA256SUMS must exist and agree;
+#   - build-info device_ready must be true;
+#   - staged kernel release must equal /usr/share/liuqin/kernel.release and the
+#     single installed /usr/lib/modules/<kver>;
+#   - exactly one kernel module tree may exist;
+#   - the staged image sha256 must match the recorded artifact hash;
+#   - the rootfs must carry a known Fedora/native root marker + contract;
+#   - write mode requires build-info payload.dtb.source == stock-rom (canonical
+#     DTB); a dev image with the upstream-artifact DTB needs the explicit
+#     --allow-dev-dtb-source switch and is never allowed on a release device.
+#
+# Subcommands: status | stage | apply | rollback | recover | confirm
+# Legacy CLI:  liuqin-apply-boot --image X [--yes-write-device] == apply --image X
+#
+# Exit codes:
+#   0  success (dry-run validation or completed write/rollback)
+#   1  validation/identity failure (nothing written)
+#   2  refused (write gate, missing/wrong device, differing boot_b, bad staging)
+#   3  another apply/rollback holds the lock
+#   4  write/read-back verification failed (backup restored or recovery printed)
+#   9  simulated power loss (test hook only; journal says phase=writing)
+#
+# Test-only environment hooks (never set on a real device):
+#   LIUQIN_APPLY_ALLOW_REGULAR_FILE=1        accept a regular file as partition
+#   LIUQIN_APPLY_TEST_ALLOW_NONROOT_WRITE=1  skip the euid-0 requirement
+#   LIUQIN_APPLY_TEST_HOLD_LOCK_MS=NNN       hold the lock NNN ms after acquiring
+#   LIUQIN_APPLY_TEST_ABORT_WRITE_AFTER=N    exit(9) after N bytes of the write
+#   LIUQIN_APPLY_TEST_READBACK_CORRUPT=after-write|always  corrupt read-back
+#   LIUQIN_APPLY_ROOT_MARKER / LIUQIN_APPLY_ROOT_CONTRACT  root layout overrides
+#
+import argparse
+import datetime
+import errno
+import fcntl
+import hashlib
+import importlib.util
+import json
+import os
+import stat
+import struct
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+TOOL = "liuqin-apply-boot"
+TOOL_VERSION = "2.1.0"
+
+# boot_a / boot_b are 49152 sectors of 4096 bytes (192 MiB).
+PARTITION_BYTES = 201326592
+BOOT_MAGIC = b"ANDROID!"
+BOOT_V2_HEADER_SIZE = 1660
+BOOT_FIELD = {
+    "kernel_size": 8, "kernel_addr": 12, "ramdisk_size": 16,
+    "ramdisk_addr": 20, "second_size": 24, "second_addr": 28,
+    "tags_addr": 32, "page_size": 36, "header_version": 40,
+    "recovery_dtbo_size": 1632, "header_size": 1644,
+    "dtb_size": 1648, "dtb_addr": 1652,
+}
+CHUNK = 4 * 1024 * 1024
+DEFAULT_STAGING_DIR = "/boot/liuqin"
+DEFAULT_DEVICE_A = "/dev/disk/by-partlabel/boot_a"
+DEFAULT_DEVICE_B = "/dev/disk/by-partlabel/boot_b"
+DEFAULT_MODULES_DIR = "/usr/lib/modules"
+DEFAULT_KERNEL_RELEASE_FILE = "/usr/share/liuqin/kernel.release"
+DEFAULT_KERNEL_BUILD_INFO = "/usr/share/liuqin/kernel-build-info.json"
+DEFAULT_METADATA_MODULE = "/usr/lib/liuqin/liuqin_boot_metadata.py"
+DEFAULT_PAIR_TOOL = "/usr/sbin/liuqin-kernel-pair"
+SUPPORTED_METADATA_SCHEMA = 2
+BOARD_DTB_REL = "device-tree/qcom/sm8475-xiaomi-liuqin.dtb"
+ROOT_MARKERS = (
+    ("fedora", Path("/etc/liuqin-fedora-root"),
+     Path("/etc/liuqin-fedora-root.contract"),
+     "LIUQIN_FEDORA_ROOT_CONTRACT_V1", "liuqin-fedora-root-v1\n"),
+    ("native", Path("/etc/liuqin-native-root"),
+     Path("/etc/liuqin-native-root.contract"),
+     "LIUQIN_NATIVE_ROOT_CONTRACT_V1", None),
+)
+BACKUP_RETENTION = 3
+
+EXIT_OK = 0
+EXIT_VALIDATION = 1
+EXIT_REFUSED = 2
+EXIT_BUSY = 3
+EXIT_VERIFY = 4
+EXIT_ABORTED = 9
+
+
+class Refused(Exception):
+    """Precondition not met; nothing was written (exit 2)."""
+
+
+class ValidationFailed(Exception):
+    """Staged image / identity validation failed (exit 1)."""
+
+
+class WriteFailed(Exception):
+    """Write or read-back verification failed (exit 4)."""
+
+
+class BusyError(Exception):
+    """Another instance holds the apply lock (exit 3)."""
+
+
+class PowerLossSimulated(Exception):
+    """Test hook: simulate a power loss in the middle of the write."""
+
+
+def log(message: str) -> None:
+    print(f"{TOOL}: {message}", file=sys.stderr)
+
+
+def say(message: str) -> None:
+    print(message)
+
+
+def now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def env_int(name: str, default: int = 0) -> int:
+    raw = os.environ.get(name, "")
+    if not raw:
+        return default
+    try:
+        return int(raw, 10)
+    except ValueError as error:
+        raise Refused(f"{name} is not an integer: {raw}") from error
+
+
+# ---------------------------------------------------------------------------
+# hashing / IO helpers
+# ---------------------------------------------------------------------------
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def sha256_device(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb", buffering=0) as stream:
+        while True:
+            chunk = stream.read(CHUNK)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def fsync_path(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY | (os.O_DIRECTORY if path.is_dir() else 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def atomic_write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    payload = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    with tmp.open("w") as stream:
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(tmp, path)
+    fsync_path(path.parent)
+
+
+def read_json(path: Path):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def device_kind(path: Path) -> str:
+    try:
+        mode = path.stat().st_mode
+    except OSError:
+        return "missing"
+    if stat.S_ISBLK(mode):
+        return "block"
+    if stat.S_ISREG(mode):
+        return "regular"
+    return "other"
+
+
+def device_size(path: Path) -> int:
+    kind = device_kind(path)
+    if kind == "block":
+        try:
+            result = subprocess.run(["blockdev", "--getsize64", str(path)],
+                                    text=True, capture_output=True, check=False)
+            return int(result.stdout.strip() or 0)
+        except (OSError, ValueError):
+            return 0
+    if kind == "regular":
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    return 0
+
+
+def require_test_regular_file(path: Path) -> None:
+    if device_kind(path) == "regular" and os.environ.get("LIUQIN_APPLY_ALLOW_REGULAR_FILE") != "1":
+        raise Refused(
+            f"{path} is a regular file, not a block device; refusing "
+            f"(test hook: LIUQIN_APPLY_ALLOW_REGULAR_FILE=1)")
+
+
+# ---------------------------------------------------------------------------
+# boot metadata schema v2 (single producer/consumer implementation)
+# ---------------------------------------------------------------------------
+
+
+_METADATA_MODULE = None
+
+
+def metadata_module():
+    """Load kernel/fedora/liuqin_boot_metadata.py (the single schema impl).
+
+    Both the kernel-install hook and this tool use the same file; a device
+    installs it at /usr/lib/liuqin/liuqin_boot_metadata.py.  Tests may point
+    LIUQIN_BOOT_METADATA_MODULE at the repo copy explicitly.
+    """
+    global _METADATA_MODULE
+    if _METADATA_MODULE is not None:
+        return _METADATA_MODULE
+    candidates = []
+    override = os.environ.get("LIUQIN_BOOT_METADATA_MODULE")
+    if override:
+        candidates.append(Path(override))
+    here = Path(__file__).resolve().parent
+    candidates.extend([
+        here / "liuqin_boot_metadata.py",
+        here.parent / "lib" / "liuqin" / "liuqin_boot_metadata.py",
+        Path(DEFAULT_METADATA_MODULE),
+    ])
+    for candidate in candidates:
+        if candidate.is_file():
+            try:
+                spec = importlib.util.spec_from_file_location(
+                    "liuqin_boot_metadata", candidate)
+                module = importlib.util.module_from_spec(spec)
+                assert spec and spec.loader
+                sys.modules["liuqin_boot_metadata"] = module
+                spec.loader.exec_module(module)
+            except (OSError, ImportError) as error:
+                raise Refused(
+                    f"cannot load the boot metadata schema implementation "
+                    f"{candidate}: {error}") from error
+            _METADATA_MODULE = module
+            return module
+    raise Refused(
+        "boot metadata schema implementation is missing "
+        f"(looked for {DEFAULT_METADATA_MODULE}; provided by kernel-liuqin; "
+        "override with LIUQIN_BOOT_METADATA_MODULE)")
+
+
+def load_staged_metadata(path: Path) -> dict:
+    metadata = metadata_module().load_boot_metadata(path)
+    metadata["metadata_path"] = str(path)
+    return metadata
+
+
+def payload_sections(path: Path):
+    """(kernel Image sha256, ramdisk sha256, final DTB sha256) of a boot image
+    or whole padded boot partition; None when the bytes are not a v2 image."""
+    try:
+        sections = metadata_module().boot_image_sections(Path(path))
+    except metadata_module().MetadataError:
+        return None
+    return {"kernel_image_sha256": sections["kernel_image_sha256"],
+            "kernel_gzip_sha256": sections["kernel_gzip_sha256"],
+            "ramdisk_sha256": sections["ramdisk_sha256"],
+            "dtb_sha256": sections["dtb_sha256"],
+            "file_bytes": sections["file_bytes"]}
+
+
+def kernel_build_info_file() -> Path:
+    return Path(os.environ.get("LIUQIN_KERNEL_BUILD_INFO", DEFAULT_KERNEL_BUILD_INFO))
+
+
+def installed_vmlinuz(modules_dir: Path, release: str) -> Path:
+    return modules_dir / release / "vmlinuz"
+
+
+def installed_pair_id(modules_dir: Path, release: str) -> tuple:
+    """The installed kernel pair identity: sha256 of the running kernel Image.
+
+    Returns (pair_id, source) where source is "vmlinuz" or "kernel-build-info",
+    and validates the two agree when both are available (fail closed).
+    """
+    vmlinuz = installed_vmlinuz(modules_dir, release)
+    if not vmlinuz.is_file():
+        raise ValidationFailed(f"installed kernel Image missing: {vmlinuz}")
+    vmlinuz_sha = sha256_file(vmlinuz)
+    build_info = kernel_build_info_file()
+    if build_info.is_file():
+        data = read_json(build_info)
+        if not isinstance(data, dict):
+            raise ValidationFailed(f"cannot parse {build_info}")
+        recorded = ((data.get("artifacts") or {}).get("dist/Image") or {}).get("sha256")
+        if recorded and recorded != vmlinuz_sha:
+            raise ValidationFailed(
+                f"installed kernel identity is inconsistent: {build_info} records "
+                f"Image {recorded} but {vmlinuz} is {vmlinuz_sha}")
+        if recorded:
+            return recorded, "kernel-build-info"
+    return vmlinuz_sha, "vmlinuz"
+
+
+def pair_tool() -> Path:
+    candidates = []
+    override = os.environ.get("LIUQIN_KERNEL_PAIR_TOOL")
+    if override:
+        candidates.append(Path(override))
+    here = Path(__file__).resolve().parent
+    candidates.extend([here / "liuqin-kernel-pair", Path(DEFAULT_PAIR_TOOL)])
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise Refused(
+        "kernel pair tool is missing (liuqin-kernel-pair; provided by kernel-liuqin; "
+        "override with LIUQIN_KERNEL_PAIR_TOOL)")
+
+
+def run_pair_tool(arguments: list, timeout: int = 900) -> subprocess.CompletedProcess:
+    tool = pair_tool()
+    env = dict(os.environ)
+    return subprocess.run([sys.executable, str(tool), *map(str, arguments)],
+                          text=True, capture_output=True, env=env, timeout=timeout)
+
+
+def pair_find_by_kernel_image(kernel_image_sha: str) -> tuple:
+    """(pair_id_or_None, pair_dir_or_None) for an archived kernel pair."""
+    if not kernel_image_sha:
+        return None, None
+    result = run_pair_tool(["find", "--kernel-image-sha", kernel_image_sha, "--json"])
+    if result.returncode != 0:
+        return None, None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None, None
+    if not data.get("pair_id"):
+        return None, None
+    return data["pair_id"], data.get("path")
+
+
+# ---------------------------------------------------------------------------
+# Android boot image v2 header
+# ---------------------------------------------------------------------------
+
+
+class BootImage:
+    def __init__(self, path: Path, **fields):
+        self.path = path
+        self.__dict__.update(fields)
+
+    def summary(self) -> dict:
+        return {
+            "path": str(self.path),
+            "file_bytes": self.file_bytes,
+            "sha256": self.sha256,
+            "header_version": self.header_version,
+            "page_size": self.page_size,
+            "kernel_size": self.kernel_size,
+            "ramdisk_size": self.ramdisk_size,
+            "second_size": self.second_size,
+            "recovery_dtbo_size": self.recovery_dtbo_size,
+            "dtb_size": self.dtb_size,
+            "dtb_addr": f"{self.dtb_addr:#x}",
+            "dtb_offset": self.dtb_offset,
+            "padded_partition_sha256": self.padded_sha256,
+        }
+
+
+def _u32(data: bytes, offset: int) -> int:
+    return struct.unpack_from("<I", data, offset)[0]
+
+
+def _align(value: int, page_size: int) -> int:
+    return (value + page_size - 1) // page_size * page_size
+
+
+def parse_boot_image(path: Path) -> BootImage:
+    if not path.is_file():
+        raise ValidationFailed(f"staged image not found: {path}")
+    size = path.stat().st_size
+    if size == 0:
+        raise ValidationFailed(f"staged image is empty: {path}")
+    with path.open("rb") as stream:
+        data = stream.read(BOOT_V2_HEADER_SIZE)
+    if len(data) < BOOT_V2_HEADER_SIZE:
+        raise ValidationFailed(f"{path}: {size} bytes is smaller than a boot v2 header")
+    if data[:8] != BOOT_MAGIC:
+        raise ValidationFailed(f"{path}: Android boot magic missing (got {data[:8]!r})")
+    page_size = _u32(data, BOOT_FIELD["page_size"])
+    header_version = _u32(data, BOOT_FIELD["header_version"])
+    header_size = _u32(data, BOOT_FIELD["header_size"])
+    kernel_size = _u32(data, BOOT_FIELD["kernel_size"])
+    ramdisk_size = _u32(data, BOOT_FIELD["ramdisk_size"])
+    second_size = _u32(data, BOOT_FIELD["second_size"])
+    recovery_dtbo_size = _u32(data, BOOT_FIELD["recovery_dtbo_size"])
+    dtb_size = _u32(data, BOOT_FIELD["dtb_size"])
+    dtb_addr = struct.unpack_from("<Q", data, BOOT_FIELD["dtb_addr"])[0]
+    if header_version != 2:
+        raise ValidationFailed(f"{path}: boot header version {header_version}, expected 2")
+    if header_size != BOOT_V2_HEADER_SIZE:
+        raise ValidationFailed(f"{path}: header_size {header_size}, expected {BOOT_V2_HEADER_SIZE}")
+    if page_size != 4096:
+        raise ValidationFailed(f"{path}: page size {page_size}, expected 4096")
+    if kernel_size == 0 or ramdisk_size == 0:
+        raise ValidationFailed(f"{path}: kernel/ramdisk size is zero")
+    if dtb_size == 0:
+        raise ValidationFailed(f"{path}: no DTB in the boot image (v2 requires one)")
+    dtb_offset = _align(header_size, page_size) + _align(kernel_size, page_size) + \
+        _align(ramdisk_size, page_size) + _align(second_size, page_size) + \
+        _align(recovery_dtbo_size, page_size)
+    if dtb_offset + dtb_size > size:
+        raise ValidationFailed(
+            f"{path}: DTB section [{dtb_offset}, {dtb_offset + dtb_size}) exceeds the image")
+    if size > PARTITION_BYTES:
+        raise ValidationFailed(
+            f"{path}: image is {size} bytes, larger than the {PARTITION_BYTES}-byte boot partition")
+    image = BootImage(
+        path=path, file_bytes=size, sha256=sha256_file(path),
+        page_size=page_size, header_version=header_version,
+        kernel_size=kernel_size, ramdisk_size=ramdisk_size,
+        second_size=second_size, recovery_dtbo_size=recovery_dtbo_size,
+        dtb_size=dtb_size, dtb_addr=dtb_addr, dtb_offset=dtb_offset,
+        padded_sha256="")
+    image.padded_sha256 = padded_digest(image)
+    return image
+
+
+def padded_digest(image: BootImage) -> str:
+    """sha256 of (image bytes + zero padding to the whole 192 MiB partition)."""
+    digest = hashlib.sha256()
+    with image.path.open("rb") as stream:
+        while True:
+            chunk = stream.read(CHUNK)
+            if not chunk:
+                break
+            digest.update(chunk)
+    remaining = PARTITION_BYTES - image.file_bytes
+    zeros = bytes(CHUNK)
+    while remaining > 0:
+        block = min(CHUNK, remaining)
+        digest.update(zeros[:block])
+        remaining -= block
+    return digest.hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# staging / identity gate
+# ---------------------------------------------------------------------------
+
+
+def staging_paths(image: Path, staging_dir: Path) -> dict:
+    base = image.name[:-4] if image.name.endswith(".img") else image.name
+    return {
+        "manifest": staging_dir / f"{base}.manifest",
+        "build_info": staging_dir / f"{base}.build-info.json",
+        "sums": staging_dir / f"{base}.SHA256SUMS",
+        "stage_record": staging_dir / f"{base}.stage.json",
+    }
+
+
+def parse_manifest(path: Path) -> dict:
+    values = {}
+    for line in path.read_text().splitlines():
+        if "=" in line and not line.lstrip().startswith("#"):
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip()
+    return values
+
+
+def root_layout() -> dict:
+    override_marker = os.environ.get("LIUQIN_APPLY_ROOT_MARKER")
+    override_contract = os.environ.get("LIUQIN_APPLY_ROOT_CONTRACT")
+    candidates = []
+    if override_marker:
+        candidates.append(("override", Path(override_marker),
+                           Path(override_contract) if override_contract else None,
+                           None, None))
+    candidates.extend(ROOT_MARKERS)
+    for name, marker, contract, header, content in candidates:
+        if not marker.is_file():
+            continue
+        result = {"profile": name, "marker": str(marker),
+                  "contract": str(contract) if contract else None,
+                  "marker_content": None, "contract_header": None, "problems": []}
+        try:
+            result["marker_content"] = marker.read_text()
+        except OSError as error:
+            result["problems"].append(f"cannot read marker: {error}")
+        if content is not None and result["marker_content"] != content:
+            result["problems"].append(
+                f"marker content {result['marker_content']!r} != expected {content!r}")
+        if contract and contract.is_file():
+            try:
+                lines = contract.read_text().splitlines()
+                result["contract_header"] = lines[0] if lines else ""
+            except OSError as error:
+                result["problems"].append(f"cannot read contract: {error}")
+            if header and result["contract_header"] != header:
+                result["problems"].append(
+                    f"contract header {result['contract_header']!r} != {header!r}")
+        else:
+            result["problems"].append(f"root contract missing: {contract}")
+        return result
+    return {"profile": None, "marker": None, "contract": None,
+            "problems": ["no /etc/liuqin-fedora-root or /etc/liuqin-native-root marker found"]}
+
+
+def installed_kernels(modules_dir: Path) -> list:
+    if not modules_dir.is_dir():
+        return []
+    return sorted(entry.name for entry in modules_dir.iterdir() if entry.is_dir())
+
+
+def identity_gate(image: BootImage, staging_dir: Path, modules_dir: Path,
+                  release_file: Path, *, write_mode: bool,
+                  allow_dev_dtb_source: bool) -> dict:
+    """Apply-time gate: the staged image must belong to the installed rootfs.
+
+    Since TN0032 the staged metadata is schema v2 (liuqin_boot_metadata.py) and
+    is cross-checked against the real boot.img sections AND against the
+    installed kernel payload, so "kernel identity mismatch" is a hard failure
+    for a device write instead of a warning.
+    """
+    paths = staging_paths(image.path, staging_dir)
+    gate = {"checks": [], "warnings": [], "manifest": str(paths["manifest"]),
+            "build_info": str(paths["build_info"]), "root_layout": None,
+            "schema_version": None, "metadata": None, "installed_pair_id": None}
+
+    def check(check_id: str, ok: bool, detail: str = "") -> None:
+        gate["checks"].append({"id": check_id, "ok": bool(ok), "detail": detail})
+
+    def warn(message: str) -> None:
+        gate["warnings"].append(message)
+
+    if not paths["manifest"].is_file():
+        raise Refused(f"staging manifest missing: {paths['manifest']} (run the kernel-install hook first)")
+    manifest = parse_manifest(paths["manifest"])
+    gate["manifest_values"] = manifest
+    if not paths["build_info"].is_file():
+        raise Refused(f"staging build-info missing: {paths['build_info']}")
+    try:
+        metadata = load_staged_metadata(paths["build_info"])
+    except Refused:
+        raise
+    except Exception as error:  # metadata schema errors are validation failures
+        raise ValidationFailed(f"cannot load the staged boot metadata: {error}") from error
+    gate["metadata"] = metadata
+    gate["schema_version"] = metadata["schema_version"]
+    legacy = metadata["legacy"]
+    if legacy:
+        for warning in metadata["warnings"]:
+            warn(warning)
+        if write_mode:
+            raise ValidationFailed(
+                "staged boot metadata is legacy schema v1; a device write requires "
+                "schema v2. Re-run the kernel-install hook (dnf reinstall kernel-liuqin) "
+                "to re-stage the boot image with the schema v2 producer")
+    else:
+        check("manifest.schema_version",
+              manifest.get("schema_version") == str(SUPPORTED_METADATA_SCHEMA),
+              f"manifest schema_version={manifest.get('schema_version')!r}")
+        check("build_info.schema_version",
+              metadata["schema_version"] == SUPPORTED_METADATA_SCHEMA,
+              f"build-info schema_version={metadata['schema_version']!r}")
+
+    check("build_info.device_ready", metadata["device_ready"] is True,
+          f"device_ready={metadata['device_ready']!r}")
+    check("manifest.bootimg_sha256", manifest.get("bootimg_sha256") == image.sha256,
+          f"manifest {manifest.get('bootimg_sha256')} vs image {image.sha256}")
+    check("build_info.artifact_sha256", metadata["artifact_sha256"] == image.sha256,
+          f"build-info {metadata['artifact_sha256']} vs image {image.sha256}")
+
+    # The recorded payload identity must equal the real boot.img sections.
+    sections = payload_sections(image.path)
+    if sections is None:
+        raise ValidationFailed(f"cannot parse the boot image sections: {image.path}")
+    gate["payload_sections"] = sections
+    check("image.kernel_image_sha256",
+          sections["kernel_image_sha256"] == metadata["kernel_image_sha256"],
+          f"image kernel {sections['kernel_image_sha256']} vs metadata "
+          f"{metadata['kernel_image_sha256']}")
+    check("image.ramdisk_sha256",
+          sections["ramdisk_sha256"] == metadata["ramdisk_sha256"],
+          f"image ramdisk {sections['ramdisk_sha256']} vs metadata {metadata['ramdisk_sha256']}")
+    check("image.dtb_sha256",
+          sections["dtb_sha256"] == metadata["dtb_sha256"],
+          f"image dtb {sections['dtb_sha256']} vs metadata {metadata['dtb_sha256']}")
+
+    if paths["sums"].is_file():
+        expected = None
+        for line in paths["sums"].read_text().splitlines():
+            if line.split() and line.split()[-1] == image.path.name:
+                expected = line.split()[0]
+        check("staging.sha256sums", expected == image.sha256,
+              f"SHA256SUMS {expected} vs image {image.sha256}")
+    else:
+        warn(f"no {paths['sums'].name}; relying on manifest/build-info hashes")
+
+    if not release_file.is_file():
+        raise Refused(f"rootfs kernel identity missing: {release_file}")
+    rootfs_release = release_file.read_text().splitlines()[0].strip()
+    check("kernel_release.manifest", manifest.get("kernel_release") == rootfs_release,
+          f"manifest {manifest.get('kernel_release')!r} vs rootfs {rootfs_release!r}")
+    check("kernel_release.build_info", metadata["kernel_release"] == rootfs_release,
+          f"build-info {metadata['kernel_release']!r} vs rootfs {rootfs_release!r}")
+    kernels = installed_kernels(modules_dir)
+    check("modules.single_kernel", len(kernels) == 1, f"{len(kernels)} kernel trees: {kernels}")
+    if len(kernels) == 1:
+        check("modules.release", kernels[0] == rootfs_release,
+              f"modules {kernels[0]!r} vs rootfs {rootfs_release!r}")
+
+    # Kernel pair gate: the installed kernel Image (and its modules tree) must
+    # be exactly the kernel payload embedded in the staged boot image.
+    pair_id, pair_source = installed_pair_id(modules_dir, rootfs_release)
+    gate["installed_pair_id"] = pair_id
+    gate["installed_pair_source"] = pair_source
+    check("pair.kernel_image", pair_id == metadata["kernel_image_sha256"],
+          f"installed Image {pair_id} ({pair_source}) vs staged Image "
+          f"{metadata['kernel_image_sha256']}")
+    if not legacy:
+        check("manifest.kernel_image_sha256",
+              manifest.get("kernel_image_sha256") == metadata["kernel_image_sha256"],
+              f"manifest {manifest.get('kernel_image_sha256')} vs metadata "
+              f"{metadata['kernel_image_sha256']}")
+        check("manifest.dtb_sha256", manifest.get("dtb_sha256") == metadata["dtb_sha256"],
+              f"manifest {manifest.get('dtb_sha256')} vs metadata {metadata['dtb_sha256']}")
+        check("manifest.contract_sha256",
+              manifest.get("contract_sha256") == metadata["contract_sha256"],
+              f"manifest {manifest.get('contract_sha256')} vs metadata "
+              f"{metadata['contract_sha256']}")
+    board_dtb = modules_dir / rootfs_release / BOARD_DTB_REL
+    if board_dtb.is_file():
+        check("pair.board_dtb", sha256_file(board_dtb) == metadata["board_dtb_sha256"],
+              f"installed board DTB {sha256_file(board_dtb)} vs metadata "
+              f"{metadata['board_dtb_sha256']}")
+    else:
+        check("pair.board_dtb", False, f"installed board DTB missing: {board_dtb}")
+    build_info_file = kernel_build_info_file()
+    gate["kernel_build_info"] = str(build_info_file)
+    if not build_info_file.is_file():
+        if write_mode:
+            raise Refused(
+                f"kernel build info missing: {build_info_file}; cannot prove the "
+                f"installed modules tree belongs to the staged boot payload")
+        warn(f"kernel build info missing: {build_info_file} (write mode would refuse)")
+
+    layout = root_layout()
+    gate["root_layout"] = layout
+    check("rootfs.layout_marker", layout["profile"] is not None,
+          json.dumps({k: layout[k] for k in ("profile", "marker")}))
+    check("rootfs.layout_contract", not layout["problems"], "; ".join(layout["problems"]))
+
+    dtb_source = metadata["dtb_source"]
+    gate["dtb_source"] = dtb_source
+    if dtb_source == "stock-rom":
+        check("dtb.source", True, "stock-rom (canonical)")
+    elif dtb_source == "upstream-artifact":
+        if write_mode and not allow_dev_dtb_source:
+            raise Refused(
+                "staged boot.img uses the offline upstream-artifact DTB; a device write "
+                "requires the canonical stock-rom DTB (attended dev override: "
+                "--allow-dev-dtb-source)")
+        warn("staged boot.img uses the upstream-artifact DTB (dev-only offline substitute)")
+    else:
+        warn(f"metadata dtb_source is {dtb_source!r}")
+
+    for warning in gate["warnings"]:
+        log(f"gate warning: {warning}")
+    failures = [item for item in gate["checks"] if not item["ok"]]
+    if failures:
+        for item in failures:
+            log(f"gate FAILED: {item['id']}: {item['detail']}")
+        raise ValidationFailed(
+            "apply-time gate failed (staged boot payload does not match the installed "
+            "rootfs/kernel modules pair, or the staged metadata is inconsistent)")
+    return gate
+
+
+# ---------------------------------------------------------------------------
+# locking / journal / backups
+# ---------------------------------------------------------------------------
+
+
+class Lock:
+    def __init__(self, path: Path, wait_ms: int = 0):
+        self.path = path
+        self.wait_ms = wait_ms
+        self.handle = None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = self.path.open("a+")
+        deadline = time.monotonic() + self.wait_ms / 1000.0
+        while True:
+            try:
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as error:
+                if error.errno in (errno.EAGAIN, errno.EACCES):
+                    if time.monotonic() >= deadline:
+                        self.handle.close()
+                        self.handle = None
+                        raise BusyError(f"another apply/rollback holds {self.path}")
+                    time.sleep(0.05)
+                else:
+                    self.handle.close()
+                    self.handle = None
+                    raise
+        self.handle.seek(0)
+        self.handle.truncate()
+        self.handle.write(f"{os.getpid()} {now()}\n")
+        self.handle.flush()
+        os.fsync(self.handle.fileno())
+        hold = env_int("LIUQIN_APPLY_TEST_HOLD_LOCK_MS")
+        if hold > 0:
+            time.sleep(hold / 1000.0)
+        return self
+
+    def __exit__(self, *exc):
+        if self.handle is not None:
+            try:
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                self.handle.close()
+                self.handle = None
+
+
+def journal_path(staging_dir: Path) -> Path:
+    return staging_dir / "apply-state.json"
+
+
+def read_journal(staging_dir: Path) -> dict:
+    data = read_json(journal_path(staging_dir))
+    return data if isinstance(data, dict) else {}
+
+
+def write_journal(staging_dir: Path, **fields) -> dict:
+    state = read_journal(staging_dir)
+    state.update(fields)
+    state.setdefault("schema", 1)
+    state["updated_at"] = now()
+    atomic_write_json(journal_path(staging_dir), state)
+    return state
+
+
+def make_backup(device: Path, backup_dir: Path, original_sha: str,
+                prefix: str = "boot_a") -> Path:
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    final = backup_dir / f"{prefix}-{stamp}-{original_sha[:12]}.img"
+    tmp = final.with_name(final.name + ".tmp")
+    digest = hashlib.sha256()
+    total = 0
+    with device.open("rb", buffering=0) as source, tmp.open("wb") as target:
+        while True:
+            chunk = source.read(CHUNK)
+            if not chunk:
+                break
+            total += len(chunk)
+            digest.update(chunk)
+            target.write(chunk)
+        target.flush()
+        os.fsync(target.fileno())
+    if total != PARTITION_BYTES:
+        tmp.unlink(missing_ok=True)
+        raise WriteFailed(f"backup read {total} bytes from {device}, expected {PARTITION_BYTES}")
+    if digest.hexdigest() != original_sha:
+        tmp.unlink(missing_ok=True)
+        raise WriteFailed("boot_a changed while it was being backed up (sha256 mismatch)")
+    os.replace(tmp, final)
+    fsync_path(backup_dir)
+    if sha256_file(final) != original_sha:
+        raise WriteFailed(f"backup read-back verification failed: {final}")
+    return final
+
+
+def prune_backups(backup_dir: Path, prefix: str = "boot_a") -> list:
+    backups = sorted(backup_dir.glob(f"{prefix}-*.img"), key=lambda path: path.name)
+    removed = []
+    for path in backups[:-BACKUP_RETENTION]:
+        removed.append(str(path))
+        path.unlink(missing_ok=True)
+    return removed
+
+
+def write_padded_image(image: BootImage, work_dir: Path) -> Path:
+    work_dir.mkdir(parents=True, exist_ok=True)
+    target = work_dir / "boot-padded.img"
+    with image.path.open("rb") as source, target.open("wb") as out:
+        while True:
+            chunk = source.read(CHUNK)
+            if not chunk:
+                break
+            out.write(chunk)
+        remaining = PARTITION_BYTES - image.file_bytes
+        zeros = bytes(CHUNK)
+        while remaining > 0:
+            block = min(CHUNK, remaining)
+            out.write(zeros[:block])
+            remaining -= block
+        out.flush()
+        os.fsync(out.fileno())
+    fsync_path(work_dir)
+    return target
+
+
+# ---------------------------------------------------------------------------
+# device checks / write / read-back
+# ---------------------------------------------------------------------------
+
+
+def check_devices(device_a: Path, device_b: Path, *, journal: dict,
+                  allow_missing_boot_b: bool,
+                  allow_differing_boot_b: bool) -> dict:
+    """Validate boot_a and the bootloader fallback copy in boot_b.
+
+    Upstream liuqin semantics (device/gnome-overlay/usr/local/sbin/liuqin-switch,
+    tools/install-liuqin.py): only boot_a is ever written after install; boot_b
+    keeps a copy of the boot image the bootloader falls back to when boot_a
+    does not load.  install-liuqin.py writes the same project image to boot_a
+    and boot_b.  Therefore after the FIRST explicit update boot_a != boot_b is
+    the normal state — requiring equality forever made continuous updates
+    unusable.  A differing boot_b is accepted when it is (a) byte-identical to
+    boot_a, or (b) byte-identical to the fallback recorded by a previous
+    apply/confirm AND still a parseable liuqin boot image.  An unknown boot_b
+    is refused unless the operator explicitly overrides (--allow-differing-boot-b)
+    or re-establishes it with `liuqin-apply-boot confirm` after a successful
+    boot.  Nothing here writes boot_b.
+    """
+    require_test_regular_file(device_a)
+    if device_kind(device_a) not in ("block", "regular"):
+        raise Refused(f"boot_a device not found: {device_a}")
+    size_a = device_size(device_a)
+    if size_a != PARTITION_BYTES:
+        raise Refused(f"unexpected boot_a partition size: {size_a} (expected {PARTITION_BYTES})")
+    result = {"device_a": str(device_a), "size_a": size_a, "sha256_a": None,
+              "device_b": str(device_b), "size_b": None, "sha256_b": None,
+              "boot_b_state": None, "boot_b_is_image": False,
+              "fallback_sha256": None, "warnings": []}
+    sha_a = sha256_device(device_a)
+    result["sha256_a"] = sha_a
+    if device_kind(device_b) not in ("block", "regular"):
+        if not allow_missing_boot_b:
+            raise Refused(
+                f"boot_b device not found: {device_b}; it is the bootloader fallback. "
+                f"Refusing to write without a fallback (override: --allow-missing-boot-b)")
+        result["boot_b_state"] = "missing (explicitly allowed)"
+        result["warnings"].append("boot_b is missing; no bootloader fallback exists")
+        return result
+    require_test_regular_file(device_b)
+    size_b = device_size(device_b)
+    if size_b != PARTITION_BYTES:
+        raise Refused(f"unexpected boot_b partition size: {size_b} (expected {PARTITION_BYTES})")
+    result["size_b"] = size_b
+    sha_b = sha256_device(device_b)
+    result["sha256_b"] = sha_b
+    fallback_sections = payload_sections(device_b)
+    result["boot_b_is_image"] = fallback_sections is not None
+    recorded = {journal.get("fallback_sha256"), journal.get("boot_b_sha256")}
+    recorded.discard(None)
+    if sha_a == sha_b:
+        result["boot_b_state"] = "identical to boot_a (install-time fallback invariant)"
+        result["fallback_sha256"] = sha_b
+        if fallback_sections is None:
+            result["warnings"].append(
+                "boot_b is identical to boot_a but is not a parseable v2 boot image")
+        return result
+    if fallback_sections is not None and sha_b in recorded:
+        result["boot_b_state"] = (
+            "differs from boot_a but is the recorded known-good fallback "
+            "(normal state after an explicit update)")
+        result["fallback_sha256"] = sha_b
+        return result
+    detail = ("a recorded fallback" if sha_b in recorded else "not a recorded fallback")
+    result["boot_b_state"] = (
+        f"differs from boot_a and is {detail} "
+        f"(parseable boot image: {'yes' if fallback_sections is not None else 'no'})")
+    if allow_differing_boot_b:
+        result["boot_b_state"] += " (explicit override)"
+        result["warnings"].append(
+            "boot_b differs from boot_a and is not a recorded known-good fallback; "
+            "explicit override accepted")
+        result["fallback_sha256"] = sha_b if fallback_sections is not None else None
+        return result
+    raise Refused(
+        "boot_b differs from boot_a and is not the fallback recorded by a previous "
+        "apply/confirm, so the bootloader fallback copy cannot be trusted. This is "
+        "NOT the normal state after an update (a recorded known-good fallback is "
+        "accepted automatically). Options: (1) after the currently running image has "
+        "booted successfully, run `liuqin-apply-boot confirm --yes-write` to re-sync "
+        "boot_b from boot_a; (2) inspect boot_b and pass --allow-differing-boot-b if "
+        "you know what it contains")
+
+
+def write_device(device: Path, source: Path) -> None:
+    abort_after = env_int("LIUQIN_APPLY_TEST_ABORT_WRITE_AFTER")
+    written = 0
+    with device.open("r+b", buffering=0) as target, source.open("rb") as stream:
+        while True:
+            chunk = stream.read(CHUNK)
+            if not chunk:
+                break
+            if abort_after and written + len(chunk) > abort_after:
+                partial = chunk[:abort_after - written]
+                target.write(partial)
+                written += len(partial)
+                raise PowerLossSimulated(
+                    f"test hook: simulated power loss after {written} bytes")
+            target.write(chunk)
+            written += len(chunk)
+        if written != PARTITION_BYTES:
+            raise WriteFailed(f"wrote {written} bytes, expected {PARTITION_BYTES}")
+        os.fsync(target.fileno())
+
+
+def readback_matches(device: Path, expected_sha: str) -> tuple:
+    corrupt = os.environ.get("LIUQIN_APPLY_TEST_READBACK_CORRUPT", "")
+    actual = sha256_device(device)
+    if corrupt in ("always", "after-write"):
+        if corrupt == "after-write":
+            os.environ.pop("LIUQIN_APPLY_TEST_READBACK_CORRUPT", None)
+        log("test hook: simulating a corrupted read-back")
+        actual = "0" * 64
+    return actual == expected_sha, actual
+
+
+def restore_backup(device: Path, backup: Path, backup_sha: str) -> tuple:
+    log(f"restoring the original boot_a from {backup}")
+    try:
+        with backup.open("rb") as stream, device.open("r+b", buffering=0) as target:
+            while True:
+                chunk = stream.read(CHUNK)
+                if not chunk:
+                    break
+                target.write(chunk)
+            os.fsync(target.fileno())
+        actual = sha256_device(device)
+        return actual == backup_sha, actual
+    except OSError as error:
+        log(f"automatic restore failed: {error}")
+        return False, ""
+
+
+def recovery_commands(device: Path, backup, backup_sha) -> list:
+    commands = [
+        f"{TOOL} status --json",
+        f"{TOOL} recover --yes-write   # restore the last verified backup",
+    ]
+    if backup is not None:
+        commands.append(
+            f"dd if={backup} of={device} bs=1M conv=fsync status=progress  # manual restore")
+        if backup_sha:
+            commands.append(f"sha256sum {backup}   # expected {backup_sha}")
+    return commands
+
+
+# ---------------------------------------------------------------------------
+# commands
+# ---------------------------------------------------------------------------
+
+
+def cmd_status(args) -> int:
+    staging = Path(args.staging_dir)
+    state = read_journal(staging)
+    device_a = Path(args.device)
+    device_b = Path(args.device_b)
+    rootfs_release = None
+    release_file = Path(args.kernel_release_file)
+    if release_file.is_file():
+        rootfs_release = release_file.read_text().splitlines()[0].strip()
+    layout = root_layout()
+    staged = []
+    for image in sorted(staging.glob("*.img")):
+        if image.name == "boot-padded.img":
+            continue
+        paths = staging_paths(image, staging)
+        entry = {
+            "image": str(image),
+            "bytes": image.stat().st_size if image.exists() else None,
+            "manifest": paths["manifest"].is_file(),
+            "build_info": paths["build_info"].is_file(),
+            "stage_record": paths["stage_record"].is_file(),
+        }
+        if paths["build_info"].is_file():
+            try:
+                metadata = load_staged_metadata(paths["build_info"])
+            except (Refused, ValidationFailed):
+                entry["metadata_schema_version"] = None
+            except Exception as error:  # MetadataError
+                entry["metadata_schema_version"] = f"invalid: {error}"
+            else:
+                entry["metadata_schema_version"] = metadata["schema_version"]
+                entry["metadata_device_ready"] = metadata["device_ready"]
+                entry["metadata_kernel_release"] = metadata["kernel_release"]
+                entry["metadata_kernel_image_sha256"] = metadata["kernel_image_sha256"]
+        staged.append(entry)
+    backups = sorted(str(path) for path in (staging / "backup").glob("boot_a-*.img"))
+    boot_b_backups = sorted(str(path)
+                            for path in (staging / "backup").glob("boot_b-*.img"))
+    pair_store = {"tool": None, "pairs": [], "installed_pair": None}
+    try:
+        pair_result = run_pair_tool(["status"], timeout=60)
+        if pair_result.returncode == 0:
+            pair_store = json.loads(pair_result.stdout)
+    except (Refused, OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
+        pair_store = {"error": str(error)}
+    report = {
+        "tool": TOOL, "version": TOOL_VERSION, "time": now(),
+        "staging_dir": str(staging),
+        "journal": state,
+        "staged_images": staged,
+        "backups": backups,
+        "boot_b_backups": boot_b_backups,
+        "kernel_pairs": pair_store,
+        "rootfs_kernel_release": rootfs_release,
+        "installed_kernels": installed_kernels(Path(args.modules_dir)),
+        "root_layout": layout,
+        "devices": {
+            "boot_a": {"path": str(device_a), "kind": device_kind(device_a),
+                       "size": device_size(device_a) or None},
+            "boot_b": {"path": str(device_b), "kind": device_kind(device_b),
+                       "size": device_size(device_b) or None},
+        },
+        "write_gates": {
+            "experimental_device_write":
+                os.environ.get("LIUQIN_EXPERIMENTAL_DEVICE_WRITE") == "1",
+            "root": os.geteuid() == 0,
+        },
+    }
+    if getattr(args, "hashes", False) and device_kind(device_a) in ("block", "regular"):
+        sha_a = sha256_device(device_a)
+        report["devices"]["boot_a"]["sha256"] = sha_a
+        sections = payload_sections(device_a)
+        if sections:
+            report["devices"]["boot_a"]["kernel_image_sha256"] = \
+                sections["kernel_image_sha256"]
+        if device_kind(device_b) in ("block", "regular"):
+            sha_b = sha256_device(device_b)
+            report["devices"]["boot_b"]["sha256"] = sha_b
+            report["boot_b_fallback_ok"] = sha_a == sha_b
+            recorded = {state.get("fallback_sha256"), state.get("boot_b_sha256")}
+            recorded.discard(None)
+            report["boot_b_recorded_fallback"] = sha_b in recorded
+            report["boot_b_fallback_state"] = (
+                "identical to boot_a" if sha_a == sha_b else
+                "recorded known-good fallback" if sha_b in recorded else
+                "UNVERIFIED (not recorded; apply would refuse without an override)")
+        if rootfs_release:
+            try:
+                pair_id, source = installed_pair_id(Path(args.modules_dir), rootfs_release)
+            except ValidationFailed as error:
+                report["installed_pair_error"] = str(error)
+            else:
+                report["installed_kernel_pair"] = pair_id
+                report["installed_kernel_pair_source"] = source
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return EXIT_OK
+    say(f"{TOOL} {TOOL_VERSION} status @ {report['time']}")
+    say(f"staging: {staging}")
+    phase = state.get("phase")
+    say(f"last apply: {phase or 'none'}"
+        + (f" (image {state.get('image')}, {state.get('applied_at')})"
+           if state.get("image") else ""))
+    if phase in ("writing", "rollback_writing", "failed", "failed_restored",
+                 "failed_restore_failed", "rollback_failed"):
+        say("WARNING: an apply is incomplete; run `liuqin-apply-boot recover --yes-write` "
+            "to restore the last verified backup.")
+    say(f"staged images: {len(staged)}")
+    for item in staged:
+        say(f"  {item['image']} ({item['bytes']} B)"
+            f" manifest={'yes' if item['manifest'] else 'no'}"
+            f" build-info={'yes' if item['build_info'] else 'no'}"
+            f" schema={item.get('metadata_schema_version')}")
+    say(f"backups: {len(backups)}")
+    for path in backups[-BACKUP_RETENTION:]:
+        say(f"  {path}")
+    say(f"boot_a: {device_a} kind={report['devices']['boot_a']['kind']} "
+        f"size={report['devices']['boot_a']['size']} (expected {PARTITION_BYTES})")
+    say(f"boot_b: {device_b} kind={report['devices']['boot_b']['kind']} "
+        f"size={report['devices']['boot_b']['size']} (expected {PARTITION_BYTES})")
+    if "boot_b_fallback_ok" in report:
+        say(f"boot_b fallback: {report.get('boot_b_fallback_state')} "
+            f"(identical: {'yes' if report['boot_b_fallback_ok'] else 'no'})")
+    if report.get("installed_kernel_pair"):
+        say(f"installed kernel pair: {report['installed_kernel_pair']} "
+            f"({report.get('installed_kernel_pair_source')})")
+    pairs = report["kernel_pairs"].get("pairs") or []
+    say(f"archived kernel pairs: {len(pairs)}")
+    for entry in pairs:
+        say(f"  {entry.get('pair_id')}  {entry.get('created_at')}  {entry.get('path')}")
+    if boot_b_backups:
+        say(f"boot_b backups: {len(boot_b_backups)}")
+    say(f"rootfs kernel release: {rootfs_release}")
+    say(f"root layout: {layout['profile'] or 'UNKNOWN'} "
+        f"({'; '.join(layout['problems']) or 'ok'})")
+    say(f"write gates: root={report['write_gates']['root']} "
+        f"experimental={report['write_gates']['experimental_device_write']}")
+    return EXIT_OK
+
+
+def cmd_stage(args) -> int:
+    staging = Path(args.staging_dir)
+    with Lock(staging / ".apply.lock", args.lock_timeout_ms):
+        image = parse_boot_image(Path(args.image))
+        record_path = staging_paths(image.path, staging)["stage_record"]
+        record = {
+            "schema": 1, "tool": TOOL, "version": TOOL_VERSION,
+            "image": str(image.path), "image_sha256": image.sha256,
+            "header": image.summary(), "staged_at": now(),
+            "apply_command": f"{TOOL} apply --image {image.path} --yes-write",
+            "dry_run_command": f"{TOOL} apply --image {image.path} --dry-run",
+            "note": "registration only; nothing was written to any device",
+        }
+        atomic_write_json(record_path, record)
+        say(f"staged: {image.path} ({image.file_bytes} bytes, sha256 {image.sha256})")
+        say(f"record: {record_path}")
+        say("nothing was written to a device. Next:")
+        say(f"  {record['dry_run_command']}    # validate")
+        say(f"  {record['apply_command']}      # write boot_a (Phase 6, double-gated)")
+    return EXIT_OK
+
+
+def _check_write_permission() -> None:
+    if os.geteuid() != 0 and os.environ.get("LIUQIN_APPLY_TEST_ALLOW_NONROOT_WRITE") != "1":
+        raise Refused(
+            "device writes require root (test hook: LIUQIN_APPLY_TEST_ALLOW_NONROOT_WRITE=1)")
+    if os.environ.get("LIUQIN_EXPERIMENTAL_DEVICE_WRITE") != "1":
+        raise Refused(
+            "device write is gated: explicitly arm with LIUQIN_EXPERIMENTAL_DEVICE_WRITE=1 "
+            "after Phase 6 device authorization")
+
+
+def cmd_apply(args) -> int:
+    staging = Path(args.staging_dir)
+    dry_run = not args.yes_write
+    image = parse_boot_image(Path(args.image))
+    say(f"image: {image.path}")
+    say(f"  {image.file_bytes} bytes, sha256 {image.sha256}")
+    say(f"  header v{image.header_version}, page {image.page_size}, "
+        f"kernel {image.kernel_size} B, ramdisk {image.ramdisk_size} B, "
+        f"dtb {image.dtb_size} B")
+    say(f"  padded 192 MiB partition payload sha256 {image.padded_sha256}")
+
+    with Lock(staging / ".apply.lock", args.lock_timeout_ms):
+        gate = identity_gate(
+            image, staging, Path(args.modules_dir), Path(args.kernel_release_file),
+            write_mode=not dry_run, allow_dev_dtb_source=args.allow_dev_dtb_source)
+        metadata = gate["metadata"]
+        say(f"identity gate: OK ({len(gate['checks'])} checks, "
+            f"{len(gate['warnings'])} warnings)")
+        say(f"kernel pair: staged Image {metadata['kernel_image_sha256']} == "
+            f"installed Image {gate['installed_pair_id']} "
+            f"({gate.get('installed_pair_source', 'vmlinuz')})")
+
+        state = read_journal(staging)
+        devices = check_devices(
+            Path(args.device), Path(args.device_b), journal=state,
+            allow_missing_boot_b=args.allow_missing_boot_b,
+            allow_differing_boot_b=args.allow_differing_boot_b)
+        say(f"boot_a: {devices['device_a']} ({devices['size_a']} B, "
+            f"sha256 {devices['sha256_a']})")
+        say(f"boot_b: {devices['device_b']} {devices['boot_b_state']}")
+        for warning in devices["warnings"]:
+            log(f"device warning: {warning}")
+
+        # Kernel pair identity of the boot payload currently in boot_a: its
+        # embedded kernel Image sha256.  The kernel-install hook's RPM %pre has
+        # archived the matching modules tree, so a later rollback can restore
+        # boot + modules together (liuqin-kernel-pair).
+        previous = payload_sections(Path(args.device))
+        previous_pair_id = previous["kernel_image_sha256"] if previous else None
+        archived_pair_id = archived_pair_dir = None
+        if previous_pair_id:
+            archived_pair_id, archived_pair_dir = pair_find_by_kernel_image(previous_pair_id)
+            say(f"previous boot_a payload kernel Image: {previous_pair_id}")
+            if archived_pair_id:
+                say(f"previous kernel pair archived: {archived_pair_id}")
+            else:
+                log("WARNING: no archived kernel pair matches the current boot_a payload; "
+                    "a later rollback of this update would be boot-only (the matching "
+                    "kernel modules tree cannot be restored)")
+
+        backup_dir = Path(args.backup_dir) if args.backup_dir else staging / "backup"
+        if dry_run:
+            say("DRY-RUN: would save the current boot_a to "
+                f"{backup_dir}/boot_a-<timestamp>-<sha>.img, then write the padded image to "
+                f"{devices['device_a']} and verify the whole partition by sha256.")
+            say("DRY-RUN: boot_b and all GPT slot attributes remain untouched. "
+                "Nothing was written.")
+            say(f"DRY-RUN: boot_b fallback handling: {devices['boot_b_state']}")
+            say(f"next: {TOOL} apply --image {image.path} --yes-write   "
+                "(requires LIUQIN_EXPERIMENTAL_DEVICE_WRITE=1 and root)")
+            return EXIT_OK
+
+        _check_write_permission()
+        backup = make_backup(Path(args.device), backup_dir, devices["sha256_a"])
+        pruned = prune_backups(backup_dir)
+        if pruned:
+            log(f"pruned old backups: {', '.join(pruned)}")
+        write_journal(staging, phase="backup_done", image=str(image.path),
+                      image_sha256=image.sha256, backup=str(backup),
+                      backup_sha256=devices["sha256_a"],
+                      expected_partition_sha256=image.padded_sha256,
+                      device=str(args.device))
+        say(f"backup: {backup} (sha256 {devices['sha256_a']}, read back OK)")
+
+        work = staging / ".apply-work"
+        padded = write_padded_image(image, work)
+        write_journal(staging, phase="writing", started_at=now())
+        try:
+            write_device(Path(args.device), padded)
+            ok, actual = readback_matches(Path(args.device), image.padded_sha256)
+        except PowerLossSimulated as error:
+            write_journal(staging, phase="writing", last_error=str(error))
+            log(f"ABORTED: {error}")
+            log("the journal says phase=writing; the last verified backup is:")
+            log(f"  {backup}")
+            for command in recovery_commands(Path(args.device), backup, devices["sha256_a"]):
+                log(f"  {command}")
+            return EXIT_ABORTED
+        except OSError as error:
+            write_journal(staging, phase="failed", last_error=str(error))
+            log(f"write failed: {error}")
+            restored, restored_sha = restore_backup(
+                Path(args.device), backup, devices["sha256_a"])
+            if restored:
+                write_journal(staging, phase="failed_restored", last_error=str(error),
+                              restored_sha256=restored_sha)
+                log("boot_a was restored from the verified backup")
+            else:
+                write_journal(staging, phase="failed_restore_failed", last_error=str(error))
+                for command in recovery_commands(Path(args.device), backup,
+                                                  devices["sha256_a"]):
+                    log(f"  {command}")
+            return EXIT_VERIFY
+        finally:
+            padded.unlink(missing_ok=True)
+            try:
+                work.rmdir()
+            except OSError:
+                pass
+
+        if not ok:
+            log(f"read-back sha256 mismatch: expected {image.padded_sha256}, got {actual}")
+            restored, restored_sha = restore_backup(
+                Path(args.device), backup, devices["sha256_a"])
+            if not restored:
+                write_journal(staging, phase="failed_restore_failed",
+                              last_error="read-back mismatch",
+                              actual_readback_sha256=actual)
+                log("automatic restore FAILED; do not reboot until boot_a is restored")
+                for command in recovery_commands(Path(args.device), backup,
+                                                  devices["sha256_a"]):
+                    log(f"  {command}")
+                return EXIT_VERIFY
+            write_journal(staging, phase="failed_restored", last_error="read-back mismatch",
+                          actual_readback_sha256=actual, restored_sha256=restored_sha)
+            log("read-back verification failed; boot_a was restored from the verified backup")
+            for command in recovery_commands(Path(args.device), backup, devices["sha256_a"]):
+                log(f"  {command}")
+            return EXIT_VERIFY
+
+        write_journal(
+            staging, phase="applied", applied_at=now(),
+            last_backup=str(backup), partition_sha256=actual,
+            kernel_release=metadata["kernel_release"],
+            kernel_image_sha256=metadata["kernel_image_sha256"],
+            boot_b_sha256=devices["sha256_b"],
+            fallback_sha256=devices["fallback_sha256"],
+            fallback_state=devices["boot_b_state"],
+            previous_payload={
+                "partition_sha256": devices["sha256_a"],
+                "kernel_image_sha256": previous_pair_id,
+                "kernel_pair_id": archived_pair_id,
+                "kernel_pair_dir": archived_pair_dir,
+            })
+        say(f"boot_a written and verified (partition sha256 {actual})")
+        say(f"backup kept at {backup}")
+        say(f"boot_b untouched ({devices['boot_b_state']}).")
+        say("GPT slot attributes untouched; no qbootctl/fastboot used.")
+        if archived_pair_id:
+            say(f"the previous kernel pair is archived ({archived_pair_id}): a rollback "
+                "can restore boot + matching modules together")
+        else:
+            say("NOTE: the previous kernel pair is not archived; a rollback of this "
+                "update would be boot-only (modules not restored).")
+        say("reboot to use the new boot image. To undo before reboot:")
+        say(f"  {TOOL} rollback --yes-write --backup {backup}")
+        say("after a successful boot, re-sync the bootloader fallback copy with:")
+        say(f"  {TOOL} confirm --yes-write")
+        return EXIT_OK
+
+
+def _choose_backup(args, staging: Path, backup_dir: Path, state: dict):
+    if args.backup:
+        return Path(args.backup).resolve()
+    recorded = state.get("last_backup")
+    if recorded and Path(recorded).is_file():
+        return Path(recorded).resolve()
+    candidates = sorted(backup_dir.glob("boot_a-*.img"), key=lambda path: path.name)
+    if candidates:
+        return candidates[-1].resolve()
+    raise Refused(f"no verified backup available under {backup_dir}")
+
+
+def _restore_pair(pair_id: str) -> subprocess.CompletedProcess:
+    log(f"restoring the archived kernel pair {pair_id} (boot + modules become consistent)")
+    result = run_pair_tool(["restore", "--pair-id", pair_id, "--yes-write"])
+    for line in (result.stdout or "").splitlines():
+        say(f"  {line}")
+    if result.returncode != 0:
+        for line in (result.stderr or "").splitlines():
+            log(f"  pair restore: {line}")
+    return result
+
+
+def _restore_device_from_backup(device: Path, backup: Path, expected_sha: str) -> bool:
+    restored, actual = restore_backup(device, backup, expected_sha)
+    if restored:
+        log(f"{device} was restored from the verified backup")
+    else:
+        log(f"automatic restore of {device} FAILED; do not reboot")
+    return restored
+
+
+def cmd_rollback(args) -> int:
+    """Restore boot_a from a verified backup AND the matching kernel pair.
+
+    A boot.img restore is not a complete system rollback: the kernel Image in
+    the backup needs its matching /usr/lib/modules/<kver> tree.  The RPM %pre
+    archived that tree (liuqin-kernel-pair) before the upgrade replaced it, so
+    this command restores both.  If no archived pair matches the backup's
+    kernel Image, the rollback is refused by default; --boot-only accepts a
+    boot-only restore with a recorded boundary (never a silent mismatch).
+    """
+    staging = Path(args.staging_dir)
+    dry_run = not args.yes_write
+    boot_only = getattr(args, "boot_only", False)
+    backup_dir = Path(args.backup_dir) if args.backup_dir else staging / "backup"
+    state = read_journal(staging)
+    backup = _choose_backup(args, staging, backup_dir, state)
+    if not backup.is_file():
+        raise Refused(f"backup not found: {backup}")
+    if backup.stat().st_size != PARTITION_BYTES:
+        raise Refused(
+            f"backup is {backup.stat().st_size} bytes, expected {PARTITION_BYTES}: {backup}")
+    backup_sha = sha256_file(backup)
+    recorded_sha = state.get("backup_sha256")
+    if state.get("last_backup") and Path(state["last_backup"]).resolve() == backup and \
+            recorded_sha and recorded_sha != backup_sha:
+        raise ValidationFailed(
+            f"backup sha256 {backup_sha} does not match journal {recorded_sha}")
+    device = Path(args.device)
+    with Lock(staging / ".apply.lock", args.lock_timeout_ms):
+        require_test_regular_file(device)
+        if device_kind(device) not in ("block", "regular"):
+            raise Refused(f"boot_a device not found: {device}")
+        if device_size(device) != PARTITION_BYTES:
+            raise Refused(f"unexpected boot_a partition size: {device_size(device)}")
+        say(f"backup: {backup} (sha256 {backup_sha})")
+
+        # Which kernel pair does this boot payload belong to?
+        sections = payload_sections(backup)
+        target_pair_id = sections["kernel_image_sha256"] if sections else None
+        release_file = Path(args.kernel_release_file)
+        release = None
+        if release_file.is_file():
+            lines = release_file.read_text().splitlines()
+            release = lines[0].strip() if lines else None
+        current_pair = None
+        current_pair_problem = None
+        if release:
+            try:
+                current_pair, _source = installed_pair_id(Path(args.modules_dir), release)
+            except ValidationFailed as error:
+                current_pair_problem = str(error)
+        pair_restore_id = None
+        pair_reason = None
+        if target_pair_id is None:
+            pair_reason = ("the backup is not a parseable liuqin boot image, so its "
+                           "kernel pair identity is unknown")
+            if not boot_only:
+                raise Refused(
+                    f"{pair_reason}; restoring it would not be verifiable. "
+                    "Re-run with --boot-only to accept a boot-only rollback (NOT a "
+                    "complete system rollback)")
+            log(f"WARNING: {pair_reason}; boot-only rollback")
+        elif current_pair_problem:
+            pair_reason = f"installed kernel pair is inconsistent: {current_pair_problem}"
+            if not boot_only:
+                raise ValidationFailed(
+                    f"{pair_reason}. Fix the installed kernel package first, or use "
+                    "--boot-only to accept a boot-only rollback")
+            log(f"WARNING: {pair_reason}; boot-only rollback")
+        elif current_pair == target_pair_id:
+            say(f"kernel pair: backup payload Image {target_pair_id} == installed Image "
+                f"{current_pair}; modules already match, no pair restore needed")
+            pair_reason = "installed modules pair already matches the backup payload"
+        else:
+            archived_id, archived_dir = pair_find_by_kernel_image(target_pair_id)
+            if not archived_id:
+                pair_reason = (
+                    f"no archived kernel pair matches the backup's kernel Image "
+                    f"{target_pair_id} (store: liuqin-kernel-pair list)")
+                if not boot_only:
+                    raise Refused(
+                        f"{pair_reason}. Restoring only boot.img would leave the boot "
+                        "payload and /usr/lib/modules mismatched. Re-run with --boot-only "
+                        "to accept a boot-only rollback (NOT a complete system rollback), "
+                        "or reinstall the matching kernel RPM")
+                log(f"WARNING: {pair_reason}; boot-only rollback")
+            else:
+                verify = run_pair_tool(["verify", "--pair-id", archived_id])
+                if verify.returncode != 0:
+                    raise Refused(
+                        f"archived kernel pair {archived_id} failed verification; "
+                        f"refusing to restore it:\n{verify.stdout}{verify.stderr}")
+                pair_restore_id = archived_id
+                say(f"kernel pair: backup payload Image {target_pair_id} != installed "
+                    f"Image {current_pair}; will restore archived pair {archived_id}")
+
+        if dry_run:
+            say(f"DRY-RUN: would restore {backup} to {device} and verify the whole partition.")
+            if pair_restore_id:
+                say(f"DRY-RUN: would then restore the archived kernel pair "
+                    f"{pair_restore_id} (modules tree + identity files), archiving the "
+                    "current pair first.")
+            elif pair_reason:
+                say(f"DRY-RUN: kernel pair handling: {pair_reason}")
+            say("DRY-RUN: nothing was written.")
+            return EXIT_OK
+        _check_write_permission()
+        write_journal(staging, phase="rolling_back", rollback_backup=str(backup))
+        try:
+            write_device(device, backup)
+        except PowerLossSimulated as error:
+            write_journal(staging, phase="rollback_writing", last_error=str(error))
+            log(f"ABORTED: {error}")
+            return EXIT_ABORTED
+        ok, actual = readback_matches(device, backup_sha)
+        if not ok:
+            write_journal(staging, phase="rollback_failed",
+                          last_error="read-back mismatch", actual_readback_sha256=actual)
+            log(f"rollback read-back mismatch: expected {backup_sha}, got {actual}")
+            log("do not reboot; retry the rollback or restore manually")
+            return EXIT_VERIFY
+        say(f"boot_a restored and verified (partition sha256 {actual})")
+
+        if pair_restore_id:
+            write_journal(staging, phase="rollback_pair_pending",
+                          rollback_pair_id=pair_restore_id,
+                          rollback_target_pair=target_pair_id)
+            result = _restore_pair(pair_restore_id)
+            if result.returncode != 0:
+                write_journal(staging, phase="rollback_pair_failed",
+                              last_error="kernel pair restore failed")
+                log("boot_a is rolled back but the kernel modules pair is NOT restored yet.")
+                log("do not reboot; complete it with:")
+                log(f"  {TOOL} recover --yes-write   # retries the archived pair restore")
+                return EXIT_VERIFY
+            installed_now = None
+            if release:
+                try:
+                    installed_now, _source = installed_pair_id(Path(args.modules_dir), release)
+                except ValidationFailed as error:
+                    write_journal(staging, phase="rollback_pair_failed",
+                                  last_error=str(error))
+                    log(f"post-restore kernel pair verification failed: {error}")
+                    return EXIT_VERIFY
+            if installed_now != target_pair_id:
+                write_journal(staging, phase="rollback_pair_failed",
+                              last_error="installed pair does not match the backup payload")
+                log(f"post-restore verification failed: installed pair {installed_now} != "
+                    f"backup payload {target_pair_id}")
+                return EXIT_VERIFY
+            say(f"kernel pair restored and verified: installed Image {installed_now} == "
+                f"backup payload Image {target_pair_id}")
+        write_journal(staging, phase="rolled_back", rolled_back_at=now(),
+                      rolled_back_from=str(backup), partition_sha256=actual,
+                      kernel_image_sha256=target_pair_id,
+                      pair_restored=bool(pair_restore_id),
+                      pair_restore_reason=pair_reason)
+        say("reboot to boot the previous image.")
+        return EXIT_OK
+
+
+def cmd_recover(args) -> int:
+    staging = Path(args.staging_dir)
+    state = read_journal(staging)
+    phase = state.get("phase")
+    if phase in ("rollback_pair_pending", "rollback_pair_failed"):
+        pair_id = state.get("rollback_pair_id")
+        if not pair_id:
+            raise Refused(
+                f"journal phase is {phase} but no rollback_pair_id is recorded; "
+                "restore the kernel package and boot image manually")
+        if not args.yes_write:
+            say(f"DRY-RUN: would retry restoring the archived kernel pair {pair_id}.")
+            return EXIT_OK
+        _check_write_permission()
+        result = _restore_pair(pair_id)
+        if result.returncode != 0:
+            write_journal(staging, phase="rollback_pair_failed",
+                          last_error="pair restore retry failed")
+            log("kernel pair restore still failing; do not reboot")
+            return EXIT_VERIFY
+        write_journal(staging, phase="rolled_back", pair_restored=True,
+                      pair_restored_at=now(), rollback_pair_id=pair_id)
+        say(f"kernel pair {pair_id} restored; boot and modules match. Reboot when ready.")
+        return EXIT_OK
+    if phase == "fallback_syncing":
+        backup = state.get("fallback_backup")
+        expected = state.get("fallback_backup_sha256")
+        if not backup or not expected:
+            raise Refused(
+                "journal phase is fallback_syncing but no boot_b backup is recorded; "
+                "inspect boot_b manually")
+        if not args.yes_write:
+            say(f"DRY-RUN: would restore boot_b from {backup} (sha256 {expected}).")
+            return EXIT_OK
+        _check_write_permission()
+        device_b = Path(args.device_b)
+        restored = _restore_device_from_backup(device_b, Path(backup), expected)
+        if not restored:
+            raise ValidationFailed("could not restore boot_b from its backup")
+        write_journal(staging, phase="applied", last_error="fallback_sync_interrupted_restored")
+        say("boot_b was restored from its backup; the fallback copy is unchanged.")
+        return EXIT_OK
+    if phase in ("writing", "rollback_writing", "failed", "failed_restored",
+                 "failed_restore_failed", "rollback_failed"):
+        log(f"journal phase is {phase}; restoring the last verified backup")
+        if not args.backup:
+            args.backup = state.get("last_backup") or state.get("rollback_backup") or ""
+        return cmd_rollback(args)
+    if phase == "applied":
+        say("journal phase is applied; nothing to recover. Use `rollback` to revert.")
+        return EXIT_OK
+    raise Refused(f"no incomplete apply to recover (journal phase: {phase!r})")
+
+
+def cmd_confirm(args) -> int:
+    """Re-sync the bootloader fallback copy (boot_b) with the known-good boot_a.
+
+    Upstream semantics: boot_b is the copy the bootloader falls back to when
+    boot_a does not load.  After an update boot_a != boot_b is normal; this
+    command makes boot_b track the newest image that has actually booted (run
+    it after a successful boot, manually or from a device-layer unit).  It is
+    not needed for continuous updates — a differing boot_b that matches the
+    journal-recorded fallback is already accepted by `apply`.
+    """
+    staging = Path(args.staging_dir)
+    dry_run = not args.yes_write
+    device_a = Path(args.device)
+    device_b = Path(args.device_b)
+    backup_dir = Path(args.backup_dir) if args.backup_dir else staging / "backup"
+    with Lock(staging / ".apply.lock", args.lock_timeout_ms):
+        require_test_regular_file(device_a)
+        require_test_regular_file(device_b)
+        for device, label in ((device_a, "boot_a"), (device_b, "boot_b")):
+            if device_kind(device) not in ("block", "regular"):
+                raise Refused(f"{label} device not found: {device}")
+            if device_size(device) != PARTITION_BYTES:
+                raise Refused(f"unexpected {label} partition size: {device_size(device)}")
+        state = read_journal(staging)
+        sha_a = sha256_device(device_a)
+        sections = payload_sections(device_a)
+        if sections is None:
+            raise Refused(
+                "boot_a does not contain a parseable liuqin boot image; refusing to "
+                "copy it into boot_b as a fallback")
+        recorded = state.get("partition_sha256")
+        if recorded is None:
+            log("WARNING: the journal has no partition_sha256 for boot_a; treating this "
+                "explicit confirm as the operator's attestation that it booted")
+        elif recorded != sha_a:
+            raise Refused(
+                f"boot_a changed since the last apply/rollback (journal {recorded}, "
+                f"current {sha_a}); refusing to copy unverified bytes into boot_b")
+        release_file = Path(args.kernel_release_file)
+        if release_file.is_file():
+            lines = release_file.read_text().splitlines()
+            release = lines[0].strip() if lines else ""
+            if release:
+                installed_now, _source = installed_pair_id(Path(args.modules_dir), release)
+                if installed_now != sections["kernel_image_sha256"]:
+                    raise ValidationFailed(
+                        f"boot_a payload Image {sections['kernel_image_sha256']} != "
+                        f"installed kernel pair {installed_now}; the running system is "
+                        "not a consistent boot+modules pair, refusing to bless it")
+        sha_b = sha256_device(device_b)
+        if sha_b == sha_a:
+            write_journal(staging, phase="fallback_confirmed",
+                          fallback_sha256=sha_a, boot_b_sha256=sha_b,
+                          confirmed_at=now(), fallback_note="boot_b already equalled boot_a")
+            say("boot_b already equals boot_a; the fallback copy is current. Nothing written.")
+            return EXIT_OK
+        say(f"boot_a: sha256 {sha_a}")
+        say(f"boot_b: sha256 {sha_b} (current fallback copy)")
+        if dry_run:
+            say(f"DRY-RUN: would back up boot_b to {backup_dir}/boot_b-<ts>-<sha>.img, "
+                f"then copy the whole boot_a partition into boot_b and verify the "
+                "read-back sha256.")
+            say("DRY-RUN: nothing was written.")
+            return EXIT_OK
+        _check_write_permission()
+        backup = make_backup(device_b, backup_dir, sha_b, prefix="boot_b")
+        pruned = prune_backups(backup_dir, "boot_b")
+        if pruned:
+            log(f"pruned old boot_b backups: {', '.join(pruned)}")
+        write_journal(staging, phase="fallback_syncing",
+                      fallback_backup=str(backup),
+                      fallback_backup_sha256=sha_b,
+                      fallback_target_sha256=sha_a)
+        try:
+            write_device(device_b, device_a)
+        except PowerLossSimulated as error:
+            write_journal(staging, phase="fallback_syncing", last_error=str(error))
+            log(f"ABORTED: {error}")
+            log(f"boot_b may be partially written; its backup is {backup}")
+            log(f"  {TOOL} recover --yes-write   # restores boot_b from that backup")
+            return EXIT_ABORTED
+        except OSError as error:
+            log(f"boot_b write failed: {error}")
+            _restore_device_from_backup(device_b, backup, sha_b)
+            write_journal(staging, phase="applied",
+                          last_error=f"fallback_sync_failed: {error}")
+            return EXIT_VERIFY
+        ok, actual = readback_matches(device_b, sha_a)
+        if not ok:
+            log(f"boot_b read-back sha256 mismatch: expected {sha_a}, got {actual}")
+            _restore_device_from_backup(device_b, backup, sha_b)
+            write_journal(staging, phase="applied",
+                          last_error="fallback_sync_failed: read-back mismatch")
+            return EXIT_VERIFY
+        write_journal(staging, phase="fallback_confirmed",
+                      fallback_sha256=sha_a, boot_b_sha256=actual,
+                      confirmed_at=now(),
+                      fallback_image_sha256=state.get("image_sha256"))
+        say(f"boot_b re-synced with boot_a (partition sha256 {actual}); the bootloader "
+            "fallback copy now holds the known-good image.")
+        say(f"boot_b backup kept at {backup}")
+        return EXIT_OK
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--staging-dir",
+        default=os.environ.get("LIUQIN_BOOT_STAGING_DIR", DEFAULT_STAGING_DIR))
+    common.add_argument(
+        "--device", default=os.environ.get("LIUQIN_BOOT_DEVICE", DEFAULT_DEVICE_A),
+        help="boot_a device (default /dev/disk/by-partlabel/boot_a)")
+    common.add_argument(
+        "--device-b", default=os.environ.get("LIUQIN_BOOT_DEVICE_B", DEFAULT_DEVICE_B),
+        help="boot_b device (fallback invariant check)")
+    common.add_argument(
+        "--modules-dir", default=os.environ.get("LIUQIN_MODULES_DIR", DEFAULT_MODULES_DIR))
+    common.add_argument(
+        "--kernel-release-file",
+        default=os.environ.get("LIUQIN_KERNEL_RELEASE_FILE", DEFAULT_KERNEL_RELEASE_FILE))
+    common.add_argument(
+        "--backup-dir", default=os.environ.get("LIUQIN_BOOT_BACKUP_DIR", ""))
+    common.add_argument("--lock-timeout-ms", type=int, default=0)
+    common.add_argument("--json", action="store_true",
+                        help="machine-readable output (status)")
+
+    parser = argparse.ArgumentParser(
+        prog=TOOL, description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--version", action="version", version=f"{TOOL} {TOOL_VERSION}")
+    sub = parser.add_subparsers(dest="command")
+
+    status = sub.add_parser("status", parents=[common],
+                            help="show staged images, devices, last apply")
+    status.add_argument("--hashes", action="store_true",
+                        help="also read boot_a/boot_b and compare (slow)")
+
+    stage = sub.add_parser("stage", parents=[common],
+                           help="register/validate a staged boot.img (no write)")
+    stage.add_argument("--image", required=True)
+
+    actions = {
+        "apply": "apply a staged boot.img to boot_a",
+        "rollback": "restore the verified backup AND the matching kernel pair",
+        "recover": "restore after an interrupted apply/rollback/confirm",
+        "confirm": "re-sync the bootloader fallback copy (boot_b) with a booted boot_a",
+    }
+    for name, help_text in actions.items():
+        action = sub.add_parser(name, parents=[common], help=help_text)
+        write_group = action.add_mutually_exclusive_group()
+        write_group.add_argument("--yes-write", "--yes-write-device", dest="yes_write",
+                                 action="store_true",
+                                 help="really write boot_a (double-gated)")
+        write_group.add_argument("--dry-run", dest="yes_write", action="store_false",
+                                 help="validate only (default)")
+        action.set_defaults(yes_write=False)
+        if name == "apply":
+            action.add_argument("--image", required=True)
+            action.add_argument("--allow-differing-boot-b", action="store_true")
+            action.add_argument("--allow-missing-boot-b", action="store_true")
+            action.add_argument("--allow-dev-dtb-source", action="store_true",
+                                help="attended dev only: accept the upstream-artifact DTB")
+        if name in ("rollback", "recover"):
+            action.add_argument("--backup", default="")
+            action.add_argument("--boot-only", action="store_true",
+                                help="rollback: accept a boot-only restore when no "
+                                     "archived kernel pair matches (NOT a complete "
+                                     "system rollback)")
+    return parser
+
+
+def legacy_argv(argv: list) -> list:
+    """Support the pre-2.0 `liuqin-apply-boot --image X [...]` form."""
+    if not argv:
+        return argv
+    if argv[0] in ("-h", "--help", "--version"):
+        return argv
+    if argv[0].startswith("-"):
+        return ["apply", *argv]
+    return argv
+
+
+def main(argv=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    argv = legacy_argv(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command is None:
+        parser.print_help()
+        return EXIT_REFUSED
+    try:
+        if args.command == "status":
+            return cmd_status(args)
+        if args.command == "stage":
+            return cmd_stage(args)
+        if args.command == "apply":
+            return cmd_apply(args)
+        if args.command == "rollback":
+            return cmd_rollback(args)
+        if args.command == "recover":
+            return cmd_recover(args)
+        if args.command == "confirm":
+            return cmd_confirm(args)
+        raise Refused(f"unknown command: {args.command}")
+    except BusyError as error:
+        log(str(error))
+        return EXIT_BUSY
+    except Refused as error:
+        log(f"refused: {error}")
+        return EXIT_REFUSED
+    except ValidationFailed as error:
+        log(f"validation failed: {error}")
+        return EXIT_VALIDATION
+    except WriteFailed as error:
+        log(f"write failed: {error}")
+        return EXIT_VERIFY
+    except OSError as error:
+        log(f"I/O error: {error}")
+        return EXIT_VALIDATION
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

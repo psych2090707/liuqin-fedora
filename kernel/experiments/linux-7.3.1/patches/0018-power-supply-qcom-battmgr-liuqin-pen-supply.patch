@@ -1,0 +1,289 @@
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -10,6 +10,7 @@
+ #include <linux/mutex.h>
+ #include <linux/nvmem-consumer.h>
+ #include <linux/of_device.h>
++#include <linux/workqueue.h>
+ #include <linux/power_supply.h>
+ #include <linux/property.h>
+ #include <linux/soc/qcom/pdr.h>
+@@ -393,6 +394,19 @@
+ 	unsigned int current_max;
+ };
+ 
++struct qcom_battmgr_pen {
++	bool valid;
++	bool present;
++	bool charging;
++	unsigned int soc;
++	unsigned int hall3;
++	unsigned int hall4;
++	unsigned int iout;
++	unsigned int state;
++	unsigned int mac_l;
++	unsigned int mac_h;
++};
++
+ struct qcom_battmgr {
+ 	struct device *dev;
+ 	struct pmic_glink_client *client;
+@@ -403,6 +417,7 @@
+ 	struct power_supply *bat_psy;
+ 	struct power_supply *usb_psy;
+ 	struct power_supply *wls_psy;
++	struct power_supply *pen_psy;
+ 
+ 	enum qcom_battmgr_unit unit;
+ 
+@@ -416,6 +431,7 @@
+ 	struct qcom_battmgr_ac ac;
+ 	struct qcom_battmgr_usb usb;
+ 	struct qcom_battmgr_wireless wireless;
++	struct qcom_battmgr_pen pen;
+ 
+ 	/* Last vendor/raw property response, serialized by @lock. */
+ 	unsigned int raw_opcode;
+@@ -441,6 +457,8 @@
+ 	unsigned int cc_orientation;
+ 
+ 	struct work_struct enable_work;
++	struct delayed_work pen_work;
++	bool pen_work_ready;
+ 
+ 	/*
+ 	 * @lock is used to prevent concurrent power supply requests to the
+@@ -2037,6 +2055,8 @@
+ 		break;
+ 	case NOTIF_XM_PROPERTY:
+ 		qcom_battmgr_schedule_cc_orientation(battmgr);
++		if (battmgr->pen_work_ready)
++			mod_delayed_work(system_wq, &battmgr->pen_work, 0);
+ 		break;
+ 	default:
+ 		dev_err(battmgr->dev, "unknown notification: %#x\n", notification);
+@@ -2534,11 +2554,206 @@
+ 		battmgr->service_up = true;
+ 		schedule_work(&battmgr->enable_work);
+ 		qcom_battmgr_schedule_cc_orientation(battmgr);
++		if (battmgr->pen_work_ready)
++			mod_delayed_work(system_wq, &battmgr->pen_work, 0);
+ 	} else {
+ 		battmgr->service_up = false;
+ 	}
+ }
+ 
++static int qcom_battmgr_pen_read(struct qcom_battmgr *battmgr,
++				 struct qcom_battmgr_pen *pen)
++{
++	u32 mac_l, mac_h, hall3, hall4, soc, iout, state;
++	int ret;
++
++	if (!battmgr->service_up)
++		return -EAGAIN;
++
++	mutex_lock(&battmgr->lock);
++	ret = qcom_battmgr_xm_get_value_locked(battmgr, XM_PEN_MAC_L, &mac_l);
++	if (!ret)
++		ret = qcom_battmgr_xm_get_value_locked(battmgr, XM_PEN_MAC_H, &mac_h);
++	if (!ret)
++		ret = qcom_battmgr_xm_get_value_locked(battmgr, XM_PEN_HALL3, &hall3);
++	if (!ret)
++		ret = qcom_battmgr_xm_get_value_locked(battmgr, XM_PEN_HALL4, &hall4);
++	if (!ret)
++		ret = qcom_battmgr_xm_get_value_locked(battmgr, XM_PEN_SOC, &soc);
++	if (!ret)
++		ret = qcom_battmgr_xm_get_value_locked(battmgr, XM_PEN_TX_IOUT, &iout);
++	if (!ret)
++		ret = qcom_battmgr_xm_get_value_locked(battmgr, XM_REVERSE_CHG_STATE, &state);
++	mutex_unlock(&battmgr->lock);
++
++	if (ret)
++		return ret;
++
++	pen->mac_l = mac_l;
++	pen->mac_h = mac_h;
++	pen->hall3 = hall3;
++	pen->hall4 = hall4;
++	pen->soc = soc;
++	pen->iout = iout;
++	pen->state = state;
++	/*
++	 * The two hall sensors only prove that a magnet is nearby.  A reversed
++	 * or sideways pen can trigger them without any power transfer, so the
++	 * charging decision must come from the reverse-charging state and TX
++	 * current.  The MAC is retained by the firmware while the pen is docked
++	 * (including a full pen that has stopped charging) and clears when the
++	 * pen is removed or placed wrong.
++	 */
++	pen->present = mac_l || mac_h || hall3 == 0 || hall4 == 0;
++	pen->charging = state == 4 && iout > 0;
++	pen->valid = true;
++
++	return 0;
++}
++
++static int qcom_battmgr_pen_register(struct qcom_battmgr *battmgr);
++
++static void qcom_battmgr_pen_work(struct work_struct *work)
++{
++	struct qcom_battmgr *battmgr = container_of(work, struct qcom_battmgr,
++						    pen_work.work);
++	struct qcom_battmgr_pen pen = {};
++	bool changed;
++	int ret;
++
++	if (!battmgr->service_up)
++		return;
++
++	ret = qcom_battmgr_pen_read(battmgr, &pen);
++	if (!ret) {
++		if (pen.present && !battmgr->pen_psy) {
++			int reg = qcom_battmgr_pen_register(battmgr);
++
++			if (reg)
++				dev_err_once(battmgr->dev,
++					     "failed to register pen power supply: %d\n",
++					     reg);
++		}
++		changed = !battmgr->pen.valid ||
++			  battmgr->pen.present != pen.present ||
++			  battmgr->pen.charging != pen.charging ||
++			  battmgr->pen.soc != pen.soc;
++		battmgr->pen = pen;
++		if (changed && battmgr->pen_psy)
++			power_supply_changed(battmgr->pen_psy);
++	}
++
++	/*
++	 * The vendor firmware sends NOTIF_XM_PROPERTY on hall/charging changes,
++	 * so the normal path is event driven.  Keep a slow fallback (60 s while
++	 * the pen is present, 5 min otherwise) so a missed notification cannot
++	 * hide the pen forever.  This is far cheaper than a permanent 10 s poll
++	 * and does not create a suspend wakeup source.
++	 */
++	schedule_delayed_work(&battmgr->pen_work,
++			      msecs_to_jiffies((battmgr->pen.present ||
++						battmgr->pen.charging) ?
++					       60000 : 300000));
++}
++
++static int qcom_battmgr_pen_get_property(struct power_supply *psy,
++					 enum power_supply_property psp,
++					 union power_supply_propval *val)
++{
++	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
++	struct qcom_battmgr_pen *pen = &battmgr->pen;
++
++	switch (psp) {
++	case POWER_SUPPLY_PROP_PRESENT:
++		val->intval = pen->present;
++		break;
++	case POWER_SUPPLY_PROP_CAPACITY:
++		/*
++		 * pen_soc keeps its last value after the pen is removed or placed
++		 * wrong.  Only expose it when the firmware identifies the pen
++		 * (MAC retained) or power transfer is actually active.
++		 */
++		if (!pen->valid || pen->soc > 100 ||
++		    (!pen->charging && !pen->mac_l && !pen->mac_h))
++			return -ENODATA;
++		val->intval = pen->soc;
++		break;
++	case POWER_SUPPLY_PROP_STATUS:
++		if (pen->charging)
++			val->intval = POWER_SUPPLY_STATUS_CHARGING;
++		else if (pen->present && pen->soc >= 100 &&
++			 (pen->mac_l || pen->mac_h))
++			val->intval = POWER_SUPPLY_STATUS_FULL;
++		else if (pen->present)
++			val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
++		else
++			val->intval = POWER_SUPPLY_STATUS_UNKNOWN;
++		break;
++	case POWER_SUPPLY_PROP_MODEL_NAME:
++		val->strval = "Xiaomi Smart Pen";
++		break;
++	case POWER_SUPPLY_PROP_MANUFACTURER:
++		val->strval = "Xiaomi";
++		break;
++	case POWER_SUPPLY_PROP_SCOPE:
++		val->intval = POWER_SUPPLY_SCOPE_DEVICE;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static const enum power_supply_property qcom_battmgr_pen_props[] = {
++	POWER_SUPPLY_PROP_PRESENT,
++	POWER_SUPPLY_PROP_CAPACITY,
++	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_MODEL_NAME,
++	POWER_SUPPLY_PROP_MANUFACTURER,
++	POWER_SUPPLY_PROP_SCOPE,
++};
++
++static const struct power_supply_desc qcom_battmgr_pen_desc = {
++	.name = "qcom-battmgr-pen",
++	.type = POWER_SUPPLY_TYPE_BATTERY,
++	.properties = qcom_battmgr_pen_props,
++	.num_properties = ARRAY_SIZE(qcom_battmgr_pen_props),
++	.get_property = qcom_battmgr_pen_get_property,
++};
++
++static int qcom_battmgr_pen_register(struct qcom_battmgr *battmgr)
++{
++	struct power_supply_config cfg = {
++		.drv_data = battmgr,
++		.fwnode = dev_fwnode(battmgr->dev),
++	};
++
++	if (battmgr->pen_psy)
++		return 0;
++
++	battmgr->pen_psy = power_supply_register(battmgr->dev,
++						 &qcom_battmgr_pen_desc, &cfg);
++	if (IS_ERR(battmgr->pen_psy)) {
++		int ret = PTR_ERR(battmgr->pen_psy);
++
++		battmgr->pen_psy = NULL;
++		return ret;
++	}
++
++	return 0;
++}
++
++static void qcom_battmgr_pen_unregister(void *data)
++{
++	struct qcom_battmgr *battmgr = data;
++
++	if (battmgr->pen_psy) {
++		power_supply_unregister(battmgr->pen_psy);
++		battmgr->pen_psy = NULL;
++	}
++}
++
+ static const struct of_device_id qcom_battmgr_of_variants[] = {
+ 	{ .compatible = "qcom,glymur-pmic-glink", .data = (void *)QCOM_BATTMGR_X1E80100 },
+ 	{ .compatible = "qcom,sm8475-pmic-glink", .data = (void *)QCOM_BATTMGR_SM8475 },
+@@ -2666,6 +2881,17 @@
+ 	pmic_glink_client_register(battmgr->client);
+ 
+ 	if (battmgr->variant == QCOM_BATTMGR_SM8475) {
++		ret = devm_add_action_or_reset(dev, qcom_battmgr_pen_unregister, battmgr);
++		if (ret)
++			return ret;
++
++		ret = devm_delayed_work_autocancel(dev, &battmgr->pen_work,
++						   qcom_battmgr_pen_work);
++		if (ret)
++			return ret;
++		battmgr->pen_work_ready = true;
++		mod_delayed_work(system_wq, &battmgr->pen_work, 0);
++
+ 		ret = devm_device_add_group(dev, &qcom_battmgr_raw_group);
+ 		if (ret)
+ 			return ret;

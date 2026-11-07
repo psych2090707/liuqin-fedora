@@ -1,0 +1,51 @@
+{
+  "release": "v0.1.0-alpha.1",
+  "device": "liuqin",
+  "fedora": "45",
+  "desktop": "GNOME 51",
+  "kernel_release": "7.3.1-liuqin-exp1",
+  "kernel_build_id": "b9077d5cc81f63681c015ab8cd6aca479f05afc2",
+  "desktop_user": "user",
+  "home": "/home/user",
+  "supported_install_layouts": [
+    "linux-only"
+  ],
+  "fresh_install_hardware_verified": false,
+  "release_kind": "experimental prerelease",
+  "offline_checks": {
+    "ext4_e2fsck": "PASS",
+    "required_directories_and_permissions": "PASS",
+    "clock_epoch_mtime_preserved": "PASS",
+    "first_boot_presets_core_services": "PASS",
+    "kernel_and_modules_match": "PASS",
+    "no_x86_64_elf_in_target_rootfs": "PASS",
+    "public_private_full_file_metadata_roundtrip": "PASS",
+    "individual_password_preparation": "PASS",
+    "installer_local_check": "PASS",
+    "installer_fake_fastboot_dryrun_queries_only": "PASS",
+    "dual_layout_rejected": "PASS",
+    "real_gnu_tar_capability_extraction": "PASS",
+    "custom_keyboard_resource_source_rebuild": "byte-identical"
+  },
+  "privacy": {
+    "old_git_history_included": false,
+    "personal_home_imported": false,
+    "vendor_firmware_payload_included": false,
+    "source_project_gitleaks_unresolved": 0,
+    "image_configuration_unresolved_findings": 0,
+    "upstream_source_unresolved_findings": 0
+  },
+  "vendor_items_removed": {
+    "rootfs": 198,
+    "ramdisks": {
+      "boot.img": 193,
+      "installer.img": 193
+    }
+  },
+  "source_packages": 610,
+  "limitations": [
+    "No independent fresh-install hardware acceptance for this new combination",
+    "No dual-boot support in this release",
+    "See HARDWARE.md for device limitations"
+  ]
+}

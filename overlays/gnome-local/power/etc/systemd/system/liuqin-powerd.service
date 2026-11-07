@@ -1,0 +1,34 @@
+# liuqin-powerd: one long-running state machine for the power key, lid,
+# suspend/resume and display recovery.
+#
+# FIRST-BOOT PRESET TRAP: Fedora runs `systemctl preset-all` on first boot and
+# 99-default-disable.preset contains "disable *".  This unit is kept enabled
+# only by /etc/systemd/system-preset/90-liuqin-power.preset; keep that file in
+# sync.  See overlays/gnome-local/README.md.
+[Unit]
+Description=liuqin unified power key and lid policy
+After=upower.service systemd-logind.service
+Wants=upower.service
+
+[Service]
+# The daemon reads /dev/input and talks to the user session bus, so it runs as
+# the single desktop user.  The polkit rule allows this user to request suspend.
+User=laplus
+Group=laplus
+SupplementaryGroups=input
+Type=simple
+# The device and the stock image both create the desktop user with UID 1000.
+# systemd's %U specifier expands to the manager UID (0) in a system service,
+# not the User= account, so use the single-user UID explicitly.
+Environment=LIUQIN_UID=1000
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+Environment=RUST_LOG=info
+ExecStart=/usr/local/libexec/liuqin-powerd
+Restart=always
+RestartSec=2
+# evdev readers are blocking threads; the daemon exits explicitly on SIGTERM.
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target

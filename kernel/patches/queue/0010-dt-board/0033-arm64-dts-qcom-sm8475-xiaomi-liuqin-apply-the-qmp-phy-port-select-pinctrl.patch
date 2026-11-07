@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: yp <yp@e5debian>
+Date: Fri, 25 Sep 2026 21:20:59 +0800
+Subject: [PATCH] arm64: dts: qcom: sm8475-xiaomi-liuqin: apply the QMP PHY
+ port select pinctrl
+
+The vendor applies usb3phy_portselect_default (gpio91, function usb_phy,
+bias-pull-down, drive 2) to the QMP USB3+DP PHY.  The pin's default
+function is usb_phy, and the mainline QMP driver does the port select in
+software from the typec orientation, so the state is belt and braces --
+but it matches the vendor and keeps the pin out of the GPIO mode the
+old orientation-gpios pinctrl forced it into (the upstream SM8450/SM8475
+boards leave orientation-gpios as documentation and set no pinctrl).
+
+diff --git a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+index 8546a5724..b4367040b 100644
+--- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
++++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+@@ -243,8 +243,6 @@
+ 		#size-cells = <0>;
+ 
+ 		orientation-gpios = <&tlmm 91 GPIO_ACTIVE_HIGH>;
+-		pinctrl-0 = <&usb3_orient_default>;
+-		pinctrl-names = "default";
+ 
+ 		connector@0 {
+ 			compatible = "usb-c-connector";
+@@ -1419,12 +1417,19 @@
+ 		bias-disable;
+ 	};
+ 
+-	/* Type-C CC orientation line into the QMP lane-swap decision. */
+-	usb3_orient_default: usb3-orient-state {
++	/*
++	 * The QMP USB3/DP PHY port select line, the vendor's
++	 * usb3phy_portselect_default state (function usb_phy, pull-down,
++	 * drive 2). The QMP driver does the port select in software
++	 * (SW_PORTSELECT_MUX) from the typec orientation, but the vendor
++	 * applies this state to the PHY and pin 91's default function is
++	 * usb_phy, so match it.
++	 */
++	usb3_phy_portselect_default: usb3-phy-portselect-default {
+ 		pins = "gpio91";
+-		function = "gpio";
+-		bias-disable;
+-		input-enable;
++		function = "usb_phy";
++		bias-pull-down;
++		drive-strength = <2>;
+ 	};
+ 
+ 	/*
+@@ -1761,6 +1766,8 @@
+ 
+ &usb_1_qmpphy {
+ 	compatible = "qcom,sm8475-qmp-usb3-dp-phy", "qcom,sm8450-qmp-usb3-dp-phy";
++	pinctrl-names = "default";
++	pinctrl-0 = <&usb3_phy_portselect_default>;
+ 	status = "okay";
+ 
+ 	vdda-phy-supply = <&pm8350c_l10>;

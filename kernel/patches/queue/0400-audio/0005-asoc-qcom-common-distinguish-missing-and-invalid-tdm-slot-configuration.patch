@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Prasad Kumpatla <prasad.kumpatla@oss.qualcomm.com>
+Date: Tue, 18 Aug 2026 14:16:54 +0530
+Subject: [PATCH] ASoC: qcom: common: Distinguish missing and invalid TDM slot
+ configuration
+
+Backport of upstream 0a9e00d5ebdfcf460902f463e765f737d3fe935e.
+
+diff --git a/sound/soc/qcom/common.c b/sound/soc/qcom/common.c
+index dbc62e547..f8426bc70 100644
+--- a/sound/soc/qcom/common.c
++++ b/sound/soc/qcom/common.c
+@@ -103,14 +103,14 @@ static int qcom_snd_parse_dai_tdm_slots(struct snd_soc_pcm_runtime *rtd,
+ 	int ret;
+ 
+ 	if (!link_np)
+-		return -EINVAL;
++		return -ENOENT;
+ 
+ 	struct device_node *cpu_np __free(device_node) =
+ 		of_get_child_by_name(link_np, "cpu");
+ 	struct device_node *codec_np __free(device_node) =
+ 		of_get_child_by_name(link_np, "codec");
+ 	if (!cpu_np || !codec_np)
+-		return -EINVAL;
++		return -ENOENT;
+ 
+ 	ret = qcom_snd_parse_tdm_slot(cpu_np, cpu_cfg);
+ 	if (ret)
+@@ -172,7 +172,7 @@ int qcom_snd_apply_dai_tdm_slots(struct snd_soc_pcm_runtime *rtd)
+ 
+ 	ret = qcom_snd_get_dai_tdm_slots(rtd, &cpu_cfg, &codec_cfg);
+ 	if (ret)
+-		return ret == -EINVAL ? 0 : ret;
++		return ret == -ENOENT ? 0 : ret;
+ 
+ 	return qcom_snd_apply_dai_tdm_slots_cfg(rtd, &cpu_cfg, &codec_cfg);
+ }

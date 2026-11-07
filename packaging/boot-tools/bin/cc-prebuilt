@@ -1,0 +1,57 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# /usr/libexec/liuqin/boot-assets/bin/cc-prebuilt — compiler shim used as
+# --slot-gcc by the copied build-initramfs.sh on the device.
+#
+# The project script compiles three small static stage-1 helpers from the
+# upstream C sources at image-build time. A device has no cross compiler, so
+# liuqin-boot-tools ships those helpers prebuilt (static AArch64 ELF, built
+# from the packaged upstream sources) and this shim installs them when the
+# script invokes it. The script still performs its own readelf checks
+# (AArch64 + static), so a wrong/missing helper fails closed there.
+set -eu
+
+if [ $# -eq 0 ]; then
+	printf 'cc-prebuilt: liuqin-boot-tools static helper shim\n' >&2
+	exit 2
+fi
+case ${1:-} in
+--version|-v|--help)
+	printf 'cc-prebuilt (liuqin-boot-tools) 1\n'
+	exit 0
+	;;
+esac
+
+assets=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+helper_dir=$assets/helpers
+
+src=
+dest=
+expect_dest=0
+for arg in "$@"; do
+	if [ "$expect_dest" -eq 1 ]; then
+		dest=$arg
+		expect_dest=0
+		continue
+	fi
+	case $arg in
+	-o) expect_dest=1 ;;
+	*.c) src=$arg ;;
+	esac
+done
+[ -n "$src" ] || {
+	printf 'cc-prebuilt: no C source in invocation: %s\n' "$*" >&2
+	exit 2
+}
+[ -n "$dest" ] || {
+	printf 'cc-prebuilt: no -o output in invocation: %s\n' "$*" >&2
+	exit 2
+}
+name=$(basename "$src" .c)
+[ -f "$helper_dir/$name" ] || {
+	printf 'cc-prebuilt: no prebuilt helper for %s (looked in %s)\n' "$name" "$helper_dir" >&2
+	exit 1
+}
+cp -f "$helper_dir/$name" "$dest"
+chmod 0755 "$dest"

@@ -1,0 +1,68 @@
+# /etc/liuqin/bootimg.conf.example — opt-in kernel-install boot.img staging
+#
+# Copy to /etc/liuqin/bootimg.conf (root:root 0600) on the device to let
+# /usr/lib/kernel/install.d/99-liuqin-android-boot.install generate and stage
+# /boot/liuqin/boot-<kver>.img on kernel add/update. Absent file = hook does
+# nothing (image-build safe default).
+#
+# This file is sourced by the hook (POSIX shell). Keep it simple: one KEY=VALUE
+# per line, no commands.
+#
+# The hook NEVER writes the boot partition and NEVER calls qbootctl/fastboot.
+# Applying a staged image is an explicit operator action:
+#   liuqin-apply-boot --image /boot/liuqin/boot-<kver>.img   # dry-run
+#
+# --- P0: on-device boot rebuild tool stack ---------------------------------
+# The kernel-install hook MUST rebuild root contract + initramfs + boot.img for
+# the new kernel (never reuse the stale ramdisk). Provide the boot-assets root
+# (Phase 3 package liuqin-boot-tools): bin/build-initramfs.sh,
+# bin/build-bootimg.sh, bin/busybox, firmware-pool/, wlan-hsp2-tuple/,
+# audio/Xiaomi-Pad-6-Pro-tplg.bin, and the rootfs hash manifest.
+LIUQIN_BOOT_ASSETS_DIR=/usr/libexec/liuqin/boot-assets
+LIUQIN_BOOTIMG_REFRESH=/usr/libexec/liuqin/liuqin-bootimg-refresh
+LIUQIN_ROOTFS_MANIFEST=/usr/share/liuqin/rootfs.files.sha256
+LIUQIN_FIRMWARE_POOL=/usr/libexec/liuqin/boot-assets/firmware-pool
+LIUQIN_WLAN_HSP2_TUPLE=/usr/libexec/liuqin/boot-assets/wlan-hsp2-tuple
+LIUQIN_AUDIO_TOPOLOGY=/usr/libexec/liuqin/boot-assets/audio/Xiaomi-Pad-6-Pro-tplg.bin
+
+# --- dev-only boot.img builder (structure validation, NOT release) ----------
+# Path to the host-side boot.img builder for dev/offline experiments; the P0
+# refresh tool above is what the release hook uses. Do not enable both.
+#   LIUQIN_BUILD_BOOTIMG_SCRIPT="/path/to/Fedora/scripts/build-bootimg.sh"
+LIUQIN_BUILD_BOOTIMG_SCRIPT=
+
+# --- release gate ----------------------------------------------------------
+# DEV ONLY. Bypasses the "installed Image/DTB/config match the recorded build"
+# check. Never set on a release device.
+# LIUQIN_BOOTIMG_ALLOW_UNVERIFIED=1
+
+# --- stock ROM analysis tree (canonical DTB path) --------------------------
+# Must contain dtbo/entry.00..43 (44 files) and vendor_boot/dtbs/dtb-00..13
+# (14 files), extracted from the user's own Xiaomi Pad 6 Pro stock ROM
+# (OS2.0.6.0.VMYCNXM). Never redistributed with the repo.
+LIUQIN_STOCK_ROM_DIR=/usr/share/liuqin/stock
+
+# auto | stock-rom | upstream-artifact
+# Production MUST use stock-rom; upstream-artifact is a dev-only fallback and
+# is rejected when --strict-kernel is combined with a non-matching kernel.
+# Production must be stock-rom (canonical: raw board DTB + /chosen overlay +
+# ABL overlay sink built from the 44 DTBO + 14 vendor_boot base DTB inputs).
+LIUQIN_BOOTIMG_DTB_SOURCE=stock-rom
+
+# --- inputs ----------------------------------------------------------------
+# NOTE: there is no LIUQIN_RAMDISK knob anymore. The hook always rebuilds the
+# initramfs from the assets above for the new kernel (task-15 P0-1); a stale
+# prebuilt ramdisk must never be reused.
+
+# AOSP mkbootimg checkout shipped in the kernel RPM (python scripts).
+LIUQIN_MKBOOTIMG_DIR=/usr/share/liuqin/mkbootimg
+
+# DT /chosen bootargs source shipped in the kernel RPM.
+LIUQIN_CMDLINE_FILE=/usr/share/liuqin/tools/native-bootargs.txt
+
+# Extra builder arguments (space separated; keep empty unless needed).
+LIUQIN_BOOTIMG_EXTRA_ARGS=
+
+# --- staging ---------------------------------------------------------------
+LIUQIN_BOOT_STAGING_DIR=/boot/liuqin
+LIUQIN_BOOT_LOG_DIR=/var/log/liuqin-bootimg

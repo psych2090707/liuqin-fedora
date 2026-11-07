@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Date: Sat, 19 Sep 2026 13:11:15 +0800
+Subject: [PATCH] arm64: dts: qcom: sm8475-xiaomi-liuqin: route the onboard mic
+ into the TX macro
+
+The capture DAI link enumerated and every control existed, but recording
+never delivered a frame.  Two things were missing or wrong:
+
+ - No machine-level audio-routing, so DAPM never powered the WCD938x
+   ADC1/MIC BIAS1 chain for the TX macro's capture stream.  Add the
+   "AMIC1" <- "MIC BIAS1" supply route and connect ADC1_OUTPUT to
+   "TX SWR_INPUT0": mainline wcd938x pins ADC1 to its TX slave
+   port1/channel0 and qcom,tx-port-mapping <1 1 2 3> lands that on
+   SoundWire master port 1 channel 0, which the TX macro exposes as
+   SWR_INPUT0 -- the same wiring sm8450-hdk uses.  The vendor's SWR_MIC4
+   only works with its "ADC1 ChMap" runtime override that mainline does
+   not have.
+
+ - The userspace side must use decimator 0 (SMIC mux 0 / DEC0), not the
+   vendor's DEC2: audioreach programs the codec-DMA active_channels_mask
+   as (1 << num_channels) - 1 with the backend fixed at 2 channels, so
+   the ADSP only ever reads codec-DMA channels 0 and 1.  That is a UCM
+   change in the product tree; it is what made the EIO go away.
+
+Validated on hardware (RAM boot, no disk write): with DEC0 the capture
+PCM records a live analog noise floor and speech; the identical setup on
+DEC2 reproduces the read EIO.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+
+diff --git a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+index 5c08b8053..c94b24703 100644
+--- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
++++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+@@ -906,6 +906,19 @@
+ 	compatible = "qcom,sm8450-sndcard";
+ 	model = "Xiaomi-Pad-6-Pro";
+ 
++	/*
++	 * Onboard-mic capture routing.  Mainline wcd938x pins ADC1 to its TX
++	 * slave port1/channel0 (wcd938x_sdw_tx_ch_info) and qcom,tx-port-mapping
++	 * <1 1 2 3> lands that on SoundWire master port 1 channel 0, which the
++	 * TX macro exposes as "TX SWR_INPUT0" (SMIC mux value SWR_MIC0) -- the
++	 * same wiring as sm8450-hdk.  The vendor's SWR_MIC4 only works with its
++	 * "ADC1 ChMap" override, which mainline does not have.  MIC BIAS1 feeds
++	 * AMIC1 (vendor amic1 path).  See docs/features/audio-mic.zh-CN.md.
++	 */
++	audio-routing =
++		"AMIC1", "MIC BIAS1",
++		"TX SWR_INPUT0", "ADC1_OUTPUT";
++
+ 	pinctrl-names = "default", "sleep";
+ 	pinctrl-0 = <&tert_tdm_clk_active>, <&tert_tdm_ws_active>,
+ 		    <&tert_tdm_din_active>, <&tert_tdm_dout_active>;

@@ -1,0 +1,276 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Fedora GNOME adaptation of pinned liuqin v0.6.0 helper (TN0083).
+# Reuse upstream shield/state handling; blank only, long hold remains inert.
+# TN0097: add idempotent ensure-off/ensure-on for the lid policy. Those actions
+# only change Mutter PowerSaveMode; they never lock or unlock the session.
+set -eu
+
+action=${1:-}
+loginctl=${LIUQIN_LOGINCTL:-/usr/bin/loginctl}
+gdbus=${LIUQIN_GDBUS:-/usr/bin/gdbus}
+setpriv=${LIUQIN_SETPRIV:-/usr/bin/setpriv}
+getent=${LIUQIN_GETENT:-/usr/bin/getent}
+id_cmd=${LIUQIN_ID:-/usr/bin/id}
+chown_cmd=${LIUQIN_CHOWN:-/usr/bin/chown}
+env_cmd=${LIUQIN_ENV:-/usr/bin/env}
+flock_cmd=${LIUQIN_FLOCK:-/usr/bin/flock}
+runtime_base=${LIUQIN_RUNTIME_BASE:-/run/user}
+state_dir=${LIUQIN_STATE_DIR:-}
+
+case $action in short|long|ensure-off|ensure-on) ;; *) exit 64 ;; esac
+
+session=$("$loginctl" show-seat seat0 --property=ActiveSession --value 2>/dev/null || :)
+[ -n "$session" ] && [ "$session" != n/a ] || {
+	echo "liuqin-power-key-action: no active seat0 session; $action ignored" >&2
+	exit 3
+}
+active=$("$loginctl" show-session "$session" --property=Active --value 2>/dev/null || :)
+class=$("$loginctl" show-session "$session" --property=Class --value 2>/dev/null || :)
+uid=$("$loginctl" show-session "$session" --property=User --value 2>/dev/null || :)
+name=$("$loginctl" show-session "$session" --property=Name --value 2>/dev/null || :)
+[ "$active" = yes ] && [ "$class" = user ] || {
+	echo "liuqin-power-key-action: seat0 session is not an active user; $action ignored" >&2
+	exit 3
+}
+case $uid in ''|*[!0-9]*) exit 3 ;; esac
+[ "$uid" -ge 1000 ] && [ -n "$name" ] || exit 3
+
+passwd_entry=$("$getent" passwd "$uid" 2>/dev/null || :)
+[ -n "$passwd_entry" ] || exit 3
+gid=$(printf '%s\n' "$passwd_entry" | cut -d: -f4)
+session_home=$(printf '%s\n' "$passwd_entry" | cut -d: -f6)
+case $gid in ''|*[!0-9]*) exit 3 ;; esac
+runtime=$runtime_base/$uid
+# The service may run as the session user (TN0097) or as root (power-key daemon).
+# Only switch credentials when they differ; a non-root process cannot clear
+# supplementary groups.
+current_uid=$("$id_cmd" -u)
+run_as_session() {
+	if [ "$current_uid" = "$uid" ]; then
+		"$@"
+	else
+		"$setpriv" --reuid="$uid" --regid="$gid" --clear-groups -- "$@"
+	fi
+}
+# The service deliberately has no DAC bypass capability. Check the 0700
+# runtime directory as its owner, just like the D-Bus call below.
+run_as_session /usr/bin/test -S "$runtime/bus" || {
+	echo "liuqin-power-key-action: active session has no D-Bus; $action ignored" >&2
+	exit 3
+}
+
+[ -n "$state_dir" ] || state_dir=$runtime/liuqin-power-keyd
+
+session_command() {
+	"$env_cmd" -i \
+		HOME="$session_home" USER="$name" LOGNAME="$name" \
+		XDG_RUNTIME_DIR="$runtime" \
+		DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+		PATH=/usr/bin:/bin \
+		"$@"
+}
+
+session_call() {
+	if [ "$current_uid" = "$uid" ]; then
+		session_command "$gdbus" call --session --timeout 5 "$@"
+	else
+		session_command "$setpriv" --reuid="$uid" --regid="$gid" \
+			--clear-groups -- "$gdbus" call --session --timeout 5 "$@"
+	fi
+}
+
+monotonic_ms() {
+	if [ -n "${LIUQIN_MONOTONIC_MS:-}" ]; then
+		"$LIUQIN_MONOTONIC_MS"
+	else
+		/usr/bin/python3 -c 'import time; print(time.monotonic_ns() // 1000000)'
+	fi
+}
+
+has_owner() {
+	reply=$(session_call --dest org.freedesktop.DBus \
+		--object-path /org/freedesktop/DBus \
+		--method org.freedesktop.DBus.NameHasOwner "$1" 2>/dev/null || :)
+	case $reply in *true*) return 0 ;; *) return 1 ;; esac
+}
+
+display_state_file() {
+	printf '%s/display-state\n' "$state_dir"
+}
+
+write_display_state() {
+	state_file=$(display_state_file)
+	state_tmp=$state_file.$$
+	(umask 077; printf '%s %s\n' "$1" "$2" >"$state_tmp")
+	maybe_chown "$state_tmp" || exit 3
+	mv -f -- "$state_tmp" "$state_file"
+}
+
+# Files may be created by the root power-key daemon or by the user-run lid
+# service; always leave them usable by the session user.
+maybe_chown() {
+	[ "$current_uid" = 0 ] || return 0
+	"$chown_cmd" "$uid:$gid" -- "$1"
+}
+
+# The lid service treats this marker as "the user deliberately used the power
+# key since the last lid change". It cancels closed-lid protection and
+# re-suspend until the next lid event or sleep cycle.
+mark_user_action() {
+	marker=$state_dir/power-key-action
+	marker_tmp=$marker.$$
+	(umask 077; monotonic_ms >"$marker_tmp")
+	maybe_chown "$marker_tmp" || exit 3
+	mv -f -- "$marker_tmp" "$marker"
+}
+
+set_power_save_mode() {
+	session_call \
+		--dest org.gnome.Mutter.DisplayConfig \
+		--object-path /org/gnome/Mutter/DisplayConfig \
+		--method org.freedesktop.DBus.Properties.Set \
+		org.gnome.Mutter.DisplayConfig PowerSaveMode "<$1>" >/dev/null
+}
+
+# Whole-second activation age of the GNOME shield. Empty when unavailable.
+shield_active_epoch() {
+	active_reply=$(session_call \
+		--dest org.gnome.ScreenSaver \
+		--object-path /org/gnome/ScreenSaver \
+		--method org.gnome.ScreenSaver.GetActive 2>/dev/null || :)
+	case $active_reply in *true*) ;; *) return 0 ;; esac
+	age_reply=$(session_call --dest org.gnome.ScreenSaver \
+		--object-path /org/gnome/ScreenSaver \
+		--method org.gnome.ScreenSaver.GetActiveTime 2>/dev/null || :)
+	age=$(printf '%s\n' "$age_reply" | sed -n 's/^(uint32 \([0-9][0-9]*\),)$/\1/p')
+	case $age in ''|*[!0-9]*) return 0 ;; esac
+	now_ms=$(monotonic_ms)
+	printf '%s\n' $((now_ms - age * 1000))
+}
+
+read_display_state() {
+	state_file=$(display_state_file)
+	state=
+	state_epoch=
+	if [ -f "$state_file" ]; then
+		read -r state state_epoch <"$state_file" || :
+	fi
+	case $state in off|on-locked|'') ;; *) state= ;; esac
+}
+
+if [ -L "$state_dir" ]; then
+	echo "liuqin-power-key-action: refusing symlinked state directory" >&2
+	exit 3
+fi
+if [ ! -d "$state_dir" ]; then
+	mkdir -m 0700 -p -- "$state_dir" || exit 3
+	if [ "$current_uid" = 0 ]; then
+		"$chown_cmd" "$uid:$gid" "$state_dir" || exit 3
+	fi
+fi
+[ -w "$state_dir" ] || exit 3
+
+# Serialise explicit and toggle actions so the display-state cache never
+# records a stale read-modify-write result.
+exec 9>>"$state_dir/action.lock" || exit 3
+maybe_chown "$state_dir/action.lock" || exit 3
+"$flock_cmd" -w 5 9 || {
+	echo "liuqin-power-key-action: action lock busy; $action ignored" >&2
+	exit 75
+}
+
+if [ "$action" = ensure-off ]; then
+	# Mutter gets an explicit mode, so a repeated call cannot toggle the panel.
+	has_owner org.gnome.Mutter.DisplayConfig || exit 3
+	set_power_save_mode 3 || exit 1
+	write_display_state off ''
+	printf 'liuqin-power-key-action: display=off (ensure)\n'
+	exit 0
+fi
+if [ "$action" = ensure-on ]; then
+	has_owner org.gnome.Mutter.DisplayConfig || exit 3
+	set_power_save_mode 0 || exit 1
+	# Keep the cache useful for the next short press. An empty epoch is safe:
+	# the toggle path treats it as stale metadata and prefers waking.
+	epoch=$(shield_active_epoch)
+	write_display_state on-locked "$epoch"
+	printf 'liuqin-power-key-action: display=on (ensure)\n'
+	exit 0
+fi
+
+# GDM 50 can leave loginctl Desktop empty. Require the actual GNOME shield
+# provider on the active user's bus instead of guessing from that field.
+has_owner org.gnome.Shell.ScreenShield || exit 3
+
+if [ "$action" = short ]; then
+	read_display_state
+	active_reply=$(session_call \
+		--dest org.gnome.ScreenSaver \
+		--object-path /org/gnome/ScreenSaver \
+		--method org.gnome.ScreenSaver.GetActive 2>/dev/null || :)
+	case $active_reply in *true*) screen_active=yes ;; *) screen_active=no ;; esac
+	# GetActiveTime resets when the shield is deactivated. Bind the cached
+	# on-locked toggle to this activation, otherwise the next idle wake after
+	# unlocking would wrongly reuse on-locked and blank the display again.
+	# GNOME reports whole seconds; allow rounding/query latency. Unavailable
+	# or stale metadata always prefers waking, never re-blanking.
+	active_epoch=
+	if [ "$screen_active" = yes ]; then
+		active_epoch=$(shield_active_epoch)
+	fi
+	if [ "$state" = on-locked ]; then
+		case $state_epoch:$active_epoch in
+			*[!0-9:]*|:*|*:) state= ;;
+			*)
+				delta=$((active_epoch - state_epoch))
+				if [ "$delta" -lt -1500 ] || [ "$delta" -gt 1500 ]; then state=; fi
+				;;
+		esac
+	fi
+	dpms_reply=$(session_call \
+		--dest org.gnome.Mutter.DisplayConfig \
+		--object-path /org/gnome/Mutter/DisplayConfig \
+		--method org.freedesktop.DBus.Properties.Get \
+		org.gnome.Mutter.DisplayConfig PowerSaveMode 2>/dev/null || :)
+	case $dpms_reply in *\<3\>*) dpms_off=yes ;; *) dpms_off=no ;; esac
+
+	# Snapshot before locking. If GNOME's idle path already activated the
+	# shield, this press is a wake request, not a request to blank it again.
+	# The explicit state survives Mutter independently seeing KEY_POWER: after
+	# our own DPMS-off, Mutter may have changed mode back to 0 before release,
+	# but `off` still makes this release a wake.
+	if [ "$state" = off ] && [ "$screen_active" = yes ]; then
+		direction=on
+	elif [ "$state" = on-locked ] && [ "$screen_active" = yes ]; then
+		direction=off
+	elif [ "$screen_active" = yes ] || [ "$dpms_off" = yes ]; then
+		direction=on
+	else
+		direction=off
+	fi
+
+	# Mark the deliberate key press before touching the display. The lid
+	# service must learn about it even if the D-Bus action fails below.
+	mark_user_action
+
+	if [ "$direction" = off ]; then
+		"$loginctl" lock-session "$session"
+		session_call \
+			--dest org.gnome.ScreenSaver \
+			--object-path /org/gnome/ScreenSaver \
+			--method org.gnome.ScreenSaver.SetActive true >/dev/null || exit 1
+		set_power_save_mode 3 || exit 1
+		new_state=off
+	else
+		# Mutter has already seen the wake key. Activating the shield again
+		# restarts GNOME's fade-to-black, even when DPMS reads back as on.
+		# Preserve the existing lock; lighting the display must not re-lock it.
+		set_power_save_mode 0 || exit 1
+		new_state=on-locked
+	fi
+	write_display_state "$new_state" "$active_epoch"
+	printf 'liuqin-power-key-action: display=%s\n' "$direction"
+else
+	printf '%s\n' 'liuqin-power-key-action: long press ignored'
+fi

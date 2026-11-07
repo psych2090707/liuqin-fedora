@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Tablet Camera
+Name[zh_CN]=平板相机
+Comment=Take photos and videos with the rear camera
+Comment[zh_CN]=使用后置相机拍照和录像
+Exec=/usr/libexec/liuqin/liuqin-camera
+Icon=org.gnome.Snapshot
+Terminal=false
+StartupNotify=true
+Categories=AudioVideo;Video;

@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically preserve trusted time without waking liuqin
+
+[Timer]
+OnBootSec=45s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+WakeSystem=false
+Persistent=false
+
+[Install]
+WantedBy=timers.target

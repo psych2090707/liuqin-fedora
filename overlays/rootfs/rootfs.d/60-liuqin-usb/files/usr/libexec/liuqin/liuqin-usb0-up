@@ -1,0 +1,39 @@
+#!/bin/bash
+# Product USB NCM link: pin usb0 to 192.168.7.2/24, idempotently.
+#
+# The initramfs creates the configfs NCM gadget and sets the address before
+# switch_root.  NetworkManager is told to leave usb0 alone; this script is the
+# single writer of the address.  AFK maintenance units must not duplicate it.
+set -u
+
+IFACE="${LIUQIN_USB0_IFACE:-usb0}"
+ADDR="${LIUQIN_USB0_ADDR:-192.168.7.2/24}"
+log() { printf 'liuqin-usb0-up: %s\n' "$*"; }
+
+# The gadget may appear a moment after the service is queued.
+for _ in $(seq 1 50); do
+    [ -e "/sys/class/net/$IFACE" ] && break
+    sleep 0.2
+done
+
+if [ ! -e "/sys/class/net/$IFACE" ]; then
+    # Unplugged cable / no gadget: a silent no-op is correct.
+    exit 0
+fi
+
+if ! ip link set dev "$IFACE" up; then
+    log "could not bring $IFACE up"
+    exit 1
+fi
+
+if ip -4 -o addr show dev "$IFACE" 2>/dev/null | awk '{print $4}' | grep -qx -- "$ADDR"; then
+    exit 0
+fi
+
+if ip addr replace "$ADDR" dev "$IFACE"; then
+    log "pinned $ADDR on $IFACE"
+else
+    log "failed to set $ADDR on $IFACE"
+    exit 1
+fi
+exit 0

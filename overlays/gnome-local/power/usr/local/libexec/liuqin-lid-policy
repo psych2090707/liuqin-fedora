@@ -1,0 +1,1367 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: MIT
+# TN0097: UPower lid watcher with closed-lid resume protection and optional
+# conditional re-suspend.
+#
+# LID_ACTION=blank   -> display off on close, on on open; after a resume with
+#                       the lid still closed, re-apply display off whenever
+#                       GNOME turns the panel back on.
+# LID_ACTION=suspend -> system suspend on close, display on on open; a resume
+#                       with the lid still closed also restores display-off and
+#                       can re-suspend under LID_RESUSPEND.
+# LID_ACTION=nothing -> do nothing.
+#
+# LID_RESUSPEND=1 additionally re-suspends once after a resume when all of the
+# conditions in TN0096 §8.3 hold. It applies to blank and suspend, not nothing.
+# An abnormal short wake with the lid open gets one retry after 10 s; a long
+# sleep returns to the normal GNOME idle policy instead. The default is 0; the
+# display protection does not need it.
+
+import json
+import os
+import struct
+import sys
+import threading
+import time
+
+import gi
+
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio, GLib  # noqa: E402
+
+CONFIG = "/etc/liuqin/power-policy.conf"
+POLICY_HELPER = "/usr/local/libexec/liuqin-power-key-policy"
+STATE_DIR_NAME = "liuqin-power-keyd"
+
+
+def state_dir(runtime):
+    return os.path.join(runtime, STATE_DIR_NAME)
+
+
+def marker_path(runtime):
+    return os.path.join(state_dir(runtime), "power-key-action")
+
+
+def state_path(runtime):
+    return os.path.join(state_dir(runtime), STATE_FILE_NAME)
+
+
+def rtc_alarm_is_set():
+    """True when the wakealarm looks like it just fired.
+
+    A future alarm that is still armed must not make a power-key wake look
+    scheduled.  Linux exposes an absolute epoch value in this file; if the
+    value cannot be parsed, keep the conservative "unknown" result.
+    """
+    try:
+        with open("/sys/class/rtc/rtc0/wakealarm", encoding="utf-8") as handle:
+            text = handle.read().strip()
+    except OSError:
+        return False
+    if not text:
+        return False
+    try:
+        alarm = int(text)
+    except ValueError:
+        return True
+    return alarm <= int(time.time()) + 5
+
+
+LOG_PREFIX = "liuqin-lid-policy"
+
+# TN0096 §8.3 initial policy values; not yet tuned on the device.
+FIX_INTERVAL_MS = 1000
+RESUME_CONFIRM_MS = 3000
+RESUSPEND_DELAY_MS = 20000
+OPEN_LID_RESUSPEND_DELAY_MS = 10000
+MAX_FIX_FAILURES = 3
+QUICK_RESUME_MS = 30000
+BOUNCE_MS = 10000
+RATE_WINDOW_MS = 1800000
+RATE_LIMIT = 3
+LID_DEBOUNCE_MS = 300
+SUSPEND_CONFIRM_MS = 8000
+STARTUP_GRACE_MS = 5000
+RESUME_GRACE_MS = 2000
+FAILED_SUSPEND_DISPLAY_MS = 5000
+STATE_FILE_NAME = "power-state.json"
+
+# input_event on 64-bit Linux: struct timeval (16) + type, code, value.
+INPUT_EVENT = struct.Struct("@llHHi")
+EV_SYN, EV_KEY, EV_REL, EV_ABS = 0, 1, 2, 3
+
+
+def log(message):
+    print(f"{LOG_PREFIX}: {message}", flush=True)
+
+
+def now_ms():
+    # CLOCK_MONOTONIC stops during suspend: minutes asleep would look like a
+    # quick resume and eventually trip the retry limit (TN0098). Use one
+    # suspend-aware clock for policy deadlines, input ages and retry history.
+    return time.clock_gettime_ns(time.CLOCK_BOOTTIME) // 1000000
+
+
+def config_value(key, default):
+    try:
+        with open(CONFIG, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                name, value = line.split("=", 1)
+                if name.strip() == key:
+                    return value.strip()
+    except OSError as error:
+        log(f"cannot read {CONFIG}: {error}")
+    return default
+
+
+def run(argv):
+    import subprocess
+
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=8, check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        log(f"command failed ({argv[0]}): {error}")
+        return None
+
+
+def active_session():
+    result = run(["/usr/bin/loginctl", "show-seat", "seat0", "--property=ActiveSession", "--value"])
+    session = (result.stdout or "").strip() if result else ""
+    if not session or session == "n/a":
+        return None
+    values = {}
+    for prop in ("User", "Name", "Class", "Active"):
+        result = run(["/usr/bin/loginctl", "show-session", session, "--property=" + prop, "--value"])
+        values[prop] = (result.stdout or "").strip() if result else ""
+    if values["Class"] != "user" or values["Active"] != "yes":
+        return None
+    uid = values["User"]
+    name = values["Name"]
+    if not uid.isdigit() or int(uid) < 1000 or not name:
+        return None
+    result = run(["/usr/bin/getent", "passwd", uid])
+    entry = (result.stdout or "").strip() if result else ""
+    fields = entry.split(":")
+    if len(fields) < 6:
+        return None
+    gid, home = fields[3], fields[5]
+    runtime = f"/run/user/{uid}"
+    if not gid.isdigit() or not os.path.isdir(home) or not os.path.isdir(runtime):
+        return None
+    return {"uid": uid, "gid": gid, "name": name, "home": home, "runtime": runtime}
+
+
+class Policy:
+    """Pure closed-lid state machine; timers are deadlines, not GLib sources."""
+
+    def __init__(self, now, action="blank", resuspend=False):
+        self.action = action if action in ("blank", "suspend", "nothing") else "blank"
+        self.resuspend_enabled = bool(resuspend)
+        self.lid_closed = False
+        self.on_battery = False
+        self.sleeping = False
+        self.protected = False
+        self.user_override = False
+        self.input_seen = False
+        self.resume_cycle = False
+        self.fix_at = None
+        self.last_fix = None
+        self.fix_failures = 0
+        self.fix_disabled = False
+        self.resuspend_at = None
+        self.allow_open_lid_resuspend = False
+        self.sleep_started_ms = None
+        self.last_sleep_ms = 0
+        self.last_resume_ms = 0
+        self.wake_cause = "unknown"
+        self.retry_count = 0
+        self.attempts = []
+        self.quick_resumes = []
+        self.stopped = False
+
+    # -- helpers ---------------------------------------------------------
+    def _cancel_timers(self):
+        self.fix_at = None
+        self.resuspend_at = None
+
+    def _can_protect(self):
+        return self.lid_closed and not self.sleeping and not self.user_override
+
+    def can_resuspend(self):
+        return (
+            self.resuspend_enabled
+            and self.resume_cycle
+            and self.on_battery
+            and (self.lid_closed or self.allow_open_lid_resuspend)
+            and self.action in ("blank", "suspend")
+            and not self.sleeping
+            and not self.user_override
+            and not self.input_seen
+            and not self.stopped
+        )
+
+    def _note_resume(self, now):
+        if not self.attempts:
+            return
+        if now - self.attempts[-1] <= QUICK_RESUME_MS:
+            self.quick_resumes.append(now)
+        else:
+            self.quick_resumes = []
+        self.quick_resumes = [t for t in self.quick_resumes if now - t <= RATE_WINDOW_MS]
+        if len(self.quick_resumes) >= RATE_LIMIT:
+            self.stopped = True
+            log("automatic re-suspend stopped after repeated quick resumes")
+
+    # -- events ----------------------------------------------------------
+    def initial(self, lid_closed, on_battery, now):
+        self.lid_closed = bool(lid_closed)
+        self.on_battery = bool(on_battery)
+        if self.lid_closed and self.action in ("blank", "suspend") and not self.user_override:
+            self.protected = True
+            self.last_fix = now
+            return ["ensure-off"]
+        return []
+
+    def lid_changed(self, closed, now):
+        if bool(closed) == self.lid_closed:
+            return []
+        self.lid_closed = bool(closed)
+        self.user_override = False
+        self.input_seen = False
+        self.resume_cycle = False
+        self.allow_open_lid_resuspend = False
+        self.retry_count = 0
+        self.stopped = False
+        self.fix_disabled = False
+        self.fix_failures = 0
+        self._cancel_timers()
+        if closed:
+            if self.action == "blank":
+                self.protected = True
+                return ["ensure-off"]
+            self.protected = False
+            if self.action == "suspend":
+                return ["suspend"]
+            return []
+        self.protected = False
+        if self.action in ("blank", "suspend"):
+            return ["ensure-on"]
+        return []
+
+    def prepare_sleep(self, entering, now):
+        if entering:
+            self.sleep_started_ms = now
+            self.last_resume_ms = 0
+            self.wake_cause = "unknown"
+            self.allow_open_lid_resuspend = False
+            self.sleeping = True
+            self.protected = False
+            self.resume_cycle = False
+            self._cancel_timers()
+            return []
+        # Resume.
+        slept_ms = 0
+        if self.sleep_started_ms is not None:
+            slept_ms = max(0, now - self.sleep_started_ms)
+        self.sleep_started_ms = None
+        self.last_sleep_ms = slept_ms
+        if slept_ms > QUICK_RESUME_MS:
+            self.retry_count = 0
+        self.last_resume_ms = now
+        self.sleeping = False
+        self.user_override = False
+        self.input_seen = False
+        self.fix_disabled = False
+        self.fix_failures = 0
+        self._cancel_timers()
+        self._note_resume(now)
+        actions = []
+        if self.lid_closed and self.action in ("blank", "suspend"):
+            self.protected = True
+            actions.append("ensure-off")
+            self.last_fix = now
+            # GNOME's resume actions may enable the panel a few seconds later;
+            # one confirmation pass plus the display-change subscription covers
+            # both orderings.
+            self.fix_at = now + RESUME_CONFIRM_MS
+        else:
+            self.protected = False
+        self.resume_cycle = True
+        if self.can_resuspend():
+            self.resuspend_at = now + RESUSPEND_DELAY_MS
+        return actions
+
+    def note_abnormal_short_wake(self, now):
+        """A spurious wake with the lid open gets one bounded retry.
+
+        A long sleep returns to the normal GNOME idle policy instead: the user
+        may simply have left the tablet open, and we must not turn a single
+        wake into a permanent "stay awake" state.
+        """
+        slept_ms = self.last_sleep_ms
+        if slept_ms > BOUNCE_MS:
+            return False
+        if not (
+            self.resuspend_enabled
+            and self.on_battery
+            and self.action in ("blank", "suspend")
+            and not self.lid_closed
+            and not self.user_override
+            and not self.input_seen
+            and not self.stopped
+        ):
+            return False
+        self.resume_cycle = True
+        self.allow_open_lid_resuspend = True
+        self.resuspend_at = now + OPEN_LID_RESUSPEND_DELAY_MS
+        return True
+
+    def display_changed(self, mode, now):
+        if int(mode) == 3:
+            return []
+        if not self._can_protect() or not self.protected or self.fix_disabled:
+            return []
+        at = now
+        if self.last_fix is not None:
+            at = max(at, self.last_fix + FIX_INTERVAL_MS)
+        # Do not pull an already scheduled fix earlier. In particular the
+        # resume confirmation stays at its 3 s deadline, so an immediate lid
+        # open can cancel it before it blanks the panel again.
+        if self.fix_at is None:
+            self.fix_at = at
+        return []
+
+    def user_key(self, now):
+        # A deliberate power-key press owns the display from now on.
+        self.user_override = True
+        self.protected = False
+        self.resume_cycle = False
+        self.allow_open_lid_resuspend = False
+        self.retry_count = 0
+        self.stopped = False
+        self._cancel_timers()
+        return []
+
+    def user_input(self, now):
+        self.input_seen = True
+        self.allow_open_lid_resuspend = False
+        self.retry_count = 0
+        if self.resuspend_at is not None:
+            self.resuspend_at = None
+            log("automatic re-suspend cancelled by user input")
+        return []
+
+    def power_source(self, on_battery, now):
+        self.on_battery = bool(on_battery)
+        if not self.on_battery and self.resuspend_at is not None:
+            self.resuspend_at = None
+            self.allow_open_lid_resuspend = False
+            log("automatic re-suspend cancelled by AC power")
+        return []
+
+    def set_action(self, action):
+        if action not in ("blank", "suspend", "nothing"):
+            return
+        self.action = action
+        if action != "blank":
+            self.protected = False
+            self.fix_at = None
+        if action != "blank":
+            self.resuspend_at = None
+        self.allow_open_lid_resuspend = False
+
+    def set_resuspend(self, enabled):
+        self.resuspend_enabled = bool(enabled)
+        if not self.resuspend_enabled:
+            self.resuspend_at = None
+            self.allow_open_lid_resuspend = False
+
+    def note_fix_result(self, ok, now):
+        if ok:
+            self.fix_failures = 0
+            return []
+        if not self.protected:
+            return []
+        self.fix_failures += 1
+        if self.fix_failures >= MAX_FIX_FAILURES:
+            self.fix_disabled = True
+            self.fix_at = None
+            log("display protection paused after repeated helper failures")
+            return []
+        self.fix_at = now + FIX_INTERVAL_MS
+        return []
+
+    def tick(self, now):
+        actions = []
+        if self.fix_at is not None and now >= self.fix_at:
+            self.fix_at = None
+            if self._can_protect() and self.protected and not self.fix_disabled:
+                actions.append("ensure-off")
+                self.last_fix = now
+        if self.resuspend_at is not None and now >= self.resuspend_at:
+            self.resuspend_at = None
+            if self.can_resuspend():
+                actions.append("resuspend-check")
+            else:
+                log("automatic re-suspend conditions no longer hold")
+        return actions
+
+    def next_deadline(self):
+        values = [v for v in (self.fix_at, self.resuspend_at) if v is not None]
+        return min(values) if values else None
+
+    def note_resuspend_issued(self, now):
+        self.attempts.append(now)
+        self.retry_count += 1
+        self.allow_open_lid_resuspend = False
+        self.resume_cycle = False
+        self.resuspend_at = None
+
+    def cancel_resuspend(self, reason):
+        log(f"automatic re-suspend cancelled: {reason}")
+        self.resuspend_at = None
+        self.resume_cycle = False
+        self.allow_open_lid_resuspend = False
+
+
+class LidService:
+    def __init__(self):
+        action = config_value("LID_ACTION", "blank")
+        resuspend = config_value("LID_RESUSPEND", "0") == "1"
+        self.policy = Policy(now_ms(), action, resuspend)
+        self.loop = GLib.MainLoop()
+        self.timer_id = None
+        self.system = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+        self.session_conn = None
+        self.session_key = None
+        self.mode = None
+        self.marker_path = None
+        self.last_marker_ms = 0
+        self.last_input_ms = 0
+        self.input_sources = []
+        self.upower = None
+        self.seat = None
+        self.config_monitor = None
+        self.marker_monitor = None
+        self.suspend_pending = False
+        self.lock_attempts = 0
+        self.pending_lid = None
+        self.lid_timer = None
+        self.suspend_confirm_timer = None
+        self.failed_display_timer = None
+        self.startup_timer = None
+        self.request_generation = 0
+        self.lock_generation = 0
+        self.suspend_cause = ""
+        self.pre_suspend_mode = None
+        self.last_lid_change_ms = 0
+        self.last_block_reason = None
+        self.rtc_alarm_set = False
+        self.state_path = None
+        self.last_state_json = None
+
+    # -- setup -----------------------------------------------------------
+    def connect_upower(self):
+        try:
+            self.upower = Gio.DBusProxy.new_for_bus_sync(
+                Gio.BusType.SYSTEM,
+                Gio.DBusProxyFlags.GET_INVALIDATED_PROPERTIES,
+                None,
+                "org.freedesktop.UPower",
+                "/org/freedesktop/UPower",
+                "org.freedesktop.UPower",
+                None,
+            )
+        except GLib.Error as error:
+            log(f"cannot talk to UPower: {error}")
+            return False
+        self.upower.connect("g-properties-changed", self.on_upower_changed)
+        try:
+            self.seat = Gio.DBusProxy.new_for_bus_sync(
+                Gio.BusType.SYSTEM,
+                Gio.DBusProxyFlags.GET_INVALIDATED_PROPERTIES,
+                None,
+                "org.freedesktop.login1",
+                "/org/freedesktop/login1/seat/seat0",
+                "org.freedesktop.login1.Seat",
+                None,
+            )
+        except GLib.Error as error:
+            log(f"cannot watch the logind seat: {error}")
+            self.seat = None
+        if self.seat is not None:
+            self.seat.connect("g-properties-changed", self.on_seat_changed)
+        self.system.signal_subscribe(
+            "org.freedesktop.login1",
+            "org.freedesktop.login1.Manager",
+            "PrepareForSleep",
+            "/org/freedesktop/login1",
+            None,
+            Gio.DBusSignalFlags.NONE,
+            self.on_prepare_for_sleep,
+        )
+        return True
+
+    def upower_value(self, name):
+        prop = self.upower.get_cached_property(name) if self.upower else None
+        if prop is None:
+            return None
+        try:
+            return bool(prop.get_boolean())
+        except (TypeError, AttributeError):
+            return None
+
+    def open_session(self):
+        info = active_session()
+        if info is None:
+            self.close_session()
+            return False
+        key = (info["uid"], info["runtime"])
+        if self.session_conn is not None and key == self.session_key:
+            return True
+        self.close_session()
+        try:
+            address = f"unix:path={info['runtime']}/bus"
+            self.session_conn = Gio.DBusConnection.new_for_address_sync(
+                address,
+                Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
+                | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+                None,
+                None,
+            )
+        except GLib.Error as error:
+            log(f"cannot connect to the user session bus: {error}")
+            self.session_conn = None
+            return False
+        self.session_key = key
+        self.session_conn.signal_subscribe(
+            "org.gnome.Mutter.DisplayConfig",
+            "org.freedesktop.DBus.Properties",
+            "PropertiesChanged",
+            "/org/gnome/Mutter/DisplayConfig",
+            None,
+            Gio.DBusSignalFlags.NONE,
+            self.on_display_signal,
+        )
+        self.session_conn.signal_subscribe(
+            "org.freedesktop.DBus",
+            "org.freedesktop.DBus",
+            "NameOwnerChanged",
+            "/org/freedesktop/DBus",
+            None,
+            Gio.DBusSignalFlags.NONE,
+            self.on_name_owner_changed,
+        )
+        self.session_conn.connect("closed", self.on_session_closed)
+        self.policy.fix_disabled = False
+        self.policy.fix_failures = 0
+        self.set_marker_path(info["runtime"])
+        self.mode = self.read_mode()
+        log(f"subscribed to user session {info['name']} (PowerSaveMode={self.mode})")
+        return True
+
+    def close_session(self):
+        conn = self.session_conn
+        if conn is None:
+            return
+        self.session_conn = None
+        self.session_key = None
+        self.mode = None
+        self.close_marker_monitor()
+        self.marker_path = None
+        self.state_path = None
+        self.last_state_json = None
+        try:
+            conn.close_sync(None)
+        except GLib.Error:
+            pass
+
+    def on_session_closed(self, connection, remote_peer_vanished, error):
+        if connection is not self.session_conn:
+            return
+        self.session_conn = None
+        self.session_key = None
+        self.mode = None
+        log(f"user session bus closed ({error or 'peer vanished'}); retrying")
+        GLib.timeout_add_seconds(2, self.reconnect_session)
+
+    def reconnect_session(self):
+        if active_session() is None:
+            return GLib.SOURCE_REMOVE
+        if not self.open_session():
+            return GLib.SOURCE_CONTINUE
+        self.refresh_protection()
+        return GLib.SOURCE_REMOVE
+
+    def read_mode(self):
+        if self.session_conn is None:
+            return None
+        try:
+            reply = self.session_conn.call_sync(
+                "org.gnome.Mutter.DisplayConfig",
+                "/org/gnome/Mutter/DisplayConfig",
+                "org.freedesktop.DBus.Properties",
+                "Get",
+                GLib.Variant("(ss)", ("org.gnome.Mutter.DisplayConfig", "PowerSaveMode")),
+                GLib.VariantType.new("(v)"),
+                Gio.DBusCallFlags.NONE,
+                3000,
+                None,
+            )
+            value = reply.unpack()[0]
+            if isinstance(value, GLib.Variant):
+                value = value.unpack()
+            return int(value)
+        except (GLib.Error, TypeError, AttributeError, ValueError) as error:
+            log(f"cannot read Mutter PowerSaveMode: {error}")
+            return None
+
+    # -- actions ---------------------------------------------------------
+    def handle(self, actions):
+        for action in actions:
+            if action in ("ensure-off", "ensure-on"):
+                self.run_helper(action)
+            elif action == "suspend":
+                self.request_suspend_locked()
+            elif action == "resuspend-check":
+                self.try_resuspend()
+        self.schedule()
+        self.write_state()
+
+    def run_helper(self, action):
+        try:
+            proc = Gio.Subprocess.new(
+                [POLICY_HELPER, action], Gio.SubprocessFlags.NONE
+            )
+        except GLib.Error as error:
+            log(f"cannot start helper {action}: {error}")
+            if action == "ensure-off":
+                self.handle(self.policy.note_fix_result(False, now_ms()))
+            return
+        proc.wait_check_async(None, self.on_helper_done, action)
+
+    def on_helper_done(self, proc, result, action):
+        try:
+            ok = proc.wait_check_finish(result)
+        except GLib.Error as error:
+            ok = False
+            log(f"helper {action} failed: {error}")
+        if ok:
+            log(f"helper {action} ok")
+        if action == "ensure-off":
+            self.handle(self.policy.note_fix_result(bool(ok), now_ms()))
+
+    def lock_session(self):
+        """Lock the active user session before suspending.
+
+        The custom lid service calls logind directly, so it must reproduce the
+        lock step that the desktop's normal suspend path performs.  Without it,
+        opening the lid during resume can let the GDM greeter take the active
+        session; the old GNOME Shell then loses input control and the framebuffer
+        console stays visible (2026-11-06).  The lock is best-effort: a greeter
+        or a session without a ScreenSaver simply falls through to suspend.
+        """
+        conn = self.session_conn
+        if conn is None:
+            return False
+        try:
+            conn.call_sync(
+                "org.gnome.ScreenSaver",
+                "/org/gnome/ScreenSaver",
+                "org.gnome.ScreenSaver",
+                "Lock",
+                None,
+                None,
+                Gio.DBusCallFlags.NONE,
+                3000,
+                None,
+            )
+        except GLib.Error as error:
+            log(f"session lock failed: {error}")
+            return False
+        log("session lock requested")
+        return True
+
+    def screensaver_active(self):
+        conn = self.session_conn
+        if conn is None:
+            return False
+        try:
+            reply = conn.call_sync(
+                "org.gnome.ScreenSaver",
+                "/org/gnome/ScreenSaver",
+                "org.gnome.ScreenSaver",
+                "GetActive",
+                None,
+                GLib.VariantType.new("(b)"),
+                Gio.DBusCallFlags.NONE,
+                1000,
+                None,
+            )
+        except GLib.Error as error:
+            log(f"cannot read screensaver state: {error}")
+            return False
+        return bool(reply.unpack()[0])
+
+    def request_suspend_locked(self, cause="lid"):
+        """Lock, wait briefly for the shield, then ask logind to suspend."""
+        if cause == "lid" and not self.policy.lid_closed:
+            log("lid already open; suspend cancelled")
+            return
+        self.suspend_cause = cause
+        self.lock_generation = self.request_generation
+        self.pre_suspend_mode = self.mode
+        if not self.lock_session():
+            self.request_suspend(cause, self.lock_generation)
+            return
+        self.lock_attempts = 0
+        GLib.timeout_add(200, self.wait_for_lock)
+
+    def wait_for_lock(self):
+        if self.request_generation != self.lock_generation:
+            log("lid changed while waiting for lock; suspend cancelled")
+            return GLib.SOURCE_REMOVE
+        if self.screensaver_active():
+            log("session locked; suspending")
+            self.request_suspend(self.suspend_cause, self.lock_generation)
+            return GLib.SOURCE_REMOVE
+        self.lock_attempts += 1
+        if self.lock_attempts >= 10:
+            log("session lock did not become active; suspending anyway")
+            self.request_suspend(self.suspend_cause, self.lock_generation)
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+    def request_suspend(self, cause=None, generation=None):
+        if self.suspend_pending:
+            log("suspend already pending; ignoring duplicate request")
+            return
+        if generation is None:
+            generation = self.request_generation
+        if generation != self.request_generation:
+            log("lid changed before suspend request; cancelled")
+            return
+        if cause == "lid" and not self.policy.lid_closed:
+            log("lid already open; suspend cancelled")
+            return
+        self.suspend_pending = True
+        self.start_suspend_confirm()
+        self.system.call(
+            "org.freedesktop.login1",
+            "/org/freedesktop/login1",
+            "org.freedesktop.login1.Manager",
+            "Suspend",
+            GLib.Variant("(b)", (False,)),
+            None,
+            Gio.DBusCallFlags.NONE,
+            10000,
+            None,
+            self.on_suspend_done,
+        )
+
+    def start_suspend_confirm(self):
+        self.cancel_suspend_confirm()
+        self.suspend_confirm_timer = GLib.timeout_add(
+            SUSPEND_CONFIRM_MS, self.on_suspend_confirm_timeout
+        )
+
+    def cancel_suspend_confirm(self):
+        if self.suspend_confirm_timer is not None:
+            GLib.source_remove(self.suspend_confirm_timer)
+            self.suspend_confirm_timer = None
+
+    def on_suspend_confirm_timeout(self):
+        self.suspend_confirm_timer = None
+        if self.policy.sleeping or not self.suspend_pending:
+            return GLib.SOURCE_REMOVE
+        log(f"suspend not confirmed within {SUSPEND_CONFIRM_MS}ms")
+        if self.policy.lid_closed:
+            self.handle(["ensure-off"])
+        self.write_state()
+        return GLib.SOURCE_REMOVE
+
+    def on_suspend_done(self, connection, result):
+        self.cancel_suspend_confirm()
+        self.suspend_pending = False
+        try:
+            connection.call_finish(result)
+            log("suspend request accepted")
+        except GLib.Error as error:
+            log(f"suspend request failed: {error}")
+            self.handle_failed_suspend(f"request failed: {error}")
+        self.write_state()
+
+    def schedule_retry(self, reason):
+        if self.policy.resuspend_at is not None:
+            return
+        if not (
+            self.policy.lid_closed
+            and self.policy.action in ("blank", "suspend")
+            and self.policy.resuspend_enabled
+            and not self.policy.stopped
+            and not self.policy.user_override
+            and not self.policy.input_seen
+        ):
+            return
+        self.policy.resume_cycle = True
+        self.policy.resuspend_at = now_ms() + RESUSPEND_DELAY_MS
+        self.last_block_reason = None
+        log(
+            f"suspend retry scheduled in {RESUSPEND_DELAY_MS // 1000}s "
+            f"({reason}, retry_count={self.policy.retry_count})"
+        )
+        self.schedule()
+
+    def schedule_failed_display(self):
+        if self.failed_display_timer is not None:
+            GLib.source_remove(self.failed_display_timer)
+        self.failed_display_timer = GLib.timeout_add(
+            FAILED_SUSPEND_DISPLAY_MS, self.apply_failed_display
+        )
+
+    def apply_failed_display(self):
+        self.failed_display_timer = None
+        if self.policy.lid_closed or self.policy.sleeping:
+            return GLib.SOURCE_REMOVE
+        if (
+            self.last_input_ms
+            and now_ms() - self.last_input_ms < FAILED_SUSPEND_DISPLAY_MS
+        ):
+            return GLib.SOURCE_REMOVE
+        if self.pre_suspend_mode == 3:
+            self.handle(["ensure-off"])
+            self.write_state()
+        return GLib.SOURCE_REMOVE
+
+    def handle_failed_suspend(self, reason):
+        if self.policy.sleeping:
+            return
+        log(
+            f"suspend failed: {reason}; lid={'closed' if self.policy.lid_closed else 'open'} "
+            f"mode={self.mode}"
+        )
+        if self.policy.lid_closed:
+            self.handle(["ensure-off"])
+            self.schedule_retry(reason)
+        elif self.pre_suspend_mode == 3:
+            self.schedule_failed_display()
+        self.write_state()
+
+    def try_resuspend(self):
+        if not self.policy.resuspend_enabled:
+            self.policy.cancel_resuspend("policy disabled")
+            self.write_state()
+            return
+        if not self.policy.can_resuspend():
+            self.policy.cancel_resuspend("conditions no longer hold")
+            self.write_state()
+            return
+        # Sleep inhibitors and the current display state need D-Bus round
+        # trips; keep the main loop free by doing them in a worker thread.
+        threading.Thread(target=self.check_resuspend, daemon=True).start()
+
+    def check_resuspend(self):
+        if self.read_mode() is None:
+            reason = "display state unknown"
+        elif self.logind_blocks_sleep():
+            reason = "logind block inhibitor"
+        elif self.gnome_blocks_suspend():
+            reason = "GNOME session inhibitor"
+        else:
+            reason = None
+        GLib.idle_add(self.finish_resuspend, reason)
+
+    def finish_resuspend(self, reason):
+        if reason is not None:
+            self.last_block_reason = reason
+            self.policy.cancel_resuspend(reason)
+            log(f"automatic re-suspend blocked: {reason}")
+            self.write_state()
+            self.schedule()
+            return GLib.SOURCE_REMOVE
+        if not self.policy.can_resuspend():
+            self.policy.cancel_resuspend("conditions changed while checking")
+            self.write_state()
+            self.schedule()
+            return GLib.SOURCE_REMOVE
+        self.last_block_reason = None
+        lid = "closed" if self.policy.lid_closed else "open (short-wake retry)"
+        self.policy.note_resuspend_issued(now_ms())
+        log(
+            f"requesting automatic re-suspend ({lid}, "
+            f"retry_count={self.policy.retry_count})"
+        )
+        self.request_suspend_locked("resuspend")
+        self.write_state()
+        self.schedule()
+        return GLib.SOURCE_REMOVE
+
+    def logind_blocks_sleep(self):
+        try:
+            reply = self.system.call_sync(
+                "org.freedesktop.login1",
+                "/org/freedesktop/login1",
+                "org.freedesktop.login1.Manager",
+                "ListInhibitors",
+                None,
+                GLib.VariantType.new("(a(ssssuu))"),
+                Gio.DBusCallFlags.NONE,
+                3000,
+                None,
+            )
+        except GLib.Error as error:
+            log(f"cannot list logind inhibitors: {error}")
+            return True
+        for what, _who, _why, mode, _uid, _pid in reply.unpack()[0]:
+            if "sleep" in what.split(":") and mode == "block":
+                log(f"logind block inhibitor: {_who}")
+                return True
+        return False
+
+    def gnome_blocks_suspend(self):
+        if self.session_conn is None:
+            return True
+        try:
+            reply = self.session_conn.call_sync(
+                "org.gnome.SessionManager",
+                "/org/gnome/SessionManager",
+                "org.gnome.SessionManager",
+                "IsInhibited",
+                GLib.Variant("(u)", (4,)),
+                GLib.VariantType.new("(b)"),
+                Gio.DBusCallFlags.NONE,
+                3000,
+                None,
+            )
+            return bool(reply.unpack()[0])
+        except GLib.Error as error:
+            log(f"cannot query GNOME session inhibitors: {error}")
+            return True
+
+    # -- scheduling ------------------------------------------------------
+    def schedule(self):
+        if self.timer_id is not None:
+            GLib.source_remove(self.timer_id)
+            self.timer_id = None
+        deadline = self.policy.next_deadline()
+        if deadline is None:
+            return
+        delay = max(10, deadline - now_ms())
+        self.timer_id = GLib.timeout_add(delay, self.on_timer)
+
+    def on_timer(self):
+        self.timer_id = None
+        self.handle(self.policy.tick(now_ms()))
+        return GLib.SOURCE_REMOVE
+
+    # -- signal handlers -------------------------------------------------
+    def schedule_lid_change(self, closed):
+        # UPower and logind can emit duplicate/rapid lid events.  Debounce the
+        # final physical state so five quick open/close cycles cannot queue five
+        # suspend requests.
+        closed = bool(closed)
+        if self.pending_lid == closed and self.lid_timer is not None:
+            return
+        self.pending_lid = closed
+        if self.lid_timer is not None:
+            GLib.source_remove(self.lid_timer)
+        self.lid_timer = GLib.timeout_add(LID_DEBOUNCE_MS, self.apply_lid_change)
+
+    def apply_lid_change(self):
+        self.lid_timer = None
+        closed = self.pending_lid
+        self.pending_lid = None
+        if closed is None:
+            return GLib.SOURCE_REMOVE
+        if closed == self.policy.lid_closed:
+            self.write_state()
+            return GLib.SOURCE_REMOVE
+        self.cancel_startup_timer()
+        self.clear_marker()
+        self.last_lid_change_ms = now_ms()
+        self.request_generation += 1
+        self.last_block_reason = None
+        log(f"lid {'closed' if closed else 'opened'}")
+        self.handle(self.policy.lid_changed(closed, now_ms()))
+        self.write_state()
+        return GLib.SOURCE_REMOVE
+
+    def cancel_startup_timer(self):
+        if self.startup_timer is not None:
+            GLib.source_remove(self.startup_timer)
+            self.startup_timer = None
+
+    def startup_suspend(self):
+        self.startup_timer = None
+        if not self.policy.lid_closed or self.policy.sleeping:
+            return GLib.SOURCE_REMOVE
+        if self.marker_path is not None and os.path.exists(self.marker_path):
+            log("startup with closed lid skipped: power-key override present")
+            return GLib.SOURCE_REMOVE
+        if self.policy.action != "suspend" or self.policy.user_override:
+            return GLib.SOURCE_REMOVE
+        log(
+            f"lid closed at startup; requesting one suspend after "
+            f"{STARTUP_GRACE_MS // 1000}s grace"
+        )
+        self.request_suspend_locked("startup")
+        return GLib.SOURCE_REMOVE
+
+    def on_upower_changed(self, _proxy, changed, _invalidated):
+        values = changed.unpack()
+        if "LidIsClosed" in values:
+            self.schedule_lid_change(values["LidIsClosed"])
+        if "OnBattery" in values:
+            on_battery = bool(values["OnBattery"])
+            log(f"power source {'battery' if on_battery else 'AC'}")
+            self.handle(self.policy.power_source(on_battery, now_ms()))
+            self.write_state()
+
+    def on_seat_changed(self, proxy, changed, _invalidated):
+        values = changed.unpack()
+        if "ActiveSession" not in values:
+            return
+        log("active seat0 session changed")
+        self.open_session()
+        self.refresh_protection()
+
+    def on_prepare_for_sleep(self, _conn, _sender, _path, _iface, signal, params):
+        # The signal name is also delivered through this generic callback.
+        entering = bool(params.unpack()[0])
+        if signal != "PrepareForSleep":
+            return
+        now = now_ms()
+        if entering:
+            self.cancel_suspend_confirm()
+            self.clear_marker()
+            self.rtc_alarm_set = rtc_alarm_is_set()
+            self.last_input_ms = 0
+            log("entering sleep")
+            self.handle(self.policy.prepare_sleep(True, now))
+            self.write_state()
+            return
+
+        scheduled = self.rtc_alarm_set
+        self.rtc_alarm_set = False
+        if scheduled:
+            slept_ms = 0
+            if self.policy.sleep_started_ms is not None:
+                slept_ms = max(0, now - self.policy.sleep_started_ms)
+            self.policy.wake_cause = "scheduled"
+            log(f"resumed: cause=scheduled slept_ms={slept_ms}")
+            self.handle(self.policy.prepare_sleep(False, now))
+            self.policy.cancel_resuspend("scheduled RTC wake")
+            self.schedule()
+            self.open_session()
+            self.refresh_protection()
+            self.write_state()
+            return
+
+        marker_exists = (
+            self.marker_path is not None and os.path.exists(self.marker_path)
+        )
+        recent_input = self.last_input_ms and now - self.last_input_ms <= RESUME_GRACE_MS
+        recent_lid_open = (
+            not self.policy.lid_closed
+            and self.last_lid_change_ms
+            and now - self.last_lid_change_ms <= RESUME_GRACE_MS
+        )
+        user_wake = bool(recent_input or marker_exists or recent_lid_open)
+        self.policy.wake_cause = "user" if user_wake else "abnormal"
+        slept_ms = 0
+        if self.policy.sleep_started_ms is not None:
+            slept_ms = max(0, now - self.policy.sleep_started_ms)
+        log(
+            f"resumed: cause={self.policy.wake_cause} "
+            f"slept_ms={slept_ms} lid={'closed' if self.policy.lid_closed else 'open'}"
+        )
+        self.handle(self.policy.prepare_sleep(False, now))
+        if user_wake:
+            # The press/touch that woke the device owns this cycle; do not
+            # immediately re-suspend or re-blank a closed lid.
+            self.handle(self.policy.user_input(now))
+        elif not self.policy.lid_closed and self.policy.note_abnormal_short_wake(now):
+            log(
+                "abnormal short wake with the lid open; "
+                f"one retry scheduled in {OPEN_LID_RESUSPEND_DELAY_MS // 1000}s"
+            )
+            self.schedule()
+        self.open_session()
+        self.refresh_protection()
+        self.write_state()
+
+    def on_display_signal(self, _conn, _sender, _path, _iface, _signal, params):
+        interface, changed, _invalidated = params.unpack()
+        if interface != "org.gnome.Mutter.DisplayConfig":
+            return
+        if "PowerSaveMode" not in changed:
+            return
+        value = changed["PowerSaveMode"]
+        if isinstance(value, GLib.Variant):
+            value = value.unpack()
+        self.mode = int(value)
+        self.handle(self.policy.display_changed(self.mode, now_ms()))
+
+    def on_name_owner_changed(self, _conn, _sender, _path, _iface, _signal, params):
+        name, _old, new = params.unpack()
+        if name not in ("org.gnome.Mutter.DisplayConfig", "org.gnome.SessionManager"):
+            return
+        log(f"{name} owner changed ({'present' if new else 'absent'})")
+        GLib.idle_add(self.refresh_protection)
+
+    def refresh_protection(self):
+        threading.Thread(target=self.refresh_protection_sync, daemon=True).start()
+        return GLib.SOURCE_REMOVE
+
+    def refresh_protection_sync(self):
+        mode = self.read_mode()
+        GLib.idle_add(self.apply_refreshed_mode, mode)
+
+    def apply_refreshed_mode(self, mode):
+        if mode is not None and self.policy.protected and mode != 3:
+            self.handle(self.policy.display_changed(mode, now_ms()))
+        return GLib.SOURCE_REMOVE
+
+    # -- power-key marker -------------------------------------------------
+    def set_marker_path(self, runtime):
+        path = marker_path(runtime)
+        if path == self.marker_path and self.marker_monitor is not None:
+            return
+        self.close_marker_monitor()
+        self.marker_path = path
+        self.state_path = state_path(runtime)
+        self.last_state_json = None
+        try:
+            os.makedirs(state_dir(runtime), mode=0o700, exist_ok=True)
+        except OSError as error:
+            log(f"cannot create {state_dir(runtime)}: {error}")
+        try:
+            self.marker_monitor = Gio.File.new_for_path(path).monitor_file(
+                Gio.FileMonitorFlags.NONE, None
+            )
+            self.marker_monitor.connect("changed", self.on_marker_changed)
+        except GLib.Error as error:
+            self.marker_monitor = None
+            log(f"cannot watch the power-key marker: {error}")
+
+    def close_marker_monitor(self):
+        if self.marker_monitor is not None:
+            try:
+                self.marker_monitor.cancel()
+            except GLib.Error:
+                pass
+            self.marker_monitor = None
+
+    def clear_marker(self):
+        if self.marker_path is None:
+            return
+        try:
+            os.unlink(self.marker_path)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            log(f"cannot remove power-key marker: {error}")
+
+    def current_state(self):
+        now = now_ms()
+        if self.policy.sleeping:
+            return "ASLEEP"
+        if self.policy.last_resume_ms and now - self.policy.last_resume_ms <= RESUME_GRACE_MS:
+            return "RESUME_GRACE"
+        if self.suspend_pending:
+            return "SUSPEND_PENDING"
+        if self.policy.resuspend_at is not None:
+            return "RETRY_WAIT"
+        if self.last_block_reason:
+            return "BLOCKED"
+        if self.mode == 3:
+            return "BLANK"
+        return "AWAKE"
+
+    def write_state(self):
+        """Write a small, root-readable snapshot for the power-key helper.
+
+        The helper must never need to parse logs or re-implement the lid state
+        machine.  Write atomically and keep the existing 0700 state directory.
+        """
+        if self.state_path is None:
+            return
+        payload = {
+            "state": self.current_state(),
+            "lid_closed": bool(self.policy.lid_closed),
+            "on_battery": bool(self.policy.on_battery),
+            "sleeping": bool(self.policy.sleeping),
+            "suspend_pending": bool(self.suspend_pending),
+            "last_resume_monotonic_ms": int(self.policy.last_resume_ms or 0),
+            "wake_cause": self.policy.wake_cause,
+            "retry_count": int(self.policy.retry_count),
+            "blocked_reason": self.last_block_reason,
+            "resuspend_at_monotonic_ms": self.policy.resuspend_at,
+            "updated_monotonic_ms": now_ms(),
+        }
+        try:
+            text = json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+        except (TypeError, ValueError) as error:
+            log(f"cannot encode power state: {error}")
+            return
+        if text == self.last_state_json:
+            return
+        tmp = self.state_path + ".tmp"
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+            os.replace(tmp, self.state_path)
+            self.last_state_json = text
+        except OSError as error:
+            log(f"cannot write power state: {error}")
+
+    def on_marker_changed(self, _monitor, _file, _other, _event):
+        # Deletions are ours (lid change / new sleep cycle). Only an existing
+        # marker means a deliberate power-key action.
+        if self.marker_path is None or not os.path.exists(self.marker_path):
+            return
+        now = now_ms()
+        if now - self.last_marker_ms < 500:
+            return
+        self.last_marker_ms = now
+        self.cancel_startup_timer()
+        self.last_block_reason = None
+        log("power-key action cancels closed-lid protection")
+        self.handle(self.policy.user_key(now))
+        self.write_state()
+
+    # -- config -----------------------------------------------------------
+    def on_config_changed(self, _monitor, _file, _other, _event):
+        action = config_value("LID_ACTION", "blank")
+        resuspend = config_value("LID_RESUSPEND", "0") == "1"
+        if action != self.policy.action:
+            log(f"config action changed to {action}")
+            self.policy.set_action(action)
+        if resuspend != self.policy.resuspend_enabled:
+            log(f"automatic re-suspend {'enabled' if resuspend else 'disabled'}")
+            self.policy.set_resuspend(resuspend)
+        if self.policy.action != "suspend":
+            self.cancel_startup_timer()
+        self.schedule()
+        self.write_state()
+
+    # -- input ------------------------------------------------------------
+    def start_input_watch(self):
+        count = 0
+        try:
+            names = os.listdir("/dev/input")
+        except OSError as error:
+            log(f"cannot list /dev/input: {error}")
+            return
+        for name in names:
+            if not name.startswith("event"):
+                continue
+            path = os.path.join("/dev/input", name)
+            try:
+                fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+            except OSError:
+                continue
+            source = GLib.io_add_watch(
+                fd,
+                GLib.PRIORITY_DEFAULT,
+                GLib.IOCondition.IN | GLib.IOCondition.HUP | GLib.IOCondition.ERR,
+                self.on_input,
+            )
+            self.input_sources.append((fd, source))
+            count += 1
+        log(f"watching {count} input devices for the re-suspend window")
+
+    def on_input(self, fd, _condition):
+        try:
+            data = os.read(fd, INPUT_EVENT.size * 64)
+        except BlockingIOError:
+            return True
+        except OSError:
+            return False
+        for offset in range(0, len(data) - INPUT_EVENT.size + 1, INPUT_EVENT.size):
+            _sec, _usec, etype, _code, value = INPUT_EVENT.unpack_from(data, offset)
+            if etype in (EV_KEY, EV_REL, EV_ABS) and value != 0:
+                now = now_ms()
+                self.last_input_ms = now
+                self.cancel_startup_timer()
+                self.last_block_reason = None
+                # Only the re-suspend window cares about input; avoid touching
+                # the timer on every keystroke while the tablet is in use.
+                if self.policy.resuspend_at is not None:
+                    self.handle(self.policy.user_input(now))
+                    self.write_state()
+                break
+        return True
+
+    # -- startup ----------------------------------------------------------
+    def start(self):
+        if not self.connect_upower():
+            return 1
+        lid = self.upower_value("LidIsClosed")
+        battery = self.upower_value("OnBattery")
+        self.open_session()
+        marker_exists = (
+            self.marker_path is not None and os.path.exists(self.marker_path)
+        )
+        self.policy.user_override = marker_exists
+        if marker_exists:
+            log("power-key marker present; not re-blanking on startup")
+        actions = []
+        if lid is not None:
+            actions = self.policy.initial(lid, bool(battery), now_ms())
+            self.last_lid_change_ms = now_ms()
+            self.handle(actions)
+            if (
+                lid
+                and self.policy.action == "suspend"
+                and not marker_exists
+                and not self.policy.user_override
+            ):
+                self.startup_timer = GLib.timeout_add(
+                    STARTUP_GRACE_MS, self.startup_suspend
+                )
+        else:
+            log("lid state unknown; waiting for UPower")
+        if (
+            self.policy.protected
+            and self.mode is not None
+            and self.mode != 3
+            and "ensure-off" not in actions
+        ):
+            self.handle(self.policy.display_changed(self.mode, now_ms()))
+        self.start_input_watch()
+        try:
+            self.config_monitor = Gio.File.new_for_path(CONFIG).monitor_file(
+                Gio.FileMonitorFlags.NONE, None
+            )
+            self.config_monitor.connect("changed", self.on_config_changed)
+        except GLib.Error as error:
+            log(f"cannot watch policy config: {error}")
+        log(
+            f"started: action={self.policy.action} "
+            f"resuspend={'on' if self.policy.resuspend_enabled else 'off'}"
+        )
+        self.write_state()
+        return 0
+
+    def run(self):
+        status = self.start()
+        if status != 0:
+            return status
+        try:
+            self.loop.run()
+        except KeyboardInterrupt:
+            pass
+        return 0
+
+
+def main():
+    return LidService().run()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

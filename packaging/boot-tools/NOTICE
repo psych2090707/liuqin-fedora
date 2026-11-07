@@ -1,0 +1,41 @@
+THIRD-PARTY NOTICES
+===================
+
+This package (liuqin-boot-tools) redistributes or embeds the following
+components. Full license texts are installed under
+/usr/share/licenses/liuqin-boot-tools/.
+
+1. BusyBox 1.36.1 (static aarch64 binary) — GPL-2.0-only
+   Upstream: https://busybox.net/downloads/busybox-1.36.1.tar.bz2
+   Source SHA-256 and the exact reproducible build recipe (config, toolchain,
+   reference binary sha256) are recorded in:
+     /usr/libexec/liuqin/boot-assets/tools/build-busybox.sh
+     /usr/libexec/liuqin/boot-assets/busybox.config
+     /usr/libexec/liuqin/boot-assets/busybox.sha256
+   The source tarball is obtained from the URL above (the pinned sha256 is in
+   tools/build-busybox.sh); this package ships the binary, the build recipe and
+   its configuration, so the corresponding source is available from upstream.
+
+2. AOSP mkbootimg / unpack_bootimg Python scripts — Apache-2.0
+   Upstream: https://android.googlesource.com/platform/system/tools/mkbootimg
+   Pinned commit: 954bc3ead5e6 (android-16.0.0_r4); file sha256s are pinned in
+   the project scripts/build-bootimg.sh and recorded in
+   /usr/libexec/liuqin/boot-assets/PACKAGING/provenance.json.
+
+3. Project scripts and sources copied from the liuqin Fedora port repository —
+   MIT (see LICENSE in this package), built on the yzddmr6/xiaomipad-6pro-mainline
+   tree (MIT, with its own NOTICE for third-party code).
+
+4. Kernel / board DT sources are not redistributed by this package, except the
+   small user-space helper C sources needed to reproduce the static helpers:
+     upstream/.../device/boot/liuqin-mark-slot-successful.c
+     upstream/.../device/charger-mode/liuqin-charger-mode-{power-key,exit}.c
+   Those are part of the MIT-licensed upstream user-space helpers.
+
+5. Firmware is NOT redistributed. The package ships only a staging tool
+   (`liuqin-boot-tools stage`) that copies firmware bytes from the device's own
+   liuqin-firmware / liuqin-audio packages and the user's stock ROM analysis
+   tree into a local pool at runtime.
+
+No vendor bootloader, stock ROM image, or device-specific calibration/secret
+data is included in this package.

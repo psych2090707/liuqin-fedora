@@ -1,0 +1,20 @@
+[Unit]
+Description=liuqin SSC real accelerometer sample gate
+Documentation=file:///usr/share/doc/liuqin/README-sensors.md
+# SLPI is intentionally disabled on this device (bring-up resets the SoC), so
+# /dev/fastrpc-sdsp never appears.  Skip cleanly like liuqin-hexagonrpcd-sdsp
+# does instead of leaving a failed unit on every boot; the gate starts normally
+# on installations where SLPI is usable.
+ConditionPathExists=/dev/fastrpc-sdsp
+Requires=liuqin-hexagonrpcd-sdsp.service
+After=liuqin-hexagonrpcd-sdsp.service
+Before=iio-sensor-proxy.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/liuqin-ssc-sample-gate
+TimeoutStartSec=42s
+RemainAfterExit=yes
+
+[Install]
+WantedBy=liuqin-sensor-stack.target

@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Pd-ch <3318195572@qq.com>
+Date: Mon, 14 Sep 2026 21:19:47 +0800
+Subject: [PATCH] input: touchscreen: novatek: pick NT36532 firmware by panel
+ module
+
+liuqin (Xiaomi Pad 6 Pro) is fitted with one of two NT36532 panel modules
+and their touch firmware is not interchangeable: loading the other
+module's firmware mirrors one half of the touchscreen.
+
+The bootloader names the fitted display module on the kernel command line
+(msm_drm.dsi_display0=qcom,mdss_dsi_<module>_...), so select the matching
+firmware from there.  Known modules: m81_36_02_0a -> Tianma, m81_42_02_0b
+-> CSOT.  An unlisted module keeps the firmware-name from the DT as the
+fallback.
+
+diff --git a/drivers/input/touchscreen/nt36523/nt36xxx.c b/drivers/input/touchscreen/nt36523/nt36xxx.c
+index b4f6a4376..0861b6e3f 100644
+--- a/drivers/input/touchscreen/nt36523/nt36xxx.c
++++ b/drivers/input/touchscreen/nt36523/nt36xxx.c
+@@ -26,6 +26,8 @@
+ #include <linux/debugfs.h>
+ #include <linux/of_gpio.h>
+ #include <linux/of_irq.h>
++#include <linux/init.h>
++#include <linux/string.h>
+ 
+ #include "nt36xxx.h"
+ 
+@@ -763,6 +765,23 @@ static int32_t nvt_parse_dt(struct device *dev)
+ 		ts->fw_name = DEFAULT_BOOT_UPDATE_FIRMWARE_NAME;
+ 	}
+ 
++	/*
++	 * liuqin (Xiaomi Pad 6 Pro) fits one of two NT36532 panel modules and
++	 * the touch firmware is not interchangeable: loading the other
++	 * module's firmware mirrors one half of the touchscreen.  The
++	 * bootloader names the fitted display module on the kernel command
++	 * line, so choose the firmware from there:
++	 *   m81_36_02_0a -> Tianma (tm)
++	 *   m81_42_02_0b -> CSOT   (csot)
++	 * An unrecognised module keeps the firmware-name from the DT.
++	 */
++	if (saved_command_line) {
++		if (strstr(saved_command_line, "mdss_dsi_m81_36_02_0a"))
++			ts->fw_name = LIUQIN_TOUCH_FW_TM;
++		else if (strstr(saved_command_line, "mdss_dsi_m81_42_02_0b"))
++			ts->fw_name = LIUQIN_TOUCH_FW_CSOT;
++	}
++
+ 	ret = of_property_read_u32(np, "spi-max-frequency", &ts->spi_max_freq);
+ 	if (ret) {
+ 		NVT_LOG("Unable to get spi freq\n");
+diff --git a/drivers/input/touchscreen/nt36523/nt36xxx.h b/drivers/input/touchscreen/nt36523/nt36xxx.h
+index 51d549911..a9bd81ea7 100644
+--- a/drivers/input/touchscreen/nt36523/nt36xxx.h
++++ b/drivers/input/touchscreen/nt36523/nt36xxx.h
+@@ -101,6 +101,16 @@ extern const uint16_t touch_key_array[TOUCH_KEY_NUM];
+ #define DEFAULT_BOOT_UPDATE_FIRMWARE_NAME "novatek/nt36523.bin"
+ #define DEFAULT_MP_UPDATE_FIRMWARE_NAME   "novatek_ts_mp.bin"
+ 
++/*
++ * liuqin (Xiaomi Pad 6 Pro) ships two NT36532 panel modules whose touch
++ * firmware is not interchangeable: loading the wrong one mirrors one half of
++ * the panel.  The module fitted to the running unit is named on the kernel
++ * command line as msm_drm.dsi_display0=qcom,mdss_dsi_<module>_..., so the
++ * driver selects the firmware from that name instead of a single fixed path.
++ */
++#define LIUQIN_TOUCH_FW_CSOT "novatek/liuqin/novatek_nt36532_m81_fw_csot.bin"
++#define LIUQIN_TOUCH_FW_TM   "novatek/liuqin/novatek_nt36532_m81_fw_tm.bin"
++
+ //---ESD Protect.---
+ #define NVT_TOUCH_ESD_PROTECT 1
+ #define NVT_TOUCH_ESD_CHECK_PERIOD 1500	/* ms */

@@ -1,0 +1,175 @@
+# liuqin 内核配置审计表 — 由 scripts/build-kernel.sh 读取
+# 列: symbol<TAB>class<TAB>expected<TAB>note
+#   class: device=上游产品配置对等(expect 取上游实测 .config 值) | boot=通用启动/systemd 必需
+#          fedora=Fedora 发行版要求(上游 Ubuntu 配置未满足) | info=说明性
+#   expected: y | m | n | absent | contains:<substr>
+#   上游实测基线: cache/upstream-v0.6.0/kernel-proof/.config (Ubuntu GCC 13.3, sha256 29a4fd23...)
+DRM_MSM	device	y	GPU+显示一体化(6.17 Adreno 已并入 msm)；liuqin 显示/GPU 核心
+DRM_MSM_MDSS	device	y	MDSS/DPU 显示控制器
+DRM_MSM_DPU	device	y	SM8475 DPU
+DRM_MSM_DSI	device	y	DSI 输出
+DRM_MSM_DSI_7NM_PHY	device	y	SM8475 7nm DSI PHY
+DRM_PANEL_NOVATEK_NT36532	device	y	liuqin 面板驱动(compatible xiaomi,pipa-nt36532)
+BACKLIGHT_KTZ8866	device	y	ktz8866 背光芯片
+DRM_FBDEV_EMULATION	device	y	fbdev 兼容层(KDE/console 回退)
+QCOM_Q6V5_PAS	device	y	ADSP/CDSP/MPSS/SLPI remoteproc(含传感器 DSP)
+QCOM_Q6V5_ADSP	device	m	上游按模块构建，产品策略保持
+QCOM_PD_MAPPER	device	y	PD mapper(USB/PMIC glink)
+QCOM_SMEM	device	y	共享内存
+QCOM_SMD_RPM	device	y	RPM 电源管理
+QCOM_RPMH	device	y	RPMh
+QCOM_COMMAND_DB	device	y	命令 DB
+QCOM_LLCC	device	y	LLCC 缓存控制器
+QCOM_OCMEM	device	y	OCMEM(GPU 需要)
+QCOM_SMP2P	device	y	SMP2P IPC
+QCOM_SMSM	device	y	SMSM
+BATTERY_QCOM_BATTMGR	device	y	qcom_battmgr 电量管理(任务中的 QCOM_BATT_MGR 实际符号名)
+QCOM_PMIC_GLINK	device	y	PMIC GLINK(电池/充电/UCSI 通道)
+TYPEC_UCSI	device	y	USB-C UCSI
+UCSI_PMIC_GLINK	device	y	UCSI over PMIC GLINK
+USB_GADGET	device	y	USB 外设模式(adb/网络/RNDIS)
+USB_CONFIGFS	device	y	USB gadget configfs
+USB_CONFIGFS_F_FS	device	y	FunctionFS(adb)
+USB_CONFIGFS_NCM	device	y	NCM 网络
+USB_CONFIGFS_ECM	device	y	ECM 网络
+USB_DWC3	device	y	DWC3 USB 控制器
+USB_DWC3_QCOM	device	y	QCOM DWC3 glue
+USB_DWC3_DUAL_ROLE	device	y	双角色(OTG)
+PHY_QCOM_QMP_COMBO	device	y	USB3+DP combo PHY
+PHY_QCOM_QMP_UFS	device	y	UFS PHY
+QCOM_FASTRPC	device	y	FastRPC(SSC/传感器/自动旋转)
+QCOM_RPROC_COMMON	device	y	remoteproc 公共层
+QCOM_SYSMON	device	y	sysmon
+QCOM_SOCINFO	device	y	socinfo(SSC 运行依赖)
+QCOM_SCM	device	y	SCM 固件调用
+QCOM_TZMEM	device	y	TEE 共享内存
+TEE	device	y	TEE 框架
+TEE_QSEECOM	device	y	高通 QSEECOM TEE(指纹)
+SENSORS_FPC1020_SPI	device	m	FPC1264 指纹 SPI 驱动
+TOUCHSCREEN_NT36523_SPI	device	y	NT36523/NT36532 触屏驱动(compatible novatek,NVT-ts-spi)
+TOUCHSCREEN_NOVATEK_NVT_TS	device	n	旧 nvt-ts 驱动；liuqin 不用，显式不选
+HID_NANOSIC	device	y	Nanosic WN8030 磁吸键盘桥
+HID_MULTITOUCH	device	y	HID 多点触控
+HIDRAW	device	y	hidraw 用户态访问
+INPUT_EVDEV	device	y	evdev 输入
+INPUT_UINPUT	device	y	uinput(测试自动化)
+ATH11K	device	y	WCN6855 Wi-Fi 驱动
+ATH11K_PCI	device	y	PCIe 形态(liuqin wifi@0)
+ATH11K_AHB	device	n	AHB 形态不使用
+BT	device	y	蓝牙子系统
+BT_QCA	device	y	QCA/WCN6855 蓝牙
+RFKILL	device	y	无线开关
+SND_SOC	device	y	ASoC 音频框架
+SND_SOC_QCOM	device	y	QCOM ASoC
+SND_SOC_SC8280XP	device	y	SC8280XP 机器驱动(sm8450 sndcard)
+SND_SOC_WCD938X	device	y	WCD938x codec
+SND_SOC_WCD938X_SDW	device	y	WCD938x SoundWire
+SND_SOC_CS35L41	device	y	CS35L41 功放
+SND_SOC_CS35L41_I2C	device	y	CS35L41 I2C 四扬声器
+SND_SOC_WSA883X	device	m	WSA883x 智能功放
+SND_SOC_QDSP6	device	y	QDSP6 DSP
+SOUNDWIRE	device	y	SoundWire
+SOUNDWIRE_QCOM	device	y	QCOM SoundWire
+QCOM_APR	device	y	APR 音频 IPC
+QCOM_QMI_HELPERS	device	y	QMI helpers
+SM_CAMCC_8450	device	m	摄像头时钟控制器(相机模块)
+SM_VIDEOCC_8450	device	m	
+SM_GCC_8450	device	y	
+SM_DISPCC_8450	device	y	
+SM_GPUCC_8450	device	y	
+INTERCONNECT_QCOM	device	y	
+QCOM_CPR	device	y	CPR 电源调节(CPU 频率稳定)
+QCOM_TSENS	device	y	温度传感器
+QCOM_SPMI_ADC5	device	m	SPMI ADC5
+QCOM_SPMI_TEMP_ALARM	device	m	SPMI 温度告警
+IIO	device	y	IIO 框架
+PINCTRL_SM8475	device	y	SM8475 pin control
+PINCTRL_MSM	device	y	QCOM pinctrl 基础
+PCI	device	y	PCI 总线
+PCIE_QCOM	device	y	QCOM PCIe 控制器
+PCI_PWRCTRL_PWRSEQ	device	y	PCI 上电时序(WLAN 枚举必需)
+SCSI_UFS_QCOM	device	y	UFS 存储(UFS 3.1)
+SCSI_UFSHCD_PLATFORM	device	y	UFS 平台驱动
+MMC	device	y	MMC 框架(可能用于 SD)
+MMC_SDHCI_MSM	device	y	QCOM SDHCI
+ARM_SMMU	device	y	SMMU/IOMMU
+RTC_DRV_PM8XXX	device	y	PMIC RTC
+QCOM_WDT	device	m	QCOM 看门狗
+DMABUF_HEAPS	device	y	dmabuf heaps(显示/相机)
+ANDROID_BINDER_IPC	device	y	Waydroid binder
+ANDROID_BINDERFS	device	y	Waydroid binderfs
+CONFIGFS_FS	device	y	configfs(USB gadget 依赖)
+CGROUPS	boot	y	systemd cgroup 基础
+CGROUP_DEVICE	boot	y	cgroup v2 devices 控制器
+CGROUP_FREEZER	boot	y	systemd 服务冻结
+CGROUP_PIDS	boot	y	systemd PIDs 限制
+CGROUP_CPUACCT	boot	y	CPU 统计
+CGROUP_SCHED	boot	y	CPU 带宽控制
+MEMCG	boot	y	memory cgroup
+NAMESPACES	boot	y	命名空间(容器/沙箱)
+USER_NS	boot	y	非特权用户命名空间(Flatpak/bwrap)
+NET_NS	boot	y	网络命名空间
+PID_NS	boot	y	PID 命名空间
+UTS_NS	boot	y	UTS 命名空间
+IPC_NS	boot	y	IPC 命名空间
+SECCOMP	boot	y	seccomp
+SECCOMP_FILTER	boot	y	seccomp BPF 过滤
+FANOTIFY	boot	y	fanotify(systemd 文件监控)
+FHANDLE	boot	y	systemd 必需 file handle
+EPOLL	boot	y	epoll
+EVENTFD	boot	y	eventfd
+SIGNALFD	boot	y	signalfd
+TIMERFD	boot	y	timerfd
+INOTIFY_USER	boot	y	inotify
+AIO	boot	y	异步 IO
+POSIX_MQUEUE	boot	y	POSIX 消息队列
+TMPFS	boot	y	tmpfs(/tmp,/run)
+TMPFS_POSIX_ACL	boot	y	tmpfs ACL
+DEVTMPFS	boot	y	devtmpfs(/dev)
+PROC_FS	boot	y	/proc
+SYSFS	boot	y	/sys
+BINFMT_ELF	boot	y	ELF 可执行
+BLK_DEV_INITRD	boot	y	initramfs 支持
+RD_GZIP	boot	y	gzip initramfs
+MODULES	boot	y	可加载模块(Fedora 内核必需)
+OVERLAY_FS	boot	y	overlayfs(容器/Flatpak)
+EXT4_FS	boot	y	ext4 根分区
+EXT4_FS_SECURITY	boot	y	ext4 xattr/security label(SELinux)
+VFAT_FS	boot	y	VFAT(ESP/USB)
+SQUASHFS	boot	y	SquashFS(可选)
+BLK_DEV_DM	boot	m	device-mapper
+DM_VERITY	boot	m	dm-verity
+BLK_DEV_LOOP	boot	y	loop 设备
+BLK_CGROUP	boot	y	cgroup v2 io 控制器
+PSI	boot	y	pressure stall info(systemd-oomd)
+SWAP	boot	y	swap
+CRYPTO_SHA256	boot	y	SHA256(模块/IMA)
+CRYPTO_AES	boot	y	AES
+CRYPTO_XTS	boot	m	AES-XTS(dm-crypt)
+NETFILTER	boot	y	netfilter
+NF_TABLES	boot	m	nftables(firewalld)
+NFT_CT	boot	m	nft conntrack
+NFT_NAT	boot	m	nft NAT
+NFT_MASQ	boot	m	nft masquerade
+NFT_REJECT	boot	m	nft reject
+IP_NF_IPTABLES	boot	m	iptables 兼容
+IP6_NF_IPTABLES	boot	m	ip6tables
+NETFILTER_XTABLES	boot	m	xtables
+UNIX	boot	y	AF_UNIX
+INET	boot	y	IPv4
+IPV6	boot	m	IPv6
+PACKET	boot	y	AF_PACKET
+KEYS	boot	y	内核密钥环
+AUDIT	boot	y	audit(SELinux 依赖)
+SECURITY	boot	y	LSM 框架
+INTEGRITY	boot	y	IMA/EVM 框架
+RTC_CLASS	boot	y	RTC 子系统
+WATCHDOG	boot	y	看门狗
+BPF_SYSCALL	boot	y	bpf syscall
+CGROUP_BPF	boot	y	cgroup BPF 控制器(systemd)
+SECURITY_SELINUX	fedora	y	Fedora 默认 SELinux enforcing；内核必须带 SELinux LSM（上游 Ubuntu 基线为 n）
+DEFAULT_SECURITY_SELINUX	fedora	y	默认主 LSM 设为 SELinux（SELinux 关闭时该 choice 不可见，上游基线无此行）
+LSM	fedora	contains:selinux	CONFIG_LSM 字符串必须包含 selinux，否则即使编入也不会启用
+EFI_STUB	info	y	本设备 Boot 走 ABL + boot.img，不需要 EFI stub；arm64 defconfig 默认开启，保留不冲突
+SECURITY_NETWORK	fedora	y	AppArmor 被关闭后 SELinux 依赖它；必须显式开启（上游基线靠 AppArmor select）
+SECURITY_PATH	fedora	y	AppArmor 被关闭后随之消失；SELinux/path 钩子需要

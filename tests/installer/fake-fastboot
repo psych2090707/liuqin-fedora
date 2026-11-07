@@ -1,0 +1,95 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# A Fastboot simulator for the offline installer tests.  It is put first on
+# PATH and never touches a real device; every invocation is appended to
+# $FAKE_FASTBOOT_LOG and the tablet facts come from a key=value fixture:
+#
+#   product=liuqin
+#   unlocked=yes
+#   current-slot=a
+#   userdata=0x1000000000
+#   boot_a=0xc000000
+#   boot_b=0xc000000
+#   max-download-size=0x30000000
+#
+# Mutating verbs (boot/flash/erase/format/reboot/--set-active/oem) are only
+# recorded and answered OKAY; with FAKE_FASTBOOT_REFUSE_WRITES=1 they are
+# refused and logged, so a test can prove a write was attempted.
+set -u
+
+log=${FAKE_FASTBOOT_LOG:?FAKE_FASTBOOT_LOG is not set}
+fixture=${FAKE_FASTBOOT_FIXTURE:?FAKE_FASTBOOT_FIXTURE is not set}
+[ -f "$fixture" ] || { echo "fake-fastboot: no fixture: $fixture" >&2; exit 2; }
+printf '%s\n' "$*" >>"$log"
+
+value() { # KEY: first fixture line "KEY=VALUE"
+	sed -n "s/^$1=//p" "$fixture" | head -1
+}
+
+serial=
+while [ "$#" -gt 0 ]; do
+	case $1 in
+	-s)
+		serial=$2
+		shift 2
+		;;
+	*) break ;;
+	esac
+done
+
+expected_serial=$(value serial)
+if [ -n "$expected_serial" ] && [ "$serial" != "$expected_serial" ]; then
+	echo 'error: no devices/emulators found'
+	exit 1
+fi
+
+case ${1:-} in
+getvar)
+	[ "$#" = 2 ] || { echo 'fake-fastboot: getvar needs one name' >&2; exit 2; }
+	name=$2
+	case $name in
+	product) printf '(bootloader) product: %s\n' "$(value product)" ;;
+	unlocked) printf '(bootloader) unlocked: %s\n' "$(value unlocked)" ;;
+	current-slot) printf '(bootloader) current-slot: %s\n' "$(value current-slot)" ;;
+	partition-size:*)
+		partition=${name#partition-size:}
+		printf '(bootloader) partition-size:%s: %s\n' "$partition" "$(value "$partition")"
+		;;
+	max-download-size) printf '(bootloader) max-download-size: %s\n' "$(value max-download-size)" ;;
+	*) printf '(bootloader) %s: %s\n' "$name" "$(value "$name")" ;;
+	esac
+	exit 0
+	;;
+devices)
+	printf '%s\tfastboot\n' "$(value serial)"
+	exit 0
+	;;
+boot|flash|erase|format|flashall|update|oem|reboot|reboot-bootloader)
+	if [ "${FAKE_FASTBOOT_REFUSE_WRITES:-0}" = 1 ]; then
+		printf 'REFUSED %s\n' "$*" >>"$log"
+		echo 'FAILED (remote: write refused by the offline test simulator)'
+		exit 1
+	fi
+	printf 'WROTE %s\n' "$*" >>"$log"
+	printf 'Sending %s... OKAY\n' "${1:-command}"
+	exit 0
+	;;
+--set-active*)
+	if [ "${FAKE_FASTBOOT_REFUSE_WRITES:-0}" = 1 ]; then
+		printf 'REFUSED %s\n' "$*" >>"$log"
+		echo 'FAILED (remote: write refused by the offline test simulator)'
+		exit 1
+	fi
+	printf 'WROTE %s\n' "$*" >>"$log"
+	echo 'Setting current slot ... OKAY'
+	exit 0
+	;;
+'')
+	echo 'fake-fastboot: no command' >&2
+	exit 2
+	;;
+*)
+	echo "FAILED (remote: 'unknown command: $1')"
+	exit 1
+	;;
+esac

@@ -1,0 +1,35 @@
+# kernel-liuqin — Fedora ARM64 设备内核包（liuqin / Xiaomi Pad 6 Pro）
+
+本目录是 task-11 的 **kernel RPM 打包与 kernel-install 钩子**实现，配套：
+
+- 构建/打包脚本：`scripts/build-kernel-rpm.sh`
+- 完整文档：`docs/maintenance/kernel-rpm.md`
+- 内核构建（task-5）：`scripts/build-kernel.sh` + `docs/maintenance/kernel-build.md`
+
+## 文件说明
+
+| 文件 | 安装路径 | 作用 |
+|---|---|---|
+| `kernel-liuqin.spec` | — | RPM spec（单包 + 显式 Provides/Conflicts，见 docs） |
+| `99-liuqin-android-boot.install` | `/usr/lib/kernel/install.d/` | kernel-install 钩子：add 时生成 boot.img 并**暂存**到 `/boot/liuqin/`；绝不写分区、绝不 qbootctl |
+| `liuqin-bootimg-refresh` | `/usr/libexec/liuqin/` | **P0 核心**：kernel 更新时在设备上重建 root contract → initramfs → boot.img（依赖 liuqin-boot-tools/boot-assets；缺资产 fail-closed） |
+| `bootimg-builder` | `/usr/libexec/liuqin/` | dev/离线用 boot.img 生成器包装器（release 钩子不使用；指向 `scripts/build-bootimg.sh`） |
+| `liuqin-apply-boot` | `/usr/sbin/` | 显式应用暂存镜像到 `boot_a` 的工具；默认 dry-run，写设备被 Phase 6 双重门禁禁止 |
+| `bootimg.conf.example` | `/usr/share/liuqin/` | 钩子 opt-in 配置模板（拷到 `/etc/liuqin/bootimg.conf` 后生效） |
+
+## 关键安全决策（与 pipa/Pocketblue 的差异）
+
+1. **不用 qbootctl，不改 GPT slot 属性**：liuqin 的 boot_a/boot_b 在独立 GPT（sde）上，
+   上游实测 qbootctl 式属性改写会导致设备不可启动（Lead 2026-10-20 修正）。
+2. **钩子只暂存，不写分区**：写 `boot_a` 只能由 `liuqin-apply-boot --yes-write-device` 显式执行，
+   且 Phase 6 前被 `LIUQIN_EXPERIMENTAL_DEVICE_WRITE=1` 门禁拒绝。
+3. **header v2 + 独立 dtb + ABL overlay sink**：不照抄 pipa 的 header v0 `cat vmlinuz+dtb`。
+4. **单内核策略**：包名 `kernel-liuqin`，不 `Provides: kernel`；与 Fedora 官方 kernel* 冲突（Conflicts），
+   避免 dracut/BLS/ESP 路径混用。`kernel-uname-r` 因 RPM EVR 不接受双 `-` 的 kernelrelease 无法提供，
+   out-of-tree 模块请依赖 `kernel-liuqin`/`kernel-liuqin-modules`。
+5. **P0（task-15）：更新时重建 contract/initramfs，不复用旧 ramdisk**；pre-apply 的 stale boot 窗口
+   由 rootfs 契约侧的“内核身份动态比较 + warning”关闭（接口请求见 docs/maintenance/kernel-rpm.md §4.3）。
+6. **release gate**：钩子校验安装的 Image/DTB/config 与 `/usr/share/liuqin/kernel-build-info.json`
+   记录一致，dev/基线内核不能被包进 release boot.img。
+
+详见 `docs/maintenance/kernel-rpm.md`。

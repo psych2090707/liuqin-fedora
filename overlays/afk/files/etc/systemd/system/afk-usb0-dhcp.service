@@ -1,0 +1,32 @@
+[Unit]
+Description=AFK: DHCP for the USB NCM host (192.168.7.10-19)
+Documentation=file:/etc/afk/dnsmasq-usb0.conf
+# The gadget (and therefore usb0) is created by the initramfs and survives
+# switch_root, so normally this unit runs on every boot.  If the device was
+# booted without the configfs gadget at all, just stay inactive instead of
+# failing the boot.
+ConditionPathExists=/sys/class/net/usb0
+After=network-pre.target afk-usb0-address.service
+Wants=afk-usb0-address.service
+# The static 192.168.7.2/24 address is pinned by afk-usb0-address.service;
+# NetworkManager is told to leave usb0 alone (90-afk-unmanaged.conf).
+
+[Service]
+Type=simple
+StateDirectory=afk
+StateDirectoryMode=0755
+ExecStartPre=/usr/bin/install -d -o dnsmasq -g dnsmasq -m 0755 /var/lib/afk
+ExecStart=/usr/sbin/dnsmasq --conf-file=/etc/afk/dnsmasq-usb0.conf --keep-in-foreground
+Restart=always
+RestartSec=3
+# dnsmasq runs as root here only to bind port 67 and write the lease file under
+# /var/lib/afk; it drops privileges for everything else (-u dnsmasq by default
+# when started as root, see the dnsmasq(8) user= default).
+NoNewPrivileges=yes
+PrivateTmp=no
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths=/var/lib/afk
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,27 @@
+[package]
+name = "liuqin-powerd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Unified power-key, lid and resume daemon for the liuqin tablet"
+
+[dependencies]
+anyhow = "1"
+evdev = "0.13"
+futures-util = "0.3"
+libc = "0.2"
+liuqin-power-core = { path = "../liuqin-power-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "time",
+    "sync",
+    "process",
+    "signal",
+    "fs",
+] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+zbus = { version = "6", default-features = false, features = ["tokio", "proxy"] }

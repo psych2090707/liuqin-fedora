@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Prasad Kumpatla <prasad.kumpatla@oss.qualcomm.com>
+Date: Tue, 18 Aug 2026 14:16:55 +0530
+Subject: [PATCH] ASoC: qcom: sc8280xp: Fix TDM hw_params error handling
+
+Backport of upstream 8593dc5f052e791748eaa76397ad95b9e32edac3. The other upstream fixes are already present in the adapted product/6.17 implementation.
+
+diff --git a/sound/soc/qcom/sc8280xp.c b/sound/soc/qcom/sc8280xp.c
+index 7f59f6c19..d40371c39 100644
+--- a/sound/soc/qcom/sc8280xp.c
++++ b/sound/soc/qcom/sc8280xp.c
+@@ -43,7 +43,7 @@ static int sc8280xp_tdm_hw_params(struct snd_pcm_substream *substream,
+ 
+ 	ret = qcom_snd_get_dai_tdm_slots(rtd, &cpu_cfg, &codec_cfg);
+ 	if (ret)
+-		return ret == -EINVAL ? 0 : ret;
++		return ret == -ENOENT ? 0 : ret;
+ 
+ 	if (!cpu_cfg.slots)
+ 		return 0;

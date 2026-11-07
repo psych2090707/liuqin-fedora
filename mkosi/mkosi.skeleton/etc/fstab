@@ -1,0 +1,14 @@
+# /etc/fstab — liuqin Fedora rootfs.
+#
+# The liuqin boot flow is Android-boot-image based (no EFI/GRUB): the boot image
+# mounts the system root by label:
+#     root=LABEL=LIUQIN_ROOT
+# The upstream installer (tools/lib/install-root.sh) identifies both partitions
+# by label and REWRITES this file at install time, keeping only the /home line:
+#     LABEL=LIUQIN_HOME  /home  ext4  defaults,nofail,x-systemd.device-timeout=30s  0 2
+# The root line below makes the directory tree self-mountable for chroot/qemu
+# testing and stays compatible with the installer contract. Home is a separate
+# partition so reinstalls can keep user data; `nofail` keeps a damaged /home from
+# blocking the console-less first boot.
+LABEL=LIUQIN_ROOT    /      ext4    defaults,errors=remount-ro,x-systemd.growfs  0 1
+LABEL=LIUQIN_HOME    /home  ext4    defaults,nofail,x-systemd.device-timeout=30s  0 2

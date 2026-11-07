@@ -1,0 +1,176 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: yp <yp@e5debian>
+Date: Sat, 26 Sep 2026 03:27:49 +0800
+Subject: [PATCH] drm/msm/dp, phy: qcom, usb, soc: quiet the DP bring-up
+ instrumentation
+
+The external-DP bring-up left unconditional logging on paths that run per
+plug and per AUX transaction: every DPCD read attempt, every AUX transfer
+and its error, every alt-mode notification and hpd bridge notify, the QMP
+PHY's dp_init/dp_power_on register dumps, the FSA4480 SBU readback, and a
+hex dump of every pmic_glink TX/RX message.
+
+All of it has served its purpose now that the link comes up, so move it to
+dev_dbg()/drm_dbg_dp(), which is silent by default and can still be turned
+on with drm.debug or dynamic debug.  pmic_glink_trace keeps its parameter
+but defaults to off.  Genuine error paths are left at DRM_ERROR.
+
+Co-Authored-By: claude-sonnet-4-6 <noreply@anthropic.com>
+
+diff --git a/drivers/gpu/drm/msm/dp/dp_aux.c b/drivers/gpu/drm/msm/dp/dp_aux.c
+index bef015ab3..90cd092fb 100644
+--- a/drivers/gpu/drm/msm/dp/dp_aux.c
++++ b/drivers/gpu/drm/msm/dp/dp_aux.c
+@@ -201,7 +201,7 @@ static ssize_t msm_dp_aux_cmd_fifo_tx(struct msm_dp_aux_private *aux,
+ 	time_left = wait_for_completion_timeout(&aux->comp,
+ 						msecs_to_jiffies(250));
+ 	if (!time_left) {
+-		DRM_INFO("aux: no isr in 250ms (ctrl=%#x status=%#x trans=%#x tmo=%#x hpd=%#x)\n",
++		dev_dbg(aux->dev, "aux: no isr in 250ms (ctrl=%#x status=%#x trans=%#x tmo=%#x hpd=%#x)\n",
+ 			 msm_dp_read_aux(aux, REG_DP_AUX_CTRL),
+ 			 msm_dp_read_aux(aux, REG_DP_AUX_STATUS),
+ 			 msm_dp_read_aux(aux, REG_DP_AUX_TRANS_CTRL),
+@@ -501,17 +501,9 @@ irqreturn_t msm_dp_aux_isr(struct drm_dp_aux *msm_dp_aux, u32 isr)
+ 		return IRQ_NONE;
+ 	}
+ 
+-	if (aux->aux_error_num == DP_AUX_ERR_NONE) {
+-		DRM_INFO("aux: xfer ok (%#010x)\n", isr);
+-	} else {
+-		static bool logged_aux_err;
+-
+-		if (!logged_aux_err) {
+-			logged_aux_err = true;
+-			DRM_INFO("aux: isr err isr=%#010x err_num=%d native=%d\n",
+-				 isr, aux->aux_error_num, aux->native);
+-		}
+-	}
++	if (aux->aux_error_num != DP_AUX_ERR_NONE)
++		dev_dbg(aux->dev, "aux: isr err isr=%#010x err_num=%d native=%d\n",
++			isr, aux->aux_error_num, aux->native);
+ 
+ 	complete(&aux->comp);
+ 
+diff --git a/drivers/gpu/drm/msm/dp/dp_ctrl.c b/drivers/gpu/drm/msm/dp/dp_ctrl.c
+index d9301772e..b9af35aa4 100644
+--- a/drivers/gpu/drm/msm/dp/dp_ctrl.c
++++ b/drivers/gpu/drm/msm/dp/dp_ctrl.c
+@@ -1701,8 +1701,8 @@ int msm_dp_ctrl_core_clk_enable(struct msm_dp_ctrl *msm_dp_ctrl)
+ 	}
+ 
+ 	for (unsigned int i = 0; i < ctrl->num_core_clks; i++)
+-		DRM_INFO("core clk[%u] %s rate=%lu\n", i, ctrl->core_clks[i].id,
+-			 clk_get_rate(ctrl->core_clks[i].clk));
++		drm_dbg_dp(ctrl->drm_dev, "core clk[%u] %s rate=%lu\n", i,
++			   ctrl->core_clks[i].id, clk_get_rate(ctrl->core_clks[i].clk));
+ 
+ 	ctrl->core_clks_on = true;
+ 
+@@ -1952,8 +1952,8 @@ void msm_dp_ctrl_phy_init(struct msm_dp_ctrl *msm_dp_ctrl)
+ 	phy_configure(phy, &ctrl->phy_opts);
+ 	ret = phy_power_on(phy);
+ 
+-	DRM_INFO("phy_init init=%d power_on=%d power_on_ret=%d\n",
+-		 phy->init_count, phy->power_count, ret);
++	drm_dbg_dp(ctrl->drm_dev, "phy_init init=%d power_on=%d power_on_ret=%d\n",
++		   phy->init_count, phy->power_count, ret);
+ }
+ 
+ void msm_dp_ctrl_phy_exit(struct msm_dp_ctrl *msm_dp_ctrl)
+diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_display.c
+index 923b409bd..c78c0196c 100644
+--- a/drivers/gpu/drm/msm/dp/dp_display.c
++++ b/drivers/gpu/drm/msm/dp/dp_display.c
+@@ -410,7 +410,8 @@ static int msm_dp_display_process_hpd_high(struct msm_dp_display_private *dp)
+ 		if (!rc)
+ 			break;
+ 
+-		DRM_INFO("DPCD read attempt %d/5 failed: %d\n", attempt + 1, rc);
++		drm_dbg_dp(dp->drm_dev, "DPCD read attempt %d/5 failed: %d\n",
++			   attempt + 1, rc);
+ 		msleep(100);
+ 	}
+ 
+@@ -611,7 +612,7 @@ static int msm_dp_hpd_plug_handle(struct msm_dp_display_private *dp, u32 data)
+ 	state =  dp->hpd_state;
+ 	drm_dbg_dp(dp->drm_dev, "Before, type=%d hpd_state=%d\n",
+ 			dp->msm_dp_display.connector_type, state);
+-	dev_info(dp->drm_dev->dev, "hpd plug: type=%d hpd_state=%d\n",
++	dev_dbg(dp->drm_dev->dev, "hpd plug: type=%d hpd_state=%d\n",
+ 			dp->msm_dp_display.connector_type, state);
+ 
+ 	if (state == ST_DISPLAY_OFF) {
+@@ -639,7 +640,7 @@ static int msm_dp_hpd_plug_handle(struct msm_dp_display_private *dp, u32 data)
+ 	}
+ 
+ 	ret = msm_dp_display_usbpd_configure_cb(&pdev->dev);
+-	dev_info(dp->drm_dev->dev, "hpd plug: configure_cb ret=%d hpd_state=%d\n",
++	dev_dbg(dp->drm_dev->dev, "hpd plug: configure_cb ret=%d hpd_state=%d\n",
+ 		 ret, dp->hpd_state);
+ 	if (ret) {	/* link train failed */
+ 		dp->hpd_state = ST_DISCONNECTED;
+diff --git a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+index 544adafbb..3599997cf 100644
+--- a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+@@ -3364,7 +3364,7 @@ static int qmp_combo_dp_init(struct phy *phy)
+ 
+ 	cfg->dp_aux_init(qmp);
+ 
+-	dev_info(qmp->dev,
++	dev_dbg(qmp->dev,
+ 		 "dp_init: orient=%d pd_ctl=%#x mode=%#x bias=%#x aux=%#x/%#x/%#x aux_st=%#x com_ts=%#x com_ms=%#x com_ro=%#x com_pd=%#x\n",
+ 		 qmp->orientation,
+ 		 readl(qmp->dp_dp_phy + QSERDES_DP_PHY_PD_CTL),
+@@ -3424,7 +3424,7 @@ static int qmp_combo_dp_power_on(struct phy *phy)
+ 
+ 	mutex_unlock(&qmp->phy_mutex);
+ 
+-	dev_info(qmp->dev,
++	dev_dbg(qmp->dev,
+ 		 "dp_power_on: serdes_ret=%d cfg_ret=%d com_mode=%#x pll_bias=%#x c_ready=%#x cmn=%#x pd_ctl=%#x cfg=%#x mode=%#x status=%#x\n",
+ 		 serdes_ret, cfg_ret,
+ 		 readl(qmp->com + QPHY_V3_DP_COM_PHY_MODE_CTRL),
+@@ -4051,7 +4051,7 @@ static int qmp_combo_typec_switch_set(struct typec_switch_dev *sw,
+ 	if (orientation == qmp->orientation || orientation == TYPEC_ORIENTATION_NONE)
+ 		return 0;
+ 
+-	dev_info(qmp->dev, "typec orientation: %d -> %d\n",
++	dev_dbg(qmp->dev, "typec orientation: %d -> %d\n",
+ 		 qmp->orientation, orientation);
+ 
+ 	mutex_lock(&qmp->phy_mutex);
+diff --git a/drivers/soc/qcom/pmic_glink.c b/drivers/soc/qcom/pmic_glink.c
+index c796a8e37..4483405e0 100644
+--- a/drivers/soc/qcom/pmic_glink.c
++++ b/drivers/soc/qcom/pmic_glink.c
+@@ -49,11 +49,10 @@ static struct pmic_glink *__pmic_glink;
+ static DEFINE_MUTEX(__pmic_glink_lock);
+ 
+ /*
+- * Diagnostic tracing of every USBC/PAN/UCSI glink message.  Enabled by default
+- * for the external-DP bring-up; the traffic volume is low (PD/alt-mode events
+- * plus UCSI command completions) so it is safe to leave in for a session.
++ * Diagnostic tracing of every USBC/PAN/UCSI glink message, kept available for
++ * USB-C bring-up but off by default.
+  */
+-static bool pmic_glink_trace = true;
++static bool pmic_glink_trace;
+ module_param(pmic_glink_trace, bool, 0644);
+ 
+ static void pmic_glink_dump(const char *dir, const void *data, size_t len)
+diff --git a/drivers/usb/typec/mux/fsa4480.c b/drivers/usb/typec/mux/fsa4480.c
+index 64b929ef4..98d0cb5ee 100644
+--- a/drivers/usb/typec/mux/fsa4480.c
++++ b/drivers/usb/typec/mux/fsa4480.c
+@@ -147,8 +147,8 @@ static int fsa4480_set(struct fsa4480 *fsa)
+ 		regmap_read(fsa->regmap, FSA4480_SWITCH_ENABLE, &r04);
+ 		regmap_read(fsa->regmap, FSA4480_SWITCH_SELECT, &r05);
+ 		regmap_read(fsa->regmap, FSA4480_SWITCH_STATUS1, &r07);
+-		dev_info(&fsa->client->dev,
+-			 "set: mode=%#lx svid=%#06x orient=%d swap=%d rev=%d sel=%#x en=%#x rd=%#x/%#x/%#x\n",
++		dev_dbg(&fsa->client->dev,
++			"set: mode=%#lx svid=%#06x orient=%d swap=%d rev=%d sel=%#x en=%#x rd=%#x/%#x/%#x\n",
+ 			 fsa->mode, fsa->svid, fsa->orientation,
+ 			 fsa->swap_sbu_lanes, reverse, sel, enable, r04, r05, r07);
+ 	}

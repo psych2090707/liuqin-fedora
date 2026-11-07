@@ -1,0 +1,14 @@
+[Unit]
+Description=liuqin notification source logger (GNOME session)
+Documentation=file:/usr/local/bin/liuqin-notify-log
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/liuqin-notify-log
+Restart=always
+RestartSec=3
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=default.target

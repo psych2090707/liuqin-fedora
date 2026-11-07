@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 16:02:50 +0800
+Subject: [PATCH] remoteproc: qcom: select SLPI by its processor name
+
+
+diff --git a/drivers/remoteproc/qcom_q6v5_pas.c b/drivers/remoteproc/qcom_q6v5_pas.c
+index 1ab7056c6..402921664 100644
+--- a/drivers/remoteproc/qcom_q6v5_pas.c
++++ b/drivers/remoteproc/qcom_q6v5_pas.c
+@@ -718,7 +718,7 @@ static int qcom_pas_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	rproc->auto_boot = desc->auto_boot;
+-	if (desc->ssr_name && !strcmp(desc->ssr_name, "slpi"))
++	if (desc->sysmon_name && !strcmp(desc->sysmon_name, "slpi"))
+ 		rproc->auto_boot = rproc->auto_boot && slpi_auto_boot;
+ 	rproc_coredump_set_elf_info(rproc, ELFCLASS32, EM_NONE);
+ 

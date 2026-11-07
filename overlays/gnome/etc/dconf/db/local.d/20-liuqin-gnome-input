@@ -1,0 +1,22 @@
+# TN0078 — GNOME 中文输入：切换快捷键与可见的拼音预编辑。
+#
+# 背景：GNOME 50 Wayland 下只有 Super+Space 能切输入源；IBus 自己的
+# Ctrl+Space trigger 在 Wayland 没有全局抓键（GNOME 由 shell 直接调
+# SetGlobalEngine），实测注入 Ctrl+Space 不切换。用户从 KDE/fcitx5 迁来，
+# Ctrl+Space 是习惯键。
+# 取舍：Ctrl+Space 成为 mutter 全局按键后，个别应用（如 VSCode 的补全）
+# 收不到该组合；这与用户在 KDE 下 fcitx5 抓 Ctrl+Space 的行为一致。
+# 快捷键部分只影响 GNOME；libpinyin 设置影响使用该引擎的会话，不影响 Fcitx5。
+# 不改变输入源顺序或默认语言。回退：恢复对应备份文件后 `sudo dconf update`，
+# 不要为了撤销下方预编辑设置而删掉整个文件、丢失原有快捷键。
+#
+# 写入边界：TN0078/task-2 新建文件；不改 00-liuqin-gnome。
+
+[org/gnome/desktop/wm/keybindings]
+switch-input-source=['<Super>space', '<Control>space', 'XF86Keyboard']
+
+# libpinyin 1.16.5: DISPLAY_STYLE_COMPACT = 1.
+# 先显示拼写中的拼音字母，而不是 guessed sentence；中文候选/确认逻辑不变。
+# 避免输入 opencode 时只看见“哦盆吃哦的”，无法核对实际输入的字母。
+[com/github/libpinyin/ibus-libpinyin/libpinyin]
+display-style=1

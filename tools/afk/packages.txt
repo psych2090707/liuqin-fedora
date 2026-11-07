@@ -1,0 +1,8 @@
+krdp
+krdp-libs
+dnsmasq
+openssl
+dnf5
+dnf5-plugins
+libdnf5
+libdnf5-cli

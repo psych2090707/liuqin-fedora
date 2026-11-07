@@ -1,0 +1,17 @@
+[Unit]
+Description=AFK: pre-authorize KRDP for the KDE RemoteDesktop portal
+Documentation=file:/usr/local/sbin/afk-krdp-preauth
+# Must run inside the user session bus (flatpak permission-set talks to the
+# xdg-permission-store service), and before krdpserver asks for a screencast.
+After=plasma-core.target
+Before=app-org.kde.krdpserver.service
+PartOf=plasma-workspace.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/afk-krdp-preauth
+TimeoutStartSec=30
+
+[Install]
+WantedBy=plasma-workspace.target

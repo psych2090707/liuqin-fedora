@@ -1,0 +1,18 @@
+[Unit]
+Description=AFK: restrict AFK service ports to the USB NCM link
+Documentation=file:/etc/afk/usb0-firewall.nft
+# Opt-in only (install.sh --firewall): a broken ruleset with no console could
+# lock the operator out, so this unit is never enabled by default.
+After=network-pre.target
+Wants=network-pre.target
+Before=sshd.service app-org.kde.krdpserver.service
+ConditionPathExists=/etc/afk/usb0-firewall.nft
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/afk/usb0-firewall.nft
+ExecStop=-/usr/sbin/nft delete table inet afk
+
+[Install]
+WantedBy=multi-user.target

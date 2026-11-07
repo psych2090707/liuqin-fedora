@@ -1,0 +1,342 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# kernel-install hook: build the liuqin Android boot image (header v2) for the
+# kernel being installed and STAGE it under /boot/liuqin/.
+#
+# Installed path: /usr/lib/kernel/install.d/99-liuqin-android-boot.install
+# Contract (systemd >= v255, Fedora 44): <plugin> add <kver> <entry-dir> <image> [initrd...]
+#
+# ============================ SAFETY MODEL ================================
+# * NEVER writes the boot partition, NEVER calls qbootctl / fastboot, NEVER
+#   touches GPT slot attributes. Writing boot_a/boot_b is exclusively the job
+#   of the explicit `liuqin-apply-boot --yes-write-device` tool (Phase 6).
+# * old staged images are kept on failure (fail-closed: on any error this hook
+#   exits non-zero and leaves the previous /boot/liuqin/boot-<kver>.img intact;
+#   the new image is written to a temp file and atomically renamed only on
+#   success).
+# * generation is opt-in: it requires an operator-provided
+#   /etc/liuqin/bootimg.conf plus a working on-device boot tool stack.
+#
+# ======================= P0: no stale ramdisk/contract =====================
+# The root admission contract pins rootfs file hashes; the kernel identity files
+# (/usr/share/liuqin/kernel.release + kernel-modules.manifest) change the moment
+# the new kernel RPM is installed, while the boot.img in the boot partition is
+# still the old one until an explicit apply. Therefore this hook MUST rebuild
+# the initramfs + contract for the NEW kernel and MUST NOT fall back to a
+# stale/prebuilt ramdisk. It delegates the whole pipeline to the on-device
+# `liuqin-bootimg-refresh` tool (shipped in liuqin-boot-tools / boot-assets):
+#
+#   regenerate root contract (current rootfs manifest + new kernel.release)
+#     -> rebuild stage-1 initramfs (BusyBox/helpers/firmware/contract)
+#     -> scripts/build-bootimg.sh --strict-kernel (stock-rom canonical DTB)
+#     -> boot.img + build-info.json (device_ready=true, contract/ramdisk hashes)
+#
+# If any on-device asset is missing (boot-assets, rootfs hash manifest,
+# firmware pool, WLAN tuple, audio topology, stock ROM DTB inputs), the hook
+# fails closed with a precise message instead of staging a half-consistent boot
+# image. The pre-apply window ("stale boot image vs new rootfs") is covered by
+# the initramfs policy change requested in task-15 P0-1: kernel identity is
+# advisory (warn), not a fail-closed pin; see docs/maintenance/kernel-rpm.md §4.3.
+#
+# Environment contract (values from /etc/liuqin/bootimg.conf override defaults):
+#   LIUQIN_BOOT_ASSETS_DIR       on-device boot-assets root (default /usr/libexec/liuqin/boot-assets)
+#   LIUQIN_BOOTIMG_REFRESH       refresh tool (default $LIUQIN_BOOT_ASSETS_DIR/liuqin-bootimg-refresh,
+#                                then /usr/libexec/liuqin/liuqin-bootimg-refresh)
+#   LIUQIN_ROOTFS_MANIFEST       rootfs hash manifest used to regenerate the root
+#                                contract (default /usr/share/liuqin/rootfs.files.sha256)
+#   LIUQIN_FIRMWARE_POOL         firmware pool (default $LIUQIN_BOOT_ASSETS_DIR/firmware-pool)
+#   LIUQIN_WLAN_HSP2_TUPLE       WLAN HSP2 tuple (default $LIUQIN_BOOT_ASSETS_DIR/wlan-hsp2-tuple)
+#   LIUQIN_AUDIO_TOPOLOGY        AudioReach topology (default $LIUQIN_BOOT_ASSETS_DIR/audio/Xiaomi-Pad-6-Pro-tplg.bin)
+#   LIUQIN_STOCK_ROM_DIR         stock ROM analysis tree (dtbo/entry.NN + vendor_boot/dtbs/dtb-NN.dtb)
+#   LIUQIN_BOOTIMG_DTB_SOURCE    auto | stock-rom | upstream-artifact (default stock-rom)
+#   LIUQIN_MKBOOTIMG_DIR         AOSP mkbootimg checkout (default /usr/share/liuqin/mkbootimg)
+#   LIUQIN_CMDLINE_FILE          DT /chosen bootargs source (default /usr/share/liuqin/tools/native-bootargs.txt)
+#   LIUQIN_BOOTIMG_EXTRA_ARGS    additional args appended to the refresh invocation
+#   LIUQIN_BOOT_STAGING_DIR      staging root (default /boot/liuqin)
+#   LIUQIN_BOOT_LOG_DIR          log root (default /var/log/liuqin-bootimg)
+#   LIUQIN_MODULES_DIR           /usr/lib/modules override (tests only)
+#   LIUQIN_KERNEL_BUILD_INFO     release-gate build-info override (tests only)
+#   LIUQIN_BOOTIMG_ALLOW_UNVERIFIED=1  DEV ONLY: bypass the release gate
+#                                (installed Image/DTB/config vs recorded build);
+#                                never set on a release device.
+#
+# Exit: 0 = staged or disabled; 1 = fail-closed (nothing staged, old image kept).
+
+set -eu
+umask 022
+
+COMMAND=${1:-}
+KVER=${2:-}
+ENTRY_DIR=${3:-}
+KERNEL_IMAGE=${4:-}
+
+STAGING_DIR=${LIUQIN_BOOT_STAGING_DIR:-/boot/liuqin}
+LOG_DIR=${LIUQIN_BOOT_LOG_DIR:-/var/log/liuqin-bootimg}
+CONF=${LIUQIN_BOOTIMG_CONF:-/etc/liuqin/bootimg.conf}
+
+log() { printf '99-liuqin-android-boot: %s\n' "$*"; }
+die() {
+	log "ERROR: $*"
+	log "no boot.img was staged; previous /boot/liuqin images are untouched."
+	exit 1
+}
+
+open_log() {
+	LOG_FILE=/dev/null
+	if [ -n "$KVER" ]; then
+		mkdir -p "$LOG_DIR" 2>/dev/null || true
+		if ( : >>"$LOG_DIR/bootimg-$KVER.log" ) 2>/dev/null; then
+			LOG_FILE=$LOG_DIR/bootimg-$KVER.log
+			: >"$LOG_FILE" 2>/dev/null || LOG_FILE=/dev/null
+		fi
+	fi
+	exec >>"$LOG_FILE" 2>&1
+}
+open_log
+
+log "invoked: command=${COMMAND:-<empty>} kver=${KVER:-<empty>} entry_dir=${ENTRY_DIR:-<empty>} image=${KERNEL_IMAGE:-<empty>}"
+
+[ -n "$COMMAND" ] || die "missing \$1 (kernel-install action)"
+[ -n "$KVER" ] || die "missing \$2 (kernel version)"
+
+case $COMMAND in
+add)
+	: ;;
+remove)
+	# Offline removal of this kernel version: drop its staged boot artifacts only.
+	if [ -d "$STAGING_DIR" ]; then
+		rm -f "$STAGING_DIR/boot-$KVER.img" \
+			"$STAGING_DIR/boot-$KVER.SHA256SUMS" \
+			"$STAGING_DIR/boot-$KVER.build-info.json" \
+			"$STAGING_DIR/boot-$KVER.manifest" \
+			"$STAGING_DIR/boot-$KVER.ramdisk.cpio.gz" \
+			"$STAGING_DIR/boot-$KVER.contract"
+		log "removed staged artifacts for $KVER (boot partition not touched)"
+	fi
+	exit 0
+	;;
+*)
+	exit 0
+	;;
+esac
+
+# --- opt-in gate -----------------------------------------------------------
+if [ ! -f "$CONF" ]; then
+	printf '99-liuqin-android-boot: disabled: %s not present (boot.img staging is opt-in; kernel is installed only).\n' "$CONF" >&2
+	exit 0
+fi
+# shellcheck disable=SC1090
+. "$CONF"
+# The conf may relocate staging/log roots (and tests use this); re-apply and
+# reopen the log so it lands in the configured directory.
+STAGING_DIR=${LIUQIN_BOOT_STAGING_DIR:-$STAGING_DIR}
+LOG_DIR=${LIUQIN_BOOT_LOG_DIR:-$LOG_DIR}
+open_log
+
+ASSETS=${LIUQIN_BOOT_ASSETS_DIR:-/usr/libexec/liuqin/boot-assets}
+REFRESH=${LIUQIN_BOOTIMG_REFRESH:-$ASSETS/liuqin-bootimg-refresh}
+[ -x "$REFRESH" ] || REFRESH=/usr/libexec/liuqin/liuqin-bootimg-refresh
+# Single producer/consumer implementation of the boot metadata schema v2.
+# The refresh tool already used it to write build-info.json; this hook uses the
+# same file to verify that document against the staged bytes and to write the
+# staging manifest + SHA256SUMS that liuqin-apply-boot consumes.
+METADATA=${LIUQIN_BOOT_METADATA_TOOL:-/usr/lib/liuqin/liuqin_boot_metadata.py}
+ROOTFS_MANIFEST=${LIUQIN_ROOTFS_MANIFEST:-/usr/share/liuqin/rootfs.files.sha256}
+FIRMWARE_POOL=${LIUQIN_FIRMWARE_POOL:-$ASSETS/firmware-pool}
+WLAN_TUPLE=${LIUQIN_WLAN_HSP2_TUPLE:-$ASSETS/wlan-hsp2-tuple}
+AUDIO_TOPOLOGY=${LIUQIN_AUDIO_TOPOLOGY:-$ASSETS/audio/Xiaomi-Pad-6-Pro-tplg.bin}
+STOCK_DIR=${LIUQIN_STOCK_ROM_DIR:-/usr/share/liuqin/stock}
+DTB_SOURCE=${LIUQIN_BOOTIMG_DTB_SOURCE:-stock-rom}
+MKBOOTIMG_DIR=${LIUQIN_MKBOOTIMG_DIR:-/usr/share/liuqin/mkbootimg}
+CMDLINE_FILE=${LIUQIN_CMDLINE_FILE:-/usr/share/liuqin/tools/native-bootargs.txt}
+EXTRA_ARGS=${LIUQIN_BOOTIMG_EXTRA_ARGS:-}
+
+# --- inputs ----------------------------------------------------------------
+MODULES_DIR=${LIUQIN_MODULES_DIR:-/usr/lib/modules}
+[ -z "$KERNEL_IMAGE" ] && KERNEL_IMAGE=$MODULES_DIR/$KVER/vmlinuz
+[ -f "$KERNEL_IMAGE" ] || die "kernel image missing: $KERNEL_IMAGE"
+IMAGE_DIR=$MODULES_DIR/$KVER
+DTB=$IMAGE_DIR/device-tree/qcom/sm8475-xiaomi-liuqin.dtb
+[ -f "$DTB" ] || die "board DTB missing: $DTB"
+[ -d "$MKBOOTIMG_DIR" ] && [ -f "$MKBOOTIMG_DIR/mkbootimg.py" ] ||
+	die "AOSP mkbootimg checkout missing: $MKBOOTIMG_DIR"
+[ -f "$CMDLINE_FILE" ] || die "cmdline source missing: $CMDLINE_FILE"
+
+case $DTB_SOURCE in
+stock-rom)
+	[ -d "$STOCK_DIR" ] || die "stock ROM analysis tree missing: $STOCK_DIR (canonical DTB path needs the user's own ROM: dtbo/entry.NN x44 + vendor_boot/dtbs/dtb-NN.dtb x14)"
+	;;
+upstream-artifact)
+	die "LIUQIN_BOOTIMG_DTB_SOURCE=upstream-artifact is a dev-only structural fallback and is not allowed by this release hook; use stock-rom"
+	;;
+auto) : ;;
+*) die "invalid LIUQIN_BOOTIMG_DTB_SOURCE=$DTB_SOURCE" ;;
+esac
+
+# --- release gate: installed payload must be the recorded release build -----
+# Ensures Image/DTB/config of the installed package match
+# /usr/share/liuqin/kernel-build-info.json (which scripts/build-kernel-rpm.sh
+# copied from the kernel build). Prevents a dev/static or mismatched kernel
+# from ever being wrapped into a staged boot.img.
+KBINFO=${LIUQIN_KERNEL_BUILD_INFO:-/usr/share/liuqin/kernel-build-info.json}
+[ -f "$KBINFO" ] || die "release gate: $KBINFO missing (package is not a recorded release build)"
+if [ "${LIUQIN_BOOTIMG_ALLOW_UNVERIFIED:-0}" = "1" ]; then
+	log "WARNING: release gate bypassed via LIUQIN_BOOTIMG_ALLOW_UNVERIFIED=1 (dev only!)"
+elif command -v python3 >/dev/null 2>&1; then
+	python3 - "$KBINFO" "$KVER" "$KERNEL_IMAGE" "$DTB" <<'PY' || die "release gate failed (installed kernel does not match its recorded build; refusing to build boot.img)"
+import hashlib, json, sys
+info_path, kver, image_path, dtb_path = sys.argv[1:5]
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+info = json.load(open(info_path))
+problems = []
+if info.get("kernel_release") != kver:
+    problems.append("kernel_release %r != %r" % (info.get("kernel_release"), kver))
+artifacts = info.get("artifacts", {})
+image_sha = artifacts.get("dist/Image", {}).get("sha256")
+dtb_sha = artifacts.get("dist/sm8475-xiaomi-liuqin.dtb", {}).get("sha256")
+if image_sha and sha256(image_path) != image_sha:
+    problems.append("vmlinuz sha256 mismatch vs recorded Image")
+if dtb_sha and sha256(dtb_path) != dtb_sha:
+    problems.append("DTB sha256 mismatch vs recorded board DTB")
+config = info.get("config", {})
+audit = config.get("audit", {})
+if audit.get("fedora_ready") is not True:
+    problems.append("config.audit.fedora_ready is not true (generic/dev config, not the Fedora-SELinux release config)")
+if not config.get("sha256"):
+    problems.append("config.sha256 missing")
+for problem in problems:
+    print("release-gate: " + problem)
+sys.exit(1 if problems else 0)
+PY
+else
+	# python3-free fallback: at least compare the recorded release string.
+	grep -q '"kernel_release"[[:space:]]*:[[:space:]]*"'"$KVER"'"' "$KBINFO" ||
+		die "release gate failed: kernel-release mismatch in $KBINFO"
+fi
+log "release gate OK: installed Image/DTB/config match the recorded Fedora release build"
+
+# --- P0: on-device tool stack + all rebuild inputs must be present ----------
+[ -x "$REFRESH" ] || die "P0: on-device boot rebuild tool is missing: $REFRESH (install liuqin-boot-tools/boot-assets; a stale prebuilt ramdisk must NOT be reused)"
+[ -f "$ROOTFS_MANIFEST" ] || die "P0: rootfs hash manifest missing: $ROOTFS_MANIFEST (needed to regenerate the root admission contract for $KVER; ship it from the rootfs build)"
+[ -d "$FIRMWARE_POOL" ] || die "P0: firmware pool missing: $FIRMWARE_POOL (initramfs rebuild needs touch/BT/WLAN/regulatory/GPU/DSP firmware)"
+[ -d "$WLAN_TUPLE" ] || die "P0: WLAN HSP2 tuple missing: $WLAN_TUPLE"
+[ -f "$AUDIO_TOPOLOGY" ] || die "P0: AudioReach topology missing: $AUDIO_TOPOLOGY"
+if [ "$DTB_SOURCE" = "auto" ] && [ ! -d "$STOCK_DIR" ]; then
+	die "P0: canonical DTB path selected but stock ROM tree is missing: $STOCK_DIR"
+fi
+log "P0 toolstack inputs: assets=$ASSETS refresh=$REFRESH rootfs_manifest=$ROOTFS_MANIFEST firmware_pool=$FIRMWARE_POOL"
+
+[ -d "$STAGING_DIR" ] || mkdir -p "$STAGING_DIR" || die "cannot create staging root: $STAGING_DIR"
+
+# --- temp workspace --------------------------------------------------------
+if ! WORK=$(mktemp -d "${TMPDIR:-/tmp}/liuqin-bootimg.XXXXXX"); then
+	die "cannot create temporary workspace"
+fi
+trap 'rm -rf "$WORK"' EXIT
+
+# Materialise the kernel-out layout the builder expects. Symlinks keep the
+# staging dir small; the builder only reads these paths.
+KO=$WORK/kernel-out
+mkdir -p "$KO/arch/arm64/boot/dts/qcom" "$KO/scripts/dtc" "$KO/include/config"
+ln -s "$KERNEL_IMAGE" "$KO/arch/arm64/boot/Image"
+ln -s "$DTB" "$KO/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dtb"
+if [ -f /usr/share/liuqin/kernel.release ]; then
+	cp -f /usr/share/liuqin/kernel.release "$KO/include/config/kernel.release"
+else
+	printf '%s\n' "$KVER" >"$KO/include/config/kernel.release"
+fi
+# dtc/fdtoverlay are needed by the canonical DTB path (ABL overlay sink).
+# Fedora's `dtc` package provides both (/usr/bin/dtc, /usr/bin/fdtoverlay).
+for tool in dtc fdtoverlay; do
+	for candidate in "/usr/bin/$tool" "/usr/sbin/$tool" "$ASSETS/bin/$tool"; do
+		if [ -x "$candidate" ]; then
+			ln -s "$candidate" "$KO/scripts/dtc/$tool"
+			break
+		fi
+	done
+done
+
+OUT=$WORK/out
+mkdir -p "$OUT"
+
+log "rebuilding initramfs + contract + boot.img with $REFRESH"
+set +e
+# shellcheck disable=SC2086
+"$REFRESH" \
+	--kver "$KVER" \
+	--kernel-out "$KO" \
+	--out "$OUT" \
+	--assets-dir "$ASSETS" \
+	--rootfs-manifest "$ROOTFS_MANIFEST" \
+	--firmware-pool "$FIRMWARE_POOL" \
+	--wlan-hsp2-tuple "$WLAN_TUPLE" \
+	--audio-topology "$AUDIO_TOPOLOGY" \
+	--stock-rom-dir "$STOCK_DIR" \
+	--dtb-source "$DTB_SOURCE" \
+	--mkbootimg-dir "$MKBOOTIMG_DIR" \
+	--cmdline-file "$CMDLINE_FILE" \
+	$EXTRA_ARGS
+rc=$?
+set -e
+if [ "$rc" -ne 0 ]; then
+	die "P0: initramfs/contract/boot.img rebuild failed with exit code $rc (see $LOG_FILE and $LOG_DIR/)"
+fi
+
+BUILT=$OUT/boot-liuqin-dev.img
+[ -f "$BUILT" ] || die "refresh tool reported success but $BUILT is missing"
+[ -s "$BUILT" ] || die "refresh tool produced an empty boot image"
+[ -f "$OUT/build-info.json" ] || die "refresh tool produced no build-info.json"
+
+# --- schema v2 metadata gate + staging manifest ----------------------------
+# The refresh tool wrote build-info.json with the single schema v2 producer
+# (liuqin_boot_metadata.py).  Re-run the same implementation here to:
+#   * verify the document against the real staged bytes and against the
+#     installed kernel Image / board DTB (device_ready, kernel/DTB/ramdisk/
+#     contract hashes, dtb_source=stock-rom);
+#   * write boot-<kver>.manifest + boot-<kver>.SHA256SUMS in $OUT.
+# All validation happens BEFORE the previous staged image is replaced, so a
+# failure keeps the last good artifact intact (fail closed).
+[ -f "$METADATA" ] || die "boot metadata tool missing: $METADATA (schema v2; provided by kernel-liuqin; override with LIUQIN_BOOT_METADATA_TOOL)"
+python3 "$METADATA" stage \
+	--build-info "$OUT/build-info.json" \
+	--image "$BUILT" \
+	--staged-dir "$OUT" \
+	--kver "$KVER" \
+	--kernel-image "$KERNEL_IMAGE" \
+	--board-dtb "$DTB" ||
+	die "refusing to stage: boot metadata (schema v2) is not release-ready or does not match the assembled bytes (device_ready/kernel/DTB/ramdisk/contract)"
+log "schema v2 metadata verified against the staged bytes (device_ready=true, dtb_source=stock-rom)"
+
+# --- atomic staging: only replace the previous image after full success ----
+IMG=$STAGING_DIR/boot-$KVER.img
+TMP_IMG=$STAGING_DIR/.boot-$KVER.img.new
+cp -f "$BUILT" "$TMP_IMG"
+sync
+mv -f "$TMP_IMG" "$IMG"
+cmp -s "$IMG" "$BUILT" || die "staged image differs from the assembled image after copy"
+cp -f "$OUT/build-info.json" "$STAGING_DIR/boot-$KVER.build-info.json"
+if [ -f "$OUT/initramfs/liuqin-firstboot.cpio.gz" ]; then
+	cp -f "$OUT/initramfs/liuqin-firstboot.cpio.gz" "$STAGING_DIR/boot-$KVER.ramdisk.cpio.gz"
+fi
+for candidate in "$OUT/initramfs/liuqin-fedora-root.contract" "$OUT/liuqin-fedora-root.contract"; do
+	if [ -f "$candidate" ]; then
+		cp -f "$candidate" "$STAGING_DIR/boot-$KVER.contract"
+		break
+	fi
+done
+cp -f "$OUT/boot-$KVER.manifest" "$STAGING_DIR/boot-$KVER.manifest"
+cp -f "$OUT/boot-$KVER.SHA256SUMS" "$STAGING_DIR/boot-$KVER.SHA256SUMS"
+chmod 0644 "$IMG" "$STAGING_DIR"/boot-$KVER.* 2>/dev/null || true
+
+log "staged: $IMG ($(sha256sum "$IMG" | cut -d' ' -f1))"
+log "initramfs/contract rebuilt for $KVER; release gate passed; boot partition NOT written."
+log "to apply explicitly: liuqin-apply-boot --image $IMG   (dry-run by default)"
+exit 0

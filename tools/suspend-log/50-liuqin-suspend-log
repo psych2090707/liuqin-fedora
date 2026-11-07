@@ -1,0 +1,18 @@
+#!/bin/sh
+# systemd-sleep hook: record liuqin suspend/resume evidence.
+# Installed as /usr/lib/systemd/system-sleep/50-liuqin-suspend-log.
+# systemd 259 runs hooks from SYSTEM_SLEEP_PATH (/usr/lib/systemd/system-sleep)
+# only; /etc/systemd/system-sleep is not in its search path on this system.
+# The collector writes evidence under /var/lib/liuqin-suspend-log. Explicit
+# /etc/liuqin/early-wake-auto=1 also arms the bounded kernel recorder; staging
+# state overrides never arm hardware. No power policy, timer or IRQ changes.
+set -u
+
+action="${1:-}"
+operation="${2:-}"
+[ -n "$action" ] || exit 0
+
+# Bounded so a broken collector cannot hold suspend/resume.  Keep stderr for
+# the journal; stdout would duplicate the report into the sleep transaction.
+timeout 8 /usr/local/sbin/liuqin-suspend-log "$action" "$operation" >/dev/null || true
+exit 0

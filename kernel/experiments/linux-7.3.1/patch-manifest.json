@@ -1,0 +1,219 @@
+[
+  {
+    "group": "board-and-bindings",
+    "patch": "0001-board-and-bindings.patch",
+    "files": [
+      "Documentation/devicetree/bindings/arm/qcom.yaml",
+      "Documentation/devicetree/bindings/input/fpc,fpc1020.yaml",
+      "Documentation/devicetree/bindings/input/nanosic,wn8030.yaml",
+      "Documentation/devicetree/bindings/media/i2c/dongwoon,dw9768.yaml",
+      "Documentation/devicetree/bindings/media/i2c/qcom,liuqin-camera-sensors.yaml",
+      "Documentation/devicetree/bindings/media/qcom,sm8475-camss.yaml",
+      "Documentation/devicetree/bindings/media/qcom,sm8550-iris.yaml",
+      "Documentation/devicetree/bindings/phy/nxp,ptn3222.yaml",
+      "Documentation/devicetree/bindings/pinctrl/qcom,sm8450-tlmm.yaml",
+      "Documentation/devicetree/bindings/soc/qcom/qcom,pmic-glink.yaml",
+      "Documentation/devicetree/bindings/vendor-prefixes.yaml",
+      "Documentation/tee/index.rst",
+      "Documentation/tee/qseecom.rst",
+      "MAINTAINERS",
+      "arch/arm64/boot/dts/qcom/Makefile",
+      "arch/arm64/boot/dts/qcom/sm8450.dtsi",
+      "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts",
+      "arch/arm64/boot/dts/qcom/sm8475.dtsi"
+    ],
+    "sha256": "28e5fb0651ec662b732b34551820274e89c558dd84639c9e3d07a6d6838bb72b"
+  },
+  {
+    "group": "input-hid-touchscreen",
+    "patch": "0002-input-hid-touchscreen.patch",
+    "files": [
+      "drivers/hid/Kconfig",
+      "drivers/hid/Makefile",
+      "drivers/hid/hid-nanosic.c",
+      "drivers/input/touchscreen/Kconfig",
+      "drivers/input/touchscreen/Makefile",
+      "drivers/input/touchscreen/nt36523/Kconfig",
+      "drivers/input/touchscreen/nt36523/Makefile",
+      "drivers/input/touchscreen/nt36523/nt36xxx.c",
+      "drivers/input/touchscreen/nt36523/nt36xxx.h",
+      "drivers/input/touchscreen/nt36523/nt36xxx_fw_update.c",
+      "drivers/input/touchscreen/nt36523/nt36xxx_mem_map.h"
+    ],
+    "sha256": "3b7e61ca7e9ebce984d81ab8f96dbf941110d6e2c004810559608d71dc36b112"
+  },
+  {
+    "group": "display",
+    "patch": "0003-display.patch",
+    "files": [
+      "drivers/gpu/drm/panel/Kconfig",
+      "drivers/gpu/drm/panel/Makefile",
+      "drivers/gpu/drm/panel/panel-novatek-nt36532.c"
+    ],
+    "sha256": "0ed255d726001444502a4f1eba1109aa26aa22c0efe0e53809641dcce74bad78"
+  },
+  {
+    "group": "audio",
+    "patch": "0004-audio.patch",
+    "files": [
+      "drivers/firmware/cirrus/cs_dsp.c",
+      "sound/soc/codecs/cs35l41.c",
+      "sound/soc/codecs/cs35l41.h",
+      "sound/soc/codecs/wcd938x-sdw.c",
+      "sound/soc/codecs/wm_adsp.c",
+      "sound/soc/codecs/wm_adsp.h",
+      "sound/soc/qcom/qdsp6/audioreach.c",
+      "sound/soc/qcom/qdsp6/q6apm-dai.c",
+      "sound/soc/qcom/qdsp6/q6apm.c",
+      "sound/soc/qcom/sc8280xp.c"
+    ],
+    "sha256": "bc440cbb9ca71ce699be142128461e53f26bde968dbe7f8df62e6c8fda92a421"
+  },
+  {
+    "group": "power-soc",
+    "patch": "0005-power-soc.patch",
+    "files": [
+      "drivers/power/reset/msm-poweroff.c",
+      "drivers/power/reset/nvmem-reboot-mode.c",
+      "drivers/power/reset/qcom-pon.c",
+      "drivers/power/supply/qcom_battmgr.c",
+      "drivers/soc/qcom/pdr_internal.h",
+      "drivers/soc/qcom/pmic_glink.c",
+      "drivers/soc/qcom/pmic_glink_altmode.c",
+      "drivers/soc/qcom/qcom_pd_mapper.c",
+      "drivers/soc/qcom/qcom_pdr_msg.c",
+      "drivers/soc/qcom/ubwc_config.c"
+    ],
+    "sha256": "af8141393e61f357f354661e3d466fcbbe4b808f59bac65298c5dd3893ac00e1"
+  },
+  {
+    "group": "media-camera-clocks",
+    "patch": "0006-media-camera-clocks.patch",
+    "files": [
+      "drivers/clk/qcom/camcc-sm8450.c",
+      "drivers/clk/qcom/gcc-sm8450.c",
+      "drivers/media/i2c/Kconfig",
+      "drivers/media/i2c/Makefile",
+      "drivers/media/i2c/dw9768.c",
+      "drivers/media/i2c/qcom-liuqin-sensors.c",
+      "drivers/media/i2c/s5kjn1.c",
+      "drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c",
+      "drivers/media/platform/qcom/camss/camss-vfe.c",
+      "drivers/media/platform/qcom/camss/camss.c",
+      "drivers/media/platform/qcom/camss/camss.h",
+      "drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c",
+      "drivers/media/platform/qcom/iris/iris_platform_common.h",
+      "drivers/media/platform/qcom/iris/iris_platform_sm8450.h",
+      "drivers/media/platform/qcom/iris/iris_platform_vpu3x.c",
+      "drivers/media/platform/qcom/iris/iris_probe.c"
+    ],
+    "sha256": "0216ef5b1d2d581762465b6c11e034e5df613f595fcd8b7cdc45c3e875dac117"
+  },
+  {
+    "group": "remoteproc-earlycon",
+    "patch": "0007-remoteproc-earlycon.patch",
+    "files": [
+      "drivers/remoteproc/qcom_q6v5_pas.c",
+      "drivers/tty/serial/Kconfig",
+      "drivers/tty/serial/Makefile",
+      "drivers/tty/serial/earlycon-simplefb.c"
+    ],
+    "sha256": "58103f19617bfb82964d0bbf89a5c6f677a22d215b86268b37e6ff4948470d2b"
+  },
+  {
+    "group": "usb-phy",
+    "patch": "0008-usb-phy.patch",
+    "files": [
+      "drivers/phy/qualcomm/Kconfig",
+      "drivers/phy/qualcomm/Makefile",
+      "drivers/phy/qualcomm/phy-qcom-i2c-eusb2-repeater.c",
+      "drivers/phy/qualcomm/phy-qcom-qmp-pcie.c",
+      "drivers/usb/dwc3/core.c",
+      "drivers/usb/typec/ucsi/ucsi.c",
+      "drivers/usb/typec/ucsi/ucsi_glink.c"
+    ],
+    "sha256": "403e716f32c61dbc3aea534594008847c866dd02a5ee5510f88c6070654ba7bd"
+  },
+  {
+    "group": "pinctrl",
+    "patch": "0009-pinctrl.patch",
+    "files": [
+      "drivers/pinctrl/qcom/Kconfig.msm",
+      "drivers/pinctrl/qcom/Makefile",
+      "drivers/pinctrl/qcom/pinctrl-sm8475.c"
+    ],
+    "sha256": "ded647480c66fbb7c8f74f14bcee4dc39707ec7abae7887d4393e0c63ca70718"
+  },
+  {
+    "group": "tee-fingerprint",
+    "patch": "0010-tee-fingerprint.patch",
+    "files": [
+      "drivers/firmware/qcom/qcom_scm.c",
+      "drivers/misc/Kconfig",
+      "drivers/misc/Makefile",
+      "drivers/misc/fpc1264_spi_diag.c",
+      "drivers/soc/qcom/mdt_loader.c",
+      "drivers/tee/Kconfig",
+      "drivers/tee/Makefile",
+      "drivers/tee/qseecom/Kconfig",
+      "drivers/tee/qseecom/Makefile",
+      "drivers/tee/qseecom/core.c",
+      "include/linux/firmware/qcom/qcom_scm.h",
+      "include/linux/soc/qcom/mdt_loader.h",
+      "include/uapi/linux/tee.h"
+    ],
+    "sha256": "04c13383ff14437f4a8f30dad07720d1aacf2a6c2b611f78b170bd7e32253bc3"
+  },
+  {
+    "group": "cpu-ufs-net",
+    "patch": "0011-cpu-ufs-net.patch",
+    "files": [
+      "drivers/cpufreq/cpufreq-dt-platdev.c",
+      "drivers/ufs/host/ufs-qcom.c",
+      "drivers/ufs/host/ufs-qcom.h",
+      "net/core/rtnetlink.c"
+    ],
+    "sha256": "2caaf61aabbbb3142969e6a951a430077d140241520c429d8c3a77fcdf5c3a12"
+  },
+  {
+    "group": "ipcc-suspend",
+    "patch": "0012-ipcc-suspend.patch",
+    "files": [
+      "drivers/mailbox/qcom-ipcc.c"
+    ],
+    "sha256": "0371ab947d903cc7f0cafac934776ab6d94da74df9b875430460ef032e713105"
+  },
+  {
+    "group": "upstream-dsi-pll-system-muxes",
+    "patch": "0013-upstream-dsi-pll-system-muxes.patch",
+    "files": [
+      "drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c"
+    ],
+    "sha256": "baa2885d4012d23af318909b728c42dd146b98441d426535844bae5fb5f728d7",
+    "source": "https://lists.openwall.net/linux-kernel/2026/10/19/1525",
+    "message_id": "20261019130041.305805-1-xiaqinghuan@mail.ustc.edu.cn",
+    "withdraw_when": "the selected upstream kernel contains equivalent PHY-enable mux programming"
+  },
+  {
+    "group": "legacy-tdm-sink",
+    "patch": "0014-legacy-tdm-sink.patch",
+    "files": [
+      "sound/soc/qcom/qdsp6/audioreach.c",
+      "sound/soc/qcom/qdsp6/audioreach.h",
+      "sound/soc/qcom/qdsp6/topology.c"
+    ],
+    "sha256": "c9a2ac4859e4732076608a6b9d050583eb64d0bce2aee03c13f58528e2e237d4",
+    "source": "kernel/patches/queue/0300-input-touch-hid/0007-arm64-add-xiaomi-pad-6-pro-support.patch",
+    "withdraw_when": "the vendor ADSP firmware exposes an Audio IF sink and the topology no longer rewrites the endpoint MID to 0x0700100E"
+  },
+  {
+    "group": "input-touchscreen-novatek-liuqin-pen-scale",
+    "patch": "0015-input-touchscreen-novatek-liuqin-pen-scale.patch",
+    "files": [
+      "drivers/input/touchscreen/nt36523/nt36xxx.c"
+    ],
+    "sha256": "168a6bf4c6936b602bb96d85146c3f41db968b45c11809e397537793c0718936",
+    "source": "tasks/stylus-support/evidence/pen-evdev-2026-11-06.json; kernel/patches/queue/0300-input-touch-hid/0024",
+    "withdraw_when": "a liuqin pen report is measured in panel pixels instead of tenths, or the pen scale is set correctly by a board property upstream"
+  }
+]

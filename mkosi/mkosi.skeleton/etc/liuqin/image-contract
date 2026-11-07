@@ -1,0 +1,16 @@
+# liuqin rootfs -> image assembly contract. Read by scripts/build-image.sh /
+# boot.img assembly; keep in sync with mkosi/mkosi.conf and docs/build/rootfs-build.md.
+IMAGE_ID=liuqin-fedora-gnome
+DEVICE=liuqin
+DEVICE_NAME=Xiaomi Pad 6 Pro
+ARCH=aarch64
+DESKTOP=gnome
+LOGIN_MANAGER=gdm
+ROOT_LABEL=LIUQIN_ROOT
+# Flat image layout (ADR-0004 D4): /home is part of the root partition.
+HOME_LABEL=none
+ROOT_LAYOUT=flat
+DISPLAY_CONNECTOR=DSI-1
+DISPLAY_MODE=1800x2880@120
+DISPLAY_SCALE=2.5
+DISPLAY_ROTATION=right

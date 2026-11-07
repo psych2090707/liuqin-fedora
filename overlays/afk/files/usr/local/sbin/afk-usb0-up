@@ -1,0 +1,45 @@
+#!/bin/bash
+# AFK channel (TN0048) — pin the USB NCM device address, idempotently.
+#
+# Called by afk-usb0-address.service (early, before network.target/sshd) and by
+# afk-usb0-address.timer (every 2 minutes as a safety net).  NetworkManager is
+# configured to leave usb0 unmanaged, so this is the single writer of the
+# address; everything else in the AFK channel (sshd, dnsmasq for the host,
+# KRDP) assumes 192.168.7.2/24.
+set -u
+
+IFACE="${AFK_USB0_IFACE:-usb0}"
+ADDR="${AFK_USB0_ADDR:-192.168.7.2/24}"
+log() { printf 'afk-usb0-up: %s\n' "$*"; }
+
+# The gadget is created by the initramfs; wait briefly for udev/network to expose it.
+for _ in $(seq 1 50); do
+    [ -e "/sys/class/net/$IFACE" ] && break
+    sleep 0.2
+done
+
+if [ ! -e "/sys/class/net/$IFACE" ]; then
+    # An unplugged cable is the normal state once the tablet is used untethered.
+    # The 120 s safety-net timer would otherwise write this line into the journal
+    # every cycle (2026-10-28: 212 entries in the 10:00-15:00 window).  Exit
+    # quietly; the unit's ConditionPathExists= already covers the usual case, and
+    # a silent no-op is correct for whichever caller raced the unplug.
+    exit 0
+fi
+
+if ! ip link set dev "$IFACE" up; then
+    log "could not bring $IFACE up"
+    exit 1
+fi
+
+if ip -4 -o addr show dev "$IFACE" 2>/dev/null | awk '{print $4}' | grep -qx -- "$ADDR"; then
+    exit 0
+fi
+
+if ip addr replace "$ADDR" dev "$IFACE"; then
+    log "pinned $ADDR on $IFACE"
+else
+    log "failed to set $ADDR on $IFACE"
+    exit 1
+fi
+exit 0

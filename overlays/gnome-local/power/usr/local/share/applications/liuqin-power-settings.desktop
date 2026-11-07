@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=电源键与合盖
+Comment=设置短按/长按电源键与合盖时的屏幕行为
+Exec=/usr/local/bin/liuqin-power-settings
+Icon=preferences-system-power
+Terminal=false
+Categories=Settings;System;
+Keywords=power;button;lid;screen;blank;电源键;合盖;熄屏;亮屏;
+StartupNotify=true
