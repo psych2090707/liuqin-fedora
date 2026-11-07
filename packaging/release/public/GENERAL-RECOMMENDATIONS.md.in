@@ -1,44 +1,95 @@
-# 日常使用建议
+# 日常维护
 
-第一次进入桌面，可以先在“设置”里选好语言、时区和显示缩放。liuqin 的屏幕比较细，缩放调到自己看着舒服，触屏操作也会轻松一些。接上键盘套后，再试试打字、触控板和合盖，熟悉这台平板在 Linux 下的使用方式。
+下面的命令在平板的终端中运行。`sudo` 会要求输入自己的登录密码；示例中的 `软件包名` 和 `服务名` 请换成实际名称。
 
-## 中文输入
+## 软件源
 
-镜像使用 GNOME 自带的 IBus，已经包含中文拼音组件。在“设置 → 键盘”里添加中文输入源，之后用 Super+Space 切换；Super 就是键盘上的 Windows 键。
+Fedora 默认自动选择镜像站。下载慢时可以指定一个更合适的镜像。Fedora 45 使用 DNF5，系统提供的源文件位于 `/usr/share/dnf5/repos.d/`，自己的设置可以放在 `/etc/dnf/repos.override.d/`，以后也方便恢复。
 
-主要用触屏时，可以在辅助功能中打开屏幕键盘。项目还提供了一套定制键盘布局，适合想尝试更多快捷键的人；它目前还不完善，启用方法放在 [可选功能](OPTIONAL.md)。
-
-## 字体
-
-镜像自带 Noto 中文字体，日常阅读可以直接使用。经常写代码的话，也可以试试 Cascadia Code，在“优化”中把它选作等宽字体，终端会更整齐。
-
-喜欢浅色桌面的用户可以看看 [桌面外观](OPTIONAL.md#桌面外观)。那里介绍了 Light Style 和外观同步的开启方法，也保留了恢复默认外观的步骤。
-
-## 常用应用
-
-整理文献可以考虑 [Zotero](https://flathub.org/apps/org.zotero.Zotero)，日常沟通可以按需安装 [微信](https://flathub.org/apps/com.tencent.WeChat)。这两个社区 Flatpak 包都提供 ARM64 版本。先在软件商店里搜索需要的应用；想使用更多 Flatpak 应用时，可以按 [Flathub 的说明](https://flathub.org/setup/Fedora) 添加软件源。
-
-写代码、远程管理或者使用命令行 AI 工具，都可以在系统装好后慢慢补齐。首版把重点放在平板本身，常用软件留给每个人按自己的习惯选择。
-
-## 软件商店卡住时
-
-先确认网页能否正常打开。如果一直停在“正在刷新”，可以查看 Flatpak 的远程列表：
+以科大镜像为例，先创建目录：
 
 ```sh
-flatpak remotes --show-disabled
+sudo mkdir -p /etc/dnf/repos.override.d
+sudoedit /etc/dnf/repos.override.d/90-local-mirror.repo
 ```
 
-本项目在 Fedora 45 上遇到过 Fedora Flatpaks 的元数据刷新卡住，暂时关闭对应远程后恢复正常。若你的现象相同，可以先尝试：
+如果这个文件已经存在，先另存一份备份。将以下内容写入文件并保存：
+
+```ini
+[fedora]
+baseurl=https://mirrors.ustc.edu.cn/fedora/releases/$releasever/Everything/$basearch/os/
+metalink=
+
+[updates]
+baseurl=https://mirrors.ustc.edu.cn/fedora/updates/$releasever/Everything/$basearch/
+metalink=
+```
+
+`$releasever` 和 `$basearch` 保持原样，DNF 会自动填入系统版本和架构。然后刷新缓存、查看当前启用的源：
+
+```sh
+sudo dnf makecache --refresh
+dnf repo list --enabled
+```
+
+想恢复自动选择镜像，删除自己新建的这个覆写文件后再次刷新缓存即可；若修改的是原有文件，则恢复备份。换其他镜像站时，按该站的 Fedora 帮助页替换地址。参考 [科大镜像说明](https://mirrors.ustc.edu.cn/help/fedora.html)。
+
+添加第三方源时，优先使用软件作者给出的 Fedora 安装说明，并确认支持 Fedora 45 和 aarch64。源会影响以后更新到的软件版本，只添加自己需要的源，保留签名检查。
+
+## 常用软件命令
+
+```sh
+dnf search 软件包名             # 搜索
+sudo dnf install 软件包名       # 安装
+dnf info 软件包名              # 查看介绍和版本
+sudo dnf remove 软件包名        # 卸载，确认前看清连带删除列表
+sudo dnf upgrade --refresh      # 更新当前系统
+sudo dnf clean packages         # 清理下载的软件包缓存
+```
+
+本项目的内核需要 boot 和模块配套，升级内核前请看对应版本的项目说明；当前自动内核更新和恢复流程尚未完整验收。Fedora 大版本升级也需要另外核对设备适配。
+
+## Flatpak
+
+桌面应用也可以通过 Flatpak 安装。在 [Flathub](https://flathub.org/setup/Fedora) 按说明添加软件源后，常用命令是：
+
+```sh
+flatpak remotes
+flatpak search 关键词
+flatpak install flathub 应用ID
+flatpak update
+flatpak uninstall 应用ID
+```
+
+如果软件商店一直卡在刷新，可先查看 `flatpak remotes --show-disabled`。本项目在 Fedora 45 上遇到过 Fedora Flatpaks 元数据刷新卡住；遇到相同情况时，可临时关闭对应远程：
 
 ```sh
 sudo flatpak remote-modify --system --disable fedora
 sudo flatpak remote-modify --system --disable fedora-testing
 ```
 
-以后需要恢复时，把 `--disable` 换成 `--enable` 即可。Flathub 使用另一套远程配置，可以继续按原来的方式使用。
+恢复时将 `--disable` 改为 `--enable`。这些命令只适用于列表中已有的对应远程。
 
-如果平时需要代理，还要留意软件商店是否能使用它。浏览器可能已经配置好代理，而负责下载系统软件的后台服务仍在直连；这种情况需要按自己所用的代理工具单独设置。
+## 查看服务
 
-## 系统更新
+```sh
+systemctl --failed                    # 查看失败的系统服务
+systemctl status 服务名               # 查看某项服务的状态
+sudo systemctl restart 服务名         # 重启指定服务
+```
 
-普通应用可以通过软件商店或 dnf 更新。项目内核的更新方法会随版本说明提供；升级前先看对应说明，尤其是 boot 和内核模块的配套要求。当前尚未完整验收自动内核更新和恢复流程，首版先按手动维护的方式使用。
+排查桌面用户服务时，在 `systemctl` 后加 `--user`，例如 `systemctl --user --failed`。
+
+## 查看日志和空间
+
+```sh
+journalctl -b -p err                  # 本次启动的错误日志
+journalctl -b -u 服务名               # 某项服务本次启动的日志
+journalctl -k -b                      # 内核日志
+df -h                                # 查看磁盘可用空间
+journalctl --disk-usage               # 查看日志占用
+uname -r                             # 查看内核版本
+cat /etc/os-release                  # 查看系统版本
+```
+
+反馈问题时，附上现象、系统版本和相关日志即可。分享前看一遍内容，隐去自己的账号、网络地址和其他私人信息。
