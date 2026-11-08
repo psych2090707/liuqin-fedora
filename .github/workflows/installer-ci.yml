@@ -82,6 +82,14 @@ jobs:
           if ($document.format -ne 'liuqin-agent-doctor/1' -or -not $document.ok) {
             throw 'doctor --json did not produce a successful doctor document'
           }
+          $toolLog = Get-Content $stderr -Raw
+          Write-Host $toolLog
+          if (-not $document.fastboot.path.StartsWith($tools, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "doctor used a preinstalled fastboot instead of the isolated copy: $($document.fastboot.path)"
+          }
+          if ($toolLog -notmatch [regex]::Escape($tools)) {
+            throw 'the bootstrap did not report the isolated tools root'
+          }
           foreach ($relative in @('tools\python\python.exe',
                                   'tools\platform-tools\fastboot.exe')) {
             if (-not (Test-Path (Join-Path $tools $relative))) {
