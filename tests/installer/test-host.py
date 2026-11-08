@@ -679,7 +679,8 @@ assert installer.is_mutating_fastboot(['--set-active=a'])
 for verb in ('getvar', 'devices', 'getvar', 'getvar'):
     assert not installer.is_mutating_fastboot([verb, 'x']), verb
 assert installer.is_mutating_fastboot([])
-args = SimpleNamespace(serial='TEST_SERIAL')
+args = SimpleNamespace(serial='TEST_SERIAL',
+                       fastboot=str(project / 'tests/installer/fake-fastboot'))
 with patch.object(installer.subprocess, 'run',
                   return_value=SimpleNamespace(stdout='(bootloader) product: liuqin\n')) as run:
     dry = installer.make_fastboot(args, writes=False)

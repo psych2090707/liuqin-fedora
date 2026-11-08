@@ -117,3 +117,4 @@ jobs:
             throw 'the rejected Python archive was unpacked'
           }
           Write-Host "bad checksum refused with exit code $code"
+          exit 0
