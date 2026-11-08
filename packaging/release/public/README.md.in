@@ -9,6 +9,7 @@
 系统下载在本仓库 **[Releases](https://github.com/psych2090707/liuqin-fedora/releases)**。GitHub 自动提供的 “Source code” 压缩包是项目源码，**不是系统镜像**。
 
 - 首版只提供 Linux 单系统的实验安装路径，会清除 Android 用户数据。先读 **[安装说明](INSTALL.md)**。
+- **Windows 11 和 Linux 共用同一个入口**：Windows 用 `install-liuqin.ps1`，Linux 用 `liuqin-install.py`；Windows 不需要 WSL。Windows 上的 USB 网络和真实刷机尚未实机验证。
 - 公开镜像不含再分发许可未确认的厂商固件。使用者必须自行准备指定固件，在自己的电脑上运行本地补齐工具；该工具同时让使用者设置自己的密码。
 - 镜像账户为 **`user`**，家目录 `/home/user`。没有共享默认密码，不包含维护者个人文件、网络凭据、校准或指纹模板。
 - Android/Fedora 双系统仅列为未来计划，**未经验证，首版安装包拒绝双系统模式**。

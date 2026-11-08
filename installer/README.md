@@ -8,7 +8,10 @@ GNOME/GDM；设备侧脚本同时保留 `plasmalogin`（KDE）兼容路径，便
 ## 目录
 
 ```
-install.py                  host 侧安装器（上游 + Fedora 门控/dry-run）
+liuqin-install.py           单一入口：doctor/fetch/firmware/prepare/install
+windows/install-liuqin.ps1  Windows 引导：用户目录 Python + platform-tools
+windows/install-liuqin.cmd  同一入口的 cmd 包装
+install.py                  host 侧安装器（上游 + Fedora 门控/dry-run/阶段报告）
 lib/
   liuqin_layout.py          分区布局引擎（上游逐字复用）
   liuqin-rom-images.json    原厂 ROM 钉死表（上游逐字复用）
@@ -23,6 +26,24 @@ PROVENANCE.md               来源、sha256、逐字/改造清单
 ```
 
 ## 用法
+
+推荐从单一入口开始；它负责环境检查、下载、固件补齐和报告，设备协议仍由 `install.py` 执行。
+
+```sh
+# Windows 11（不需要 WSL）：在仓库根目录
+powershell -ExecutionPolicy Bypass -File installer\windows\install-liuqin.ps1 doctor
+
+# Linux：同一入口
+python3 installer/liuqin-install.py doctor --json
+python3 installer/liuqin-install.py fetch --repo <GitHub 仓库> --out install
+python3 installer/liuqin-install.py firmware --base install/image --out firmware --accept-firmware-terms
+python3 installer/liuqin-install.py prepare --base install/image --firmware firmware --out prepared
+python3 installer/liuqin-install.py install --bundle prepared --layout linux-only ... --dry-run
+```
+
+`install` 会把未知参数原样转给 `install.py`，并在结束时写 `liuqin-install-report.json`（`--report` 可改路径）。真实写入仍需要 `install.py` 的 `--yes-write-device`，入口不会替你添加。
+
+也可以直接使用底层安装器：
 
 ```sh
 # 1) 本地校验（默认；不访问设备）

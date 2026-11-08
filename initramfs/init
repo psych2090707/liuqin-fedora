@@ -1707,6 +1707,12 @@ echo 0x1d6b >"$gadget/idVendor"
 echo 0x1040 >"$gadget/idProduct"
 echo 0x0100 >"$gadget/bcdDevice"
 echo 0x0200 >"$gadget/bcdUSB"
+# Composite device with an Interface Association Descriptor.  Windows uses
+# these bits together with the Microsoft OS descriptor below; Linux and macOS
+# match the NCM interfaces by class and are unaffected.
+echo 0xEF >"$gadget/bDeviceClass"
+echo 0x02 >"$gadget/bDeviceSubClass"
+echo 0x01 >"$gadget/bDeviceProtocol"
 
 mkdir -p "$gadget/strings/0x409"
 echo 000000000001 >"$gadget/strings/0x409/serialnumber"
@@ -1728,6 +1734,21 @@ if ! mkdir "$gadget/functions/$function_name" 2>/dev/null; then
 fi
 echo 02:00:00:00:07:02 >"$gadget/functions/$function_name/dev_addr"
 echo 02:00:00:00:07:01 >"$gadget/functions/$function_name/host_addr"
+
+# Windows 11 ships UsbNcm; Windows 10 needs the Microsoft OS descriptor to
+# select it.  The WINNCM compatible ID is the one Microsoft documents for
+# CDC-NCM functions.  Without these, a Windows host may enumerate the gadget
+# without a usable network adapter even though Linux binds cdc_ncm.
+# Windows USB networking is not yet verified on real hardware.
+mkdir -p "$gadget/os_desc"
+echo 1 >"$gadget/os_desc/use"
+echo 0xbc >"$gadget/os_desc/b_vendor_code"
+echo MSFT100 >"$gadget/os_desc/qw_sign"
+if [ "$function_name" = ncm.usb0 ]; then
+	mkdir -p "$gadget/functions/$function_name/os_desc/interface.ncm"
+	echo WINNCM >"$gadget/functions/$function_name/os_desc/interface.ncm/compatible_id"
+fi
+ln -s "$gadget/configs/c.1" "$gadget/os_desc"
 ln -s "$gadget/functions/$function_name" "$gadget/configs/c.1/$function_name"
 
 udc_name=

@@ -26,7 +26,11 @@ die() { printf 'liuqin-install: %s\n' "$*" >&2; exit 1; }
 # assembled rootfs (scripts/build-image.sh) and embedded in installer.img; this
 # helper only verifies that the extraction preserved them (no hardcoded
 # distribution guesses such as "ping must have cap_net_raw").
-. /usr/lib/liuqin/install-privileges.sh
+privileges=${LIUQIN_INSTALL_PRIVILEGES:-/usr/lib/liuqin/install-privileges.sh}
+# Host-side tests run this file from the repository; the installed RAM image
+# always has the helper at the absolute path above.
+[ -f "$privileges" ] || privileges=$(dirname "$0")/install-privileges.sh
+. "$privileges"
 usage='usage: install-root.sh BOOT_ID ROOTFS_URL SHA256 BYTES ERASE-LIUQIN-USERDATA ROOT_PARTNAME HOME_PARTNAME [ENABLE-USB-RESCUE] [KEEP-HOME] [BATTERY-UNAVAILABLE-OK] [SWITCH-STORE ubuntu URL SHA256 BYTES android URL SHA256 BYTES]'
 [ "$#" -ge 7 ] || die "$usage"
 [ "$5" = ERASE-LIUQIN-USERDATA ] || die 'explicit data-erasure acknowledgement required'

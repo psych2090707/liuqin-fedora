@@ -36,6 +36,7 @@ run 'host installer (upstream suite + Fedora gates)' python3 tests/installer/tes
 run 'host installer dry-run flow' python3 tests/installer/test-dry-run.py
 run 'installer tooling and simulator' python3 tests/installer/test-tools.py
 run 'extra-root overlay injection' python3 tests/installer/test-extra-root.py
+run 'agent install path (Windows prep and safety gates)' python3 tests/installer/test-agent-install.py
 
 # Root, /dev/fuse and fuse2fs are needed for the device-side install test; skip
 # it (not fail) where the host cannot provide them, as documented.

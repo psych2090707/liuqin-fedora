@@ -27,9 +27,11 @@ import hashlib
 import http.server
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import tarfile
@@ -47,6 +49,103 @@ MUTATING_FASTBOOT = frozenset({
     'set_active', 'oem', 'flashing', 'update', 'wipe',
 })
 FEDORA_CONTRACT_NAME = '/etc/liuqin-fedora-root.contract'
+
+# FEDORA: a machine-readable account of the stage that was running.  Agents
+# read this instead of guessing from prose; humans still get the same lines on
+# stdout.  Every stage line is flushed, so a hung USB step is visible too.
+REPORT_FORMAT = 'liuqin-install-report/1'
+
+
+class RunReport:
+    """Stage progress plus a final JSON result, written incrementally."""
+
+    def __init__(self, path=None):
+        self.path = Path(path).expanduser() if path else None
+        self.stage = 'start'
+        self.events = []
+
+    def set(self, stage, detail=''):
+        self.stage = stage
+        self.events.append({'stage': stage, 'detail': detail})
+        print(f'STAGE {stage}' + ((': ' + detail) if detail else ''), flush=True)
+        self.flush(ok=True if stage == 'complete' else None)
+
+    def flush(self, ok=None, error=None, hint=None):
+        if self.path is None:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        data = {'format': REPORT_FORMAT, 'ok': ok, 'stage': self.stage,
+                'events': self.events}
+        if error is not None:
+            data['error'] = error
+        if hint is not None:
+            data['hint'] = hint
+        self.path.write_text(json.dumps(data, indent=2) + '\n')
+
+
+REPORT = RunReport()
+
+# Actionable next steps for the failures an agent will actually meet.  The
+# installer never guesses: it either prints one of these or the original error.
+FAILURE_HINTS = (
+    ('fastboot executable was not found',
+     '安装 Android platform-tools，并把 fastboot 放到 PATH，或用 --fastboot 指定可执行文件。'),
+    ('bundle checksum mismatch',
+     '重新下载同一版本的完整安装包；不要混用不同版本或残缺文件。'),
+    ('bundle.json is missing',
+     '安装包不完整：请下载 Release 的全部基础镜像文件并重新解包。'),
+    ('Fastboot device check failed',
+     '确认设备是 Xiaomi Pad 6 Pro（liuqin）、Bootloader 已解锁，并在 Fastboot 模式下重新插线。'),
+    ('no Fastboot device matched',
+     '只连接这台平板，或显式传入 --serial；不要在多个 Android 设备同时连接时继续。'),
+    ('Cannot determine partition size',
+     '设备的 Fastboot 分区信息不完整；停止写入，先确认 `fastboot getvar all` 正常。'),
+    ('USB channel did not become ready',
+     '电脑没有建立到平板的 USB 网络。检查数据线、设备是否停在 RAM 安装器，以及电脑是否出现 192.168.7.x 网卡。'),
+    ('device could not reach the installer HTTP server',
+     '平板无法访问电脑的安装文件服务。Windows 上通常是防火墙拦截入站连接；请允许本程序的专用网络访问，或显式传入 --host-address/--http-port 后重试。'),
+    ('refusing to install on weak battery evidence',
+     '电量或电压不足；先充电，再重新开始安装。'),
+    ('partition table is neither',
+     '停止：这个分区表不是原厂布局，也不是本项目创建的布局。不要猜分区，先恢复原厂分区表。'),
+    ('boot partition',
+     '停止：设备 boot 分区大小与本项目验证过的布局不一致，包与设备可能不匹配。'),
+    ('installer kernel does not match',
+     '安装器内核与安装包不是同一版本；重新下载同一 Release 的全部文件。'),
+    ('Saved partition table',
+     '备份内容与清单不一致；停止，不要写入，保留备份目录用于排查。'),
+)
+
+
+def hint_for(error):
+    text = str(error)
+    for needle, hint in FAILURE_HINTS:
+        if needle in text:
+            return hint
+    return None
+
+
+def fastboot_executable(args=None):
+    """Find fastboot on PATH, honour $FASTBOOT, or use --fastboot.
+
+    Windows: platform-tools ship ``fastboot.exe`` and PATH lookup is enough;
+    the explicit option exists so an agent can point at a portable copy
+    without modifying the user's PATH.
+    """
+    candidate = getattr(args, 'fastboot', None) or os.environ.get('FASTBOOT')
+    if candidate:
+        path = Path(candidate).expanduser()
+        if path.is_file():
+            return str(path)
+        found = shutil.which(candidate)
+        if found:
+            return found
+        raise RuntimeError('fastboot executable was not found: ' + str(candidate))
+    found = shutil.which('fastboot') or shutil.which('fastboot.exe')
+    if not found:
+        raise RuntimeError('fastboot executable was not found on PATH'
+                           ' —— 未找到 fastboot，请安装 Android platform-tools')
+    return found
 
 
 # Slot assignment.  In the dual layout both systems boot from slot A: the
@@ -227,8 +326,17 @@ def parse_arguments(argv=None):
     parser.add_argument('--bundle', type=Path, required=True)
     parser.add_argument('--check', action='store_true', help='Verify local files without accessing any device')
     parser.add_argument('--serial')
+    parser.add_argument('--fastboot', metavar='PATH',
+                        help='fastboot executable (default: $FASTBOOT, then PATH). '
+                             'Windows agents can point at a portable platform-tools copy')
     parser.add_argument('--host-address', help='Host IPv4 address on the tablet USB network')
+    parser.add_argument('--http-port', type=int, default=0,
+                        help='port for the bundle server (default: ephemeral). A fixed port makes '
+                             'a Windows firewall rule easier to author')
     parser.add_argument('--device-address', default='192.168.7.2')
+    parser.add_argument('--report', type=Path, metavar='FILE',
+                        help='write a machine-readable stage/result JSON file, updated as the run '
+                             'progresses (for an agent coordinating the installation)')
     parser.add_argument('--backup', type=Path)
     parser.add_argument('--no-backup', action='store_true',
                         help='Explicitly skip partition backups for an existing --keep-home reinstall')
@@ -437,12 +545,17 @@ def make_fastboot(args, writes):
     ``--yes-write-device``; otherwise it is printed and skipped, so a dry-run
     can rehearse the exact command line without touching the tablet.
     """
+    executable = fastboot_executable(args)
+
     def fastboot(*arguments):
         if not writes and is_mutating_fastboot(arguments):
-            print('DRY-RUN: would run: fastboot -s ' + args.serial + ' ' + shlex.join(arguments),
+            # The rehearsal prints the canonical command line, not the host's
+            # absolute executable path, so the plan is identical on Windows
+            # and Linux and easy to compare with the documentation.
+            print('DRY-RUN: would run: ' + shlex.join(['fastboot', '-s', args.serial, *arguments]),
                   flush=True)
             return ''
-        result = subprocess.run(['fastboot', '-s', args.serial, *arguments], check=True,
+        result = subprocess.run([executable, '-s', args.serial, *arguments], check=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=1800)
         return result.stdout
     return fastboot
@@ -489,8 +602,8 @@ def device_identity(parser, fastboot):
     """The tablet must be a liuqin with an unlocked bootloader (read-only)."""
     for name, value in (('product', 'liuqin'), ('unlocked', 'yes')):
         if not re.search(r'\b' + name + r':\s*' + value + r'\b', fastboot('getvar', name)):
-            parser.error('Fastboot device check failed: ' + name +
-                         ' —— 请确认设备是小米平板 6 Pro（liuqin）且已解锁 Bootloader')
+            raise RuntimeError('Fastboot device check failed: ' + name +
+                               ' —— 请确认设备是小米平板 6 Pro（liuqin）且已解锁 Bootloader')
 
 
 def device_capacity_checks(parser, args, fastboot, bundle):
@@ -509,8 +622,8 @@ def device_capacity_checks(parser, args, fastboot, bundle):
     # this is the cheapest identity check that runs before booting it.
     userdata_size = partition_size('userdata', required=False)
     if userdata_size is not None and userdata_size < 16 * 1024 ** 3:
-        parser.error('userdata is smaller than 16 GiB; only Xiaomi Pad 6 Pro (liuqin) is supported'
-                     ' —— 请确认设备为小米平板 6 Pro（liuqin），不要用于其他机型')
+        raise RuntimeError('userdata is smaller than 16 GiB; only Xiaomi Pad 6 Pro (liuqin) is supported'
+                           ' —— 请确认设备为小米平板 6 Pro（liuqin），不要用于其他机型')
     # The project boot image is flashed zero-filled to the whole boot
     # partition, so every partition it goes to must be the pinned size,
     # the image must fit it, and the padded image must go over USB in one
@@ -519,18 +632,18 @@ def device_capacity_checks(parser, args, fastboot, bundle):
     for slot in boot_slots(args.layout):
         reported = partition_size('boot_' + slot)
         if reported != boot_bytes:
-            parser.error(f'boot_{slot} is {reported} bytes, not the {boot_bytes} bytes of the pinned'
-                         ' layout —— boot 分区大小与本项目验证过的设备不一致')
+            raise RuntimeError(f'boot_{slot} is {reported} bytes, not the {boot_bytes} bytes of the pinned'
+                               ' layout —— boot 分区大小与本项目验证过的设备不一致')
     largest = max((bundle / name).stat().st_size for name in ('boot.img', 'installer.img'))
     if largest > boot_bytes:
-        parser.error('boot image exceeds the reported boot partition size'
-                     ' —— boot 镜像大于 boot 分区，包与设备不匹配')
+        raise RuntimeError('boot image exceeds the reported boot partition size'
+                           ' —— boot 镜像大于 boot 分区，包与设备不匹配')
     match = re.search(r'max-download-size:\s*(0x[0-9a-fA-F]+|[0-9]+)',
                       fastboot('getvar', 'max-download-size'))
     if not match or int(match[1], 0) < boot_bytes:
-        parser.error('the bootloader cannot receive a whole boot partition in one download'
-                     ' (max-download-size ' + (match[1] if match else 'unknown') + ')'
-                     ' —— Bootloader 单次下载上限小于 boot 分区')
+        raise RuntimeError('the bootloader cannot receive a whole boot partition in one download'
+                           ' (max-download-size ' + (match[1] if match else 'unknown') + ')'
+                           ' —— Bootloader 单次下载上限小于 boot 分区')
     return boot_bytes
 
 
@@ -597,6 +710,7 @@ def dry_run(parser, args, bundle, manifest):
     fails exactly where the real installation would.
     """
     print('DRY-RUN: no Fastboot write and no RAM installer write will run.', flush=True)
+    REPORT.set('dry-run-device-check', 'read-only Fastboot queries only')
     restore = args.restore_partition_table
     if restore is None and not all((args.serial, args.backup or args.no_backup, args.erase_userdata)):
         parser.error('--serial, --backup (or --no-backup), --erase-userdata and --layout are required')
@@ -617,6 +731,7 @@ def dry_run(parser, args, bundle, manifest):
     device_identity(parser, fastboot)
     if restore is not None:
         dry_run_restore(parser, args, restore, fastboot)
+        REPORT.set('complete', 'dry-run of partition-table restore passed')
         return
     boot_bytes = device_capacity_checks(parser, args, fastboot, bundle)
     planned = None if args.keep_home else reference_plan(parser, args)
@@ -674,6 +789,7 @@ def dry_run(parser, args, bundle, manifest):
     finally:
         scratch.cleanup()
     print('DRY-RUN COMPLETE: nothing was written to a device.')
+    REPORT.set('complete', 'dry-run passed; nothing was written to a device')
 
 
 def dry_run_steps(parser, args, bundle, manifest, plan, userdata_info, rom_images,
@@ -714,6 +830,10 @@ def dry_run_steps(parser, args, bundle, manifest, plan, userdata_info, rom_image
 
 def main(argv=None):
     parser, args = parse_arguments(argv)
+    REPORT.path = args.report.expanduser() if args.report else None
+    if args.report:
+        REPORT.flush()
+    REPORT.set('check', 'verify local bundle files; no device access')
     bundle = args.bundle.resolve()
     if not (bundle / 'bundle.json').is_file() and (bundle / 'image.json').is_file():
         parser.error('this is a public base image; prepare the local firmware/password bundle first'
@@ -732,7 +852,7 @@ def main(argv=None):
                          ' —— 双系统不在本版本支持范围内，不能用此安装包尝试')
     for name in BUNDLE_FILES:
         if sha(bundle / name) != manifest['files'][name]:
-            parser.error('bundle checksum mismatch: ' + name + ' —— 包文件损坏或不完整，请重新下载')
+            raise RuntimeError('bundle checksum mismatch: ' + name + ' —— 包文件损坏或不完整，请重新下载')
     # FEDORA: the optional Fedora bundle extension is validated when present;
     # an upstream-format bundle without it still passes this local check.
     fedora = manifest.get('fedora')
@@ -756,13 +876,14 @@ def main(argv=None):
         if not args.check:
             print('Default mode: local checks only. Rehearse the device flow with --dry-run;')
             print('real writes require --yes-write-device (attended device write only).')
+        REPORT.set('complete', 'local checks passed; no device was accessed')
         return
     validate_arguments(parser, args)
     if manifest['status'] != 'DEVICE_TESTED' and not args.allow_unverified:
-        parser.error('bundle has not passed device testing; use --allow-unverified only for attended tests'
+        raise RuntimeError('bundle has not passed device testing; use --allow-unverified only for attended tests'
                      ' —— 该包未通过真机验证，请勿用于正式安装')
     if 'kernel_release' not in manifest:
-        parser.error('bundle.json has no kernel_release —— 安装包缺少内核版本字段')
+        raise RuntimeError('bundle.json has no kernel_release —— 安装包缺少内核版本字段')
     if args.dry_run:
         dry_run(parser, args, bundle, manifest)
         return
@@ -797,6 +918,7 @@ def main(argv=None):
     print('REAL DEVICE WRITES ENABLED: --yes-write-device given.'
           ' attended device write only.', flush=True)
 
+    REPORT.set('device-check', 'read-only Fastboot identity and capacity queries')
     fastboot = make_fastboot(args, writes=True)
     device_identity(parser, fastboot)
 
@@ -844,6 +966,7 @@ def main(argv=None):
         # ram_image_battery_evidence().  Runs while the tablet is still in
         # Fastboot, before the RAM shell exists.
         args.battery_unavailable_ok = ram_image_battery_evidence(fastboot)
+        REPORT.set('ram-boot', 'boot the RAM installer; no storage has been written')
         print('Booting the RAM installer...', flush=True)
         fastboot('boot', str(bundle / 'installer.img'))
         deadline = time.monotonic() + 120
@@ -910,8 +1033,31 @@ def main(argv=None):
             extra['/extra-root.tar.gz'] = overlay_tar
             print(f'First-boot overlay packed: {overlay_tar.stat().st_size} bytes'
                   f' from {args.extra_root}', flush=True)
-        server = http.server.ThreadingHTTPServer((args.host_address, 0), bundle_handler(bundle, extra))
+        # FEDORA: prove that the tablet can fetch from this host before the
+        # first backup or partition edit.  On Windows the USB NIC is often
+        # classified as a public network, so an inbound rule may silently
+        # block the bundle server; without this probe the run would otherwise
+        # repartition first and fail later while extracting the rootfs.
+        probe_token = 'liuqin-probe-' + uuid.uuid4().hex
+        probe_file = Path(scratch.name) / 'probe.txt'
+        probe_file.write_text(probe_token + '\n')
+        extra['/__liuqin_probe'] = probe_file
+        server = http.server.ThreadingHTTPServer((args.host_address, args.http_port),
+                                                bundle_handler(bundle, extra))
         threading.Thread(target=server.serve_forever, daemon=True).start()
+        base = f'http://{args.host_address}:{server.server_port}'
+        print('Bundle server ready at ' + base + '; probing it from the tablet...', flush=True)
+        try:
+            answer = remote('/bin/busybox wget -q -O - ' + base + '/__liuqin_probe 2>/dev/null').decode()
+        except (OSError, RuntimeError) as error:
+            raise RuntimeError('device could not reach the installer HTTP server at ' + base +
+                               ': ' + str(error) +
+                               ' —— 设备无法访问电脑的安装文件服务；此时尚未改分区') from error
+        if answer.strip() != probe_token:
+            raise RuntimeError('device could not reach the installer HTTP server at ' + base +
+                               ' (probe answer mismatch) —— 设备无法访问电脑的安装文件服务；此时尚未改分区')
+        print('Tablet reached the bundle server; proceeding to backup.', flush=True)
+        REPORT.set('backup', 'read-only partition and GPT backups')
         backups = {}
         saved = None
         if args.no_backup:
@@ -948,6 +1094,7 @@ def main(argv=None):
             plan = layout.plan_layout(disk, args.layout, android, root)
             print(plan.table(), flush=True)
             confirm_plan(planned, plan)
+            REPORT.set('partition-layout', 'first destructive step: userdata is cleared')
             apply_layout(device_layout, disk, plan, saved, args.layout)
         flashes = []
         if args.layout == 'dual':
@@ -971,7 +1118,7 @@ def main(argv=None):
                                                       flash_sha256=digest))
             if not args.no_backup:
                 (args.backup / 'SHA256SUMS').write_text(''.join(f'{h}  {n}\n' for n, h in backups.items()))
-        base = f'http://{args.host_address}:{server.server_port}'
+        REPORT.set('rootfs', 'download and extract the Fedora root filesystem')
         install = install_root_command(boot_id, base, bundle, manifest, args, rom_images)
         print('Installing Fedora into ' + layout.ROOT_NAME + '.', flush=True)
         result = remote(shlex.join(install), 3600)
@@ -981,14 +1128,17 @@ def main(argv=None):
             inject_extra_root(remote, base)
         remote("(sleep 2; /usr/sbin/liuqin-reboot bootloader) >/dev/null 2>&1 &")
         deadline = time.monotonic() + 90
+        executable = fastboot_executable(args)
         while time.monotonic() < deadline:
-            devices = subprocess.check_output(['fastboot', 'devices'], text=True, timeout=10)
+            devices = subprocess.check_output([executable, 'devices'], text=True, timeout=10)
             if any(line.split()[0] == args.serial for line in devices.splitlines() if line.split()):
                 break
             time.sleep(2)
         else:
             raise RuntimeError('Return to Fastboot not observed; boot partition was not flashed')
+        REPORT.set('boot-flash', 'write the verified boot image and select the boot slot')
         finish_in_fastboot(fastboot, args.layout, flashes, *padded_boot, boot_bytes)
+        REPORT.set('complete', 'installation commands completed; first boot is still unverified')
         print('Installation commands completed. First-boot verification is still required.')
     finally:
         if server:
@@ -1335,4 +1485,9 @@ if __name__ == '__main__':
     try:
         main()
     except (OSError, RuntimeError, ValueError, KeyError, subprocess.SubprocessError, layout.LayoutError) as error:
-        sys.exit('Installation stopped: ' + str(error))
+        hint = hint_for(error)
+        REPORT.flush(ok=False, error=str(error), hint=hint)
+        message = 'Installation stopped at stage ' + REPORT.stage + ': ' + str(error)
+        if hint:
+            message += '\nHINT: ' + hint
+        sys.exit(message)

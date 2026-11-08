@@ -107,7 +107,8 @@ else:
         if entry['name'] not in listed:
             failures.append('asset not in SHA256SUMS: ' + entry['name'])
     for name in ('boot.img', 'installer.img', 'bundle.json', 'LICENSE', 'NOTICE',
-                 'README.md', 'INSTALL.md', 'install.py', 'liuqin_layout.py',
+                 'README.md', 'INSTALL.md', 'install.py', 'liuqin-install.py',
+                 'install-liuqin.ps1', 'liuqin_layout.py',
                  'liuqin-rom-images.json'):
         if not (directory / name).is_file():
             failures.append('missing release asset: ' + name)
@@ -270,8 +271,9 @@ for name in LICENSE NOTICE; do
 		die "neither the bundle nor the project root has $name"
 	fi
 done
-for host_file in installer/install.py installer/lib/liuqin_layout.py \
-	installer/lib/liuqin-rom-images.json; do
+for host_file in installer/install.py installer/liuqin-install.py \
+	installer/windows/install-liuqin.ps1 \
+	installer/lib/liuqin_layout.py installer/lib/liuqin-rom-images.json; do
 	cp -f "$project_root/$host_file" "$out/$(basename "$host_file")"
 done
 
@@ -344,7 +346,7 @@ for name, entry in payloads.items():
         readme.append(f'| `{name}.part-NN` | {entry["bytes"]} bytes, {len(entry["parts"])} parts |')
 readme += [
     '| `bundle.json` | bundle manifest (upstream-compatible + Fedora extension) |',
-    '| `install.py`, `liuqin_layout.py`, `liuqin-rom-images.json` | host-side installer |',
+    '| `liuqin-install.py`, `install.py`, `install-liuqin.ps1`, `liuqin_layout.py`, `liuqin-rom-images.json` | host-side installer (Windows and Linux) |',
     '| `LICENSE`, `NOTICE` | licence and firmware/redistribution notice |',
     '| `INSTALL.md` | install and verification steps |',
     '| `release-manifest.json` | machine-readable asset list with sha256 |',
@@ -398,7 +400,8 @@ for name, entry in payloads.items():
         for part in entry['parts']:
             assets.append({'name': part['name'], 'role': 'payload-part',
                            'bytes': part['bytes'], 'sha256': part['sha256'], 'split': True})
-for name in ('bundle.json', 'LICENSE', 'NOTICE', 'install.py', 'liuqin_layout.py',
+for name in ('bundle.json', 'LICENSE', 'NOTICE', 'install.py', 'liuqin-install.py',
+             'install-liuqin.ps1', 'liuqin_layout.py',
              'liuqin-rom-images.json', 'README.md', 'INSTALL.md'):
     path = directory / name
     assets.append({'name': name, 'role': 'metadata', 'bytes': path.stat().st_size,

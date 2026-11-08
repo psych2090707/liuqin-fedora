@@ -77,19 +77,23 @@ with tempfile.TemporaryDirectory() as directory:
 
         def fastboot(command, **kwargs):
             calls.append(command)
-            assert command[:3] == ['fastboot', '-s', 'TEST_SERIAL']
+            assert command[0].endswith('fake-fastboot') or command[0].endswith('fastboot.exe') \
+                or command[0] == 'fastboot', command
+            assert command[1:3] == ['-s', 'TEST_SERIAL']
             if command[3] == 'boot':
                 return SimpleNamespace(stdout='booting\n')
             name = command[-1]
             values = {'product': 'liuqin', 'unlocked': 'yes', 'current-slot': 'a',
                       'partition-size:userdata': reported, 'partition-size:boot_a': boot_size,
-                      'partition-size:boot_b': boot_size, 'max-download-size': max_download}
+                      'partition-size:boot_b': boot_size, 'max-download-size': max_download,
+                      'battery-soc-ok': 'yes', 'battery-voltage': '4200'}
             return SimpleNamespace(stdout=name + ': ' + values[name] + '\n')
 
         stdin = SimpleNamespace(isatty=lambda: stdin_tty)
         with patch.object(installer.sys, 'argv', ['install.py', '--bundle', str(root),
                           '--serial', 'TEST_SERIAL', '--backup', str(root.parent / 'unused-backup'),
                           '--erase-userdata', '--allow-unverified', '--layout', 'linux-only',
+                          '--fastboot', str(project / 'tests/installer/fake-fastboot'),
                           '--yes-write-device', *argv_extra]), \
              patch.object(installer.subprocess, 'run', side_effect=fastboot), \
              patch.object(installer.sys, 'stdin', stdin), \
