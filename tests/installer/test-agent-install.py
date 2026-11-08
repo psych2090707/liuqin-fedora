@@ -414,6 +414,9 @@ check('the Windows bootstrap prepares Python, fastboot and zstd without WSL or a
       'repository2-3.xml' in bootstrap and 'Get-FileHash' in bootstrap and
       '--scope user' in bootstrap and 'RunAsAdministrator' not in bootstrap and
       'wsl.exe' not in bootstrap.lower() and 'exit $LASTEXITCODE' in bootstrap)
+check('the Windows bootstrap can be forced into an isolated tools root for CI',
+      'ForceBootstrap' in bootstrap and 'ToolsRoot' in bootstrap and
+      '[Console]::Error.WriteLine' in bootstrap)
 check('the Windows bootstrap verifies archives by pinned hash, not ZIP Authenticode',
       'Get-AuthenticodeSignature' not in bootstrap and
       '4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3' in bootstrap and

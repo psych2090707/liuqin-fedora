@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: MIT
+#
+# Minimal host-side acceptance for the liuqin installer.
+#
+# This workflow intentionally does not build a Fedora image, download a release
+# image or touch a device.  It runs the existing offline installer tests on a
+# standard hosted Linux runner and on a standard Windows Server runner, and it
+# exercises the Windows bootstrap in an isolated tools directory.
+#
+# Windows Server is not a Windows 11 tablet: USB networking, real Fastboot and
+# first boot remain hardware tests and are not claimed here.
+
+name: installer-ci
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "installer/**"
+      - "tests/installer/**"
+      - "tools/release/prepare-image.py"
+      - "initramfs/init"
+      - ".github/workflows/installer-ci.yml"
+  pull_request:
+    paths:
+      - "installer/**"
+      - "tests/installer/**"
+      - "tools/release/prepare-image.py"
+      - "initramfs/init"
+      - ".github/workflows/installer-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-installer:
+    name: Linux installer regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install lightweight test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdisk
+      - name: Offline installer suite
+        run: sh tests/installer/run-all.sh
+
+  windows-installer:
+    name: Windows host acceptance
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python installer tests
+        shell: pwsh
+        run: |
+          python --version
+          python tests/installer/test-agent-install.py
+          python tests/installer/test-windows-dry-run.py
+
+      - name: Bootstrap from an isolated tools root and parse doctor JSON
+        shell: pwsh
+        run: |
+          $tools = Join-Path $env:RUNNER_TEMP 'liuqin-tools'
+          $stdout = Join-Path $env:RUNNER_TEMP 'doctor.json'
+          $stderr = Join-Path $env:RUNNER_TEMP 'doctor.err'
+          Remove-Item -Recurse -Force $tools -ErrorAction SilentlyContinue
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File `
+            .\installer\windows\install-liuqin.ps1 `
+            -ToolsRoot $tools -ForceBootstrap doctor --json 1> $stdout 2> $stderr
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content $stderr
+            throw "Windows bootstrap failed with exit code $LASTEXITCODE"
+          }
+          $document = Get-Content $stdout -Raw | ConvertFrom-Json
+          if ($document.format -ne 'liuqin-agent-doctor/1' -or -not $document.ok) {
+            throw 'doctor --json did not produce a successful doctor document'
+          }
+          foreach ($relative in @('tools\python\python.exe',
+                                  'tools\platform-tools\fastboot.exe')) {
+            if (-not (Test-Path (Join-Path $tools $relative))) {
+              throw "bootstrap did not create $relative"
+            }
+          }
+          if (-not (Get-ChildItem (Join-Path $tools 'tools') -Filter 'zstd.exe' -Recurse)) {
+            throw 'bootstrap did not create zstd.exe'
+          }
+          Write-Host 'doctor JSON parsed and all three tools were installed'
+
+      - name: A bad Python checksum must be refused
+        shell: pwsh
+        run: |
+          $source = Get-Content .\installer\windows\install-liuqin.ps1 -Raw
+          $source = $source.Replace(
+            '4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3',
+            ('0' * 64))
+          $copy = Join-Path (Resolve-Path .\installer\windows) `
+            ('ci-bad-' + [guid]::NewGuid().ToString('N') + '.ps1')
+          $tools = Join-Path $env:RUNNER_TEMP 'liuqin-bad-tools'
+          Remove-Item -Recurse -Force $tools -ErrorAction SilentlyContinue
+          Set-Content -Path $copy -Value $source
+          try {
+            & pwsh -NoProfile -ExecutionPolicy Bypass -File $copy `
+              -ToolsRoot $tools -ForceBootstrap doctor --json 1> $null 2> $null
+            $code = $LASTEXITCODE
+          } finally {
+            Remove-Item -Force $copy
+          }
+          if ($code -eq 0) { throw 'a bad Python checksum was accepted' }
+          if (Test-Path (Join-Path $tools 'tools\python\python.exe')) {
+            throw 'the rejected Python archive was unpacked'
+          }
+          Write-Host "bad checksum refused with exit code $code"

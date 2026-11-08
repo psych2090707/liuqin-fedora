@@ -1,0 +1,45 @@
+Disk /dev/sda: 493854720 sectors, 235.5 GiB
+Sector size (logical): 512 bytes
+Disk identifier (GUID): 060147AE-2DD4-4D85-8177-1B675EA46BF6
+Partition table holds up to 64 entries
+Main partition table begins at sector 2 and ends at sector 17
+First usable sector is 18, last usable sector is 493854702
+Partitions will be aligned on 16-sector boundaries
+Total free space is 30 sectors (15.0 KiB)
+
+Number  Start (sector)    End (sector)  Size       Code  Name
+   1              48              63   8.0 KiB     8300  switch
+   2              64             127   32.0 KiB    8300  ssd
+   3             128             191   32.0 KiB    8300  dbg
+   4             192             255   32.0 KiB    8300  bk01
+   5             256             511   128.0 KiB   8300  bk02
+   6             512            1023   256.0 KiB   8300  bk03
+   7            1024            2047   512.0 KiB   8300  bk04
+   8            2048            3071   512.0 KiB   8300  keystore
+   9            3072            4095   512.0 KiB   8300  frp
+  10            4096            8191   2.0 MiB     8300  countrycode
+  11            8192           16383   4.0 MiB     8300  misc
+  12           16384           32767   8.0 MiB     8300  bk05
+  13           32768           49151   8.0 MiB     8300  logfs
+  14           49152           65535   8.0 MiB     8300  ffu
+  15           65536           98303   16.0 MiB    8300  oops
+  16           98304          131071   16.0 MiB    8300  devinfo
+  17          131072          262143   64.0 MiB    8300  metadata
+  18          262144          294911   16.0 MiB    8300  bk06
+  19          294912          360447   32.0 MiB    8300  bk07
+  20          360448          491519   64.0 MiB    8300  bk08
+  21          491520          622591   64.0 MiB    8300  persist
+  22          622592          753663   64.0 MiB    8300  persistbak
+  23          753664          819199   32.0 MiB    8300  mtdblk
+  24          819200          937983   58.0 MiB    8300  crash_history
+  25          937984         1134591   96.0 MiB    8300  minidump
+  26         1134592         1748991   300.0 MiB   8300  rawdump
+  27         1748992         3846143   1024.0 MiB  8300  cust
+  28         3846144        21671935   8.5 GiB     8300  super
+  29        21671936        21672191   128.0 KiB   8300  vbmeta_system_a
+  30        21672192        21672447   128.0 KiB   8300  vbmeta_system_b
+  31        21672448        21729279   27.8 MiB    8300  bk010
+  32        21729280        21737471   4.0 MiB     8300  mem
+  33        21737472        21803007   32.0 MiB    8300  mbnconfig
+  34        21803008        22065151   128.0 MiB   8300  rescue
+  35        22065152       493854702   225.0 GiB   8300  userdata

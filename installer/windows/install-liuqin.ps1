@@ -8,11 +8,14 @@
 # those steps stay behind install.py --yes-write-device.  No WSL, no Visual
 # Studio build tools and no administrator rights are required.
 param(
+    [string]$ToolsRoot,
+    [switch]$ForceBootstrap,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Arguments
 )
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # Pinned downloads.  The embeddable Python ZIP and the zstd Windows archive are
@@ -41,12 +44,13 @@ foreach ($candidate in @($here, (Split-Path -Parent $here), (Split-Path -Parent 
 if (-not $entry) {
     throw 'repository or release image is incomplete: liuqin-install.py is missing'
 }
-$work = Join-Path $env:LOCALAPPDATA 'liuqin-install'
+$work = if ($ToolsRoot) { $ToolsRoot } else { Join-Path $env:LOCALAPPDATA 'liuqin-install' }
 $tools = Join-Path $work 'tools'
 New-Item -ItemType Directory -Force -Path $tools | Out-Null
 
 function Write-Step([string]$Message) {
-    Write-Host "STAGE $Message"
+    # Keep stdout free for an actual `doctor --json` document.
+    [Console]::Error.WriteLine("STAGE $Message")
 }
 
 function Get-VerifiedFile([string]$Url, [string]$Path, [string]$Algorithm, [string]$Expected) {
@@ -124,6 +128,7 @@ function Install-EmbeddedPython {
 }
 
 function Ensure-Python {
+    if ($ForceBootstrap) { return Install-EmbeddedPython }
     $python = Find-Python
     if ($python) { return $python }
     $winget = Get-Command 'winget' -ErrorAction SilentlyContinue
@@ -133,7 +138,7 @@ function Ensure-Python {
             & $winget.Source install --id Python.Python.3.12 --exact --scope user --silent `
                 --accept-package-agreements --accept-source-agreements | Out-Null
         } catch {
-            Write-Host "winget did not install Python: $($_.Exception.Message)"
+            [Console]::Error.WriteLine("winget did not install Python: $($_.Exception.Message)")
         }
         $python = Find-Python
         if ($python) { return $python }
@@ -162,8 +167,10 @@ function Get-PlatformToolsPackage {
 
 function Ensure-PlatformTools {
     Write-Step 'platform-tools: locate fastboot.exe'
-    $existing = Get-Command 'fastboot' -ErrorAction SilentlyContinue
-    if ($existing) { return $existing.Source }
+    if (-not $ForceBootstrap) {
+        $existing = Get-Command 'fastboot' -ErrorAction SilentlyContinue
+        if ($existing) { return $existing.Source }
+    }
     $target = Join-Path $tools 'platform-tools'
     $exe = Join-Path $target 'fastboot.exe'
     if (-not (Test-Path $exe)) {
@@ -179,8 +186,10 @@ function Ensure-PlatformTools {
 function Ensure-Zstd {
     # prepare-image.py uses this only for .zst firmware inputs; having it ready
     # keeps a clean Windows host from failing on that optional path.
-    $found = Get-Command 'zstd' -ErrorAction SilentlyContinue
-    if ($found) { return $found.Source }
+    if (-not $ForceBootstrap) {
+        $found = Get-Command 'zstd' -ErrorAction SilentlyContinue
+        if ($found) { return $found.Source }
+    }
     $target = Join-Path $tools "zstd-v$ZstdVersion-win64"
     $exe = Get-ChildItem -Path $target -Filter 'zstd.exe' -Recurse -ErrorAction SilentlyContinue |
         Select-Object -First 1
@@ -208,8 +217,8 @@ if (-not $Arguments -or $Arguments.Count -eq 0) {
     $Arguments = @('doctor')
 }
 
-Write-Host "Using Python: $python"
-Write-Host "Using fastboot: $fastboot"
-Write-Host "Using zstd: $zstd"
+[Console]::Error.WriteLine("Using Python: $python")
+[Console]::Error.WriteLine("Using fastboot: $fastboot")
+[Console]::Error.WriteLine("Using zstd: $zstd")
 & $python $entry @Arguments
 exit $LASTEXITCODE

@@ -1,0 +1,7 @@
+Partition GUID code: 0FC63DAF-8483-4772-8E79-3D69D8477DE4 (Linux filesystem)
+Partition unique GUID: 6BBA2227-9606-40ED-A54D-B52220541C9F
+First sector: 22065152 (at 10.5 GiB)
+Last sector: 493854702 (at 235.5 GiB)
+Partition size: 471789551 sectors (225.0 GiB)
+Attribute flags: 1000000000000000
+Partition name: 'userdata'
