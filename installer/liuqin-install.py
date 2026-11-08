@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tarfile
 import urllib.error
+import urllib.parse
 import urllib.request
 
 HERE = Path(__file__).resolve().parent
@@ -38,12 +39,19 @@ EXIT_ENVIRONMENT = 3
 EXIT_VERIFY = 4
 
 
+# Some commands (doctor --json) must leave stdout parseable by a normal JSON
+# reader.  All human progress then moves to stderr; the JSON document is the
+# only thing written to stdout.
+JSON_OUTPUT = False
+
+
 def say(message):
-    print(message, flush=True)
+    print(message, file=sys.stderr if JSON_OUTPUT else sys.stdout, flush=True)
 
 
 def stage(name, detail=''):
-    print('STAGE ' + name + ((': ' + detail) if detail else ''), flush=True)
+    line = 'STAGE ' + name + ((': ' + detail) if detail else '')
+    print(line, file=sys.stderr if JSON_OUTPUT else sys.stdout, flush=True)
 
 
 def fail(message, code=EXIT_FAIL):
@@ -120,6 +128,8 @@ def bundle_check(bundle):
 
 
 def command_doctor(args):
+    global JSON_OUTPUT
+    JSON_OUTPUT = args.json
     stage('doctor', 'host, Fastboot, bundle and device readiness')
     report = {'format': 'liuqin-agent-doctor/1',
               'platform': {'system': os.name, 'release': sys.platform,
@@ -186,9 +196,11 @@ def github_json(url, token=None):
         return json.load(response)
 
 
-def download(url, target, expected_sha256=None, size=None):
+def download(url, target, expected_sha256=None, size=None, force=False):
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
+    if force:
+        target.unlink(missing_ok=True)
     if target.is_file():
         if (size is None or target.stat().st_size == size) and \
                 (expected_sha256 is None or digest(target) == expected_sha256):
@@ -238,24 +250,90 @@ def extract_base(archive, destination):
             source.extractall(destination)
 
 
+def release_summary(release):
+    tag = release.get('tag_name') or release.get('name')
+    if not tag:
+        fail('GitHub release has no tag_name/name; cannot identify the version', EXIT_VERIFY)
+    assets = sorted((asset.get('name'), asset.get('size'))
+                    for asset in release.get('assets', []))
+    return {'format': 'liuqin-fetch/1', 'tag': str(tag), 'id': release.get('id'),
+            'prerelease': bool(release.get('prerelease')),
+            'assets': [{'name': name, 'size': size} for name, size in assets]}
+
+
+def resolve_release(api, tag, token, stable_only=False):
+    """Resolve a release without assuming /releases/latest exists.
+
+    A repository that has only prereleases returns 404 from
+    /releases/latest.  The list endpoint includes prereleases, so choose the
+    newest published entry there; --tag bypasses discovery entirely.
+    """
+    if tag:
+        try:
+            return github_json(api + '/tags/' + urllib.parse.quote(tag, safe=''), token)
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                fail('release tag not found: ' + tag, EXIT_ENVIRONMENT)
+            raise
+    try:
+        releases = github_json(api + '?per_page=50', token)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            fail('repository or releases not found; check --repo and --tag', EXIT_ENVIRONMENT)
+        raise
+    if not isinstance(releases, list):
+        fail('GitHub returned an unexpected release list; use --tag explicitly', EXIT_ENVIRONMENT)
+    candidates = [item for item in releases
+                  if not item.get('draft') and item.get('tag_name')]
+    if stable_only:
+        candidates = [item for item in candidates if not item.get('prerelease')]
+    if not candidates:
+        fail('no published release found' +
+             (' (stable only)' if stable_only else '') +
+             '; pass --tag or omit --stable to include prereleases', EXIT_ENVIRONMENT)
+    candidates.sort(key=lambda item: (item.get('published_at') or item.get('created_at') or '',
+                                      item.get('id') or 0), reverse=True)
+    return candidates[0]
+
+
+def same_release(old, new):
+    return (old.get('format') == new['format'] and old.get('tag') == new['tag'] and
+            old.get('id') == new['id'] and old.get('assets') == new['assets'])
+
+
 def command_fetch(args):
     owner, repo = github_repo(args.repo)
     token = os.environ.get('GITHUB_TOKEN')
-    api = args.api.rstrip('/') + '/repos/' + owner + '/' + repo + '/releases/'
+    api = args.api.rstrip('/') + '/repos/' + owner + '/' + repo + '/releases'
     stage('fetch-release', 'resolve ' + owner + '/' + repo + (('@' + args.tag) if args.tag else ''))
     try:
-        release = github_json(api + ('tags/' + args.tag if args.tag else 'latest'), token)
+        release = resolve_release(api, args.tag, token, getattr(args, 'stable', False))
     except urllib.error.HTTPError as error:
         fail('GitHub release lookup failed (' + str(error.code) + '); check --repo/--tag or '
              'set GITHUB_TOKEN for a private repository', EXIT_ENVIRONMENT)
+    except urllib.error.URLError as error:
+        fail('could not reach GitHub: ' + str(error.reason) + '; check the network or proxy',
+             EXIT_ENVIRONMENT)
+    identity = release_summary(release)
+    if identity['prerelease']:
+        say('Resolved prerelease ' + identity['tag'] + '; this is expected while no stable '
+            'release exists.')
+    else:
+        say('Resolved release ' + identity['tag'])
     assets = release.get('assets', [])
     parts = {}
     checksums = None
+    seen_names = set()
     for asset in assets:
-        name = asset['name']
-        match = re.fullmatch(r'(.+\.tar)\.part-[0-9]+', name)
+        name = asset.get('name', '')
+        if not name or Path(name).name != name:
+            fail('release contains an unsafe asset name: ' + repr(name), EXIT_VERIFY)
+        if name in seen_names:
+            fail('release contains duplicate asset names: ' + name, EXIT_VERIFY)
+        seen_names.add(name)
+        match = re.fullmatch(r'(.+\.tar)\.part-([0-9]+)', name)
         if match:
-            parts.setdefault(match[1], []).append(asset)
+            parts.setdefault(match[1], []).append((int(match[2]), asset))
         elif name == 'BASE.SHA256':
             checksums = asset
     if not parts or checksums is None:
@@ -263,42 +341,74 @@ def command_fetch(args):
              'download the release assets manually', EXIT_USAGE)
     out = Path(args.out).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
-    downloads = out / 'downloads'
-    total = sum(asset['size'] for group in parts.values() for asset in group)
+    record_path = out / 'release.json'
+    if record_path.is_file():
+        try:
+            old = json.loads(record_path.read_text())
+        except (OSError, ValueError):
+            fail('release.json in --out is unreadable; use a new --out', EXIT_VERIFY)
+        if not same_release(old, identity):
+            fail('--out already belongs to ' + str(old.get('tag')) +
+                 '; refusing to mix release versions. Use a new --out.', EXIT_USAGE)
+    else:
+        managed = ('downloads', 'image')
+        if any((out / name).exists() for name in managed) or list(out.glob('*.tar')):
+            fail('--out has download state without release.json; use a new --out', EXIT_USAGE)
+        record_path.write_text(json.dumps(identity, indent=2) + '\n')
+    safe_tag = re.sub(r'[^A-Za-z0-9._-]+', '_', identity['tag']) or 'release'
+    downloads = out / 'downloads' / safe_tag
     checksums_path = downloads / 'BASE.SHA256'
     download(checksums['browser_download_url'], checksums_path,
              (checksums.get('digest') or '').removeprefix('sha256:') or None,
-             checksums['size'])
+             checksums.get('size'))
     wanted = {}
     for line in checksums_path.read_text().splitlines():
         fields = line.split()
-        if len(fields) == 2:
-            wanted[fields[1].lstrip('*')] = fields[0]
-    for archive_name, group in parts.items():
-        if archive_name not in wanted:
+        if len(fields) != 2:
             continue
+        name = fields[1].lstrip('*')
+        if name in wanted and wanted[name] != fields[0]:
+            fail('BASE.SHA256 pins two different hashes for ' + name, EXIT_VERIFY)
+        wanted[name] = fields[0]
+    selected = [(name, group) for name, group in parts.items() if name in wanted]
+    if not selected:
+        fail('BASE.SHA256 names no archive matching the release parts', EXIT_VERIFY)
+    total = sum(asset['size'] for _, group in selected for _, asset in group)
+    for archive_name, group in sorted(selected):
         stage('fetch-parts', archive_name)
-        group.sort(key=lambda item: item['name'])
-        ordered = []
-        for asset in group:
-            target = downloads / asset['name']
-            expected = (asset.get('digest') or '').removeprefix('sha256:') or None
-            download(asset['browser_download_url'], target, expected, asset['size'])
-            ordered.append(target)
+        indices = sorted(index for index, _ in group)
+        if indices != list(range(len(indices))):
+            fail('release parts are not a contiguous sequence: ' + archive_name, EXIT_VERIFY)
+        ordered = [asset for _, asset in sorted(group, key=lambda item: item[0])]
         archive = out / archive_name
-        if not archive.is_file() or digest(archive) != wanted[archive_name]:
-            say('Joining ' + str(len(ordered)) + ' parts into ' + archive.name + '...')
-            with archive.open('wb') as sink:
-                for part in ordered:
-                    with part.open('rb') as source:
-                        shutil.copyfileobj(source, sink, length=1 << 20)
-        if digest(archive) != wanted[archive_name]:
-            fail('joined archive does not match BASE.SHA256: ' + archive_name, EXIT_VERIFY)
+        expected = wanted[archive_name]
+        for attempt in range(2):
+            if attempt:
+                say('Joined archive did not match BASE.SHA256; discarding cached parts and '
+                    'downloading them again.')
+                archive.unlink(missing_ok=True)
+            for asset in ordered:
+                target = downloads / asset['name']
+                download(asset['browser_download_url'], target,
+                         (asset.get('digest') or '').removeprefix('sha256:') or None,
+                         asset.get('size'), force=bool(attempt))
+            if not archive.is_file() or digest(archive) != expected:
+                say('Joining ' + str(len(ordered)) + ' parts into ' + archive.name + '...')
+                with archive.open('wb') as sink:
+                    for asset in ordered:
+                        with (downloads / asset['name']).open('rb') as source:
+                            shutil.copyfileobj(source, sink, length=1 << 20)
+            if digest(archive) == expected:
+                break
+            if attempt:
+                fail('joined archive does not match BASE.SHA256 after a clean re-download: ' +
+                     archive_name, EXIT_VERIFY)
         extract_base(archive, out / 'image')
         say('Verified base image: ' + str(out / 'image'))
         say('Downloaded size: ' + str(total) + ' bytes')
-        return EXIT_OK
-    fail('BASE.SHA256 names no archive matching the release parts', EXIT_VERIFY)
+    identity['complete'] = True
+    record_path.write_text(json.dumps(identity, indent=2) + '\n')
+    return EXIT_OK
 
 
 def firmware_sources(manifest):
@@ -425,7 +535,10 @@ def main(argv=None):
 
     fetch = commands.add_parser('fetch', help='download and verify a GitHub release base')
     fetch.add_argument('--repo', required=True)
-    fetch.add_argument('--tag')
+    fetch.add_argument('--tag', help='exact release tag; bypasses version discovery')
+    fetch.add_argument('--stable', action='store_true',
+                       help='ignore prereleases when discovering the newest release '
+                            '(default: prereleases are allowed)')
     fetch.add_argument('--out', type=Path, required=True)
     fetch.add_argument('--api', default='https://api.github.com',
                        help=argparse.SUPPRESS)
@@ -471,5 +584,9 @@ def main(argv=None):
 if __name__ == '__main__':
     try:
         sys.exit(main())
+    except urllib.error.URLError as error:
+        print('ERROR: network request failed: ' + str(getattr(error, 'reason', error)),
+              file=sys.stderr, flush=True)
+        sys.exit(EXIT_ENVIRONMENT)
     except BrokenPipeError:
         sys.exit(EXIT_FAIL)

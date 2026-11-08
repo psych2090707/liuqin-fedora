@@ -7,6 +7,7 @@ password/zstd preparation helpers, the Windows bootstrap and the Windows USB
 network descriptor.  No network, no device, no real Fastboot: the release API
 and the asset server are local HTTP servers in a temporary directory.
 """
+import contextlib
 import functools
 import hashlib
 import http.server
@@ -21,6 +22,7 @@ import sys
 import tarfile
 import tempfile
 import threading
+from unittest.mock import patch
 import urllib.request
 
 PROJECT = Path(__file__).resolve().parents[2]
@@ -113,68 +115,161 @@ else:
 
 
 # --- synthetic GitHub Release --------------------------------------------
-class Quiet(http.server.SimpleHTTPRequestHandler):
+class Quiet(http.server.BaseHTTPRequestHandler):
     def log_message(self, *arguments):
         pass
 
 
-with tempfile.TemporaryDirectory(prefix='liuqin-agent-test-') as directory:
-    work = Path(directory)
-    assets = work / 'assets'
-    assets.mkdir()
+def make_assets(directory, label):
+    directory.mkdir()
     payload = io.BytesIO()
     with tarfile.open(fileobj=payload, mode='w') as archive:
-        data = b'{"device": "liuqin", "files": {}}\n'
+        data = ('{"device": "liuqin", "label": "%s"}\n' % label).encode()
         member = tarfile.TarInfo('image.json')
         member.size = len(data)
         archive.addfile(member, io.BytesIO(data))
     blob = payload.getvalue()
     cut = len(blob) // 2
     for index, chunk in enumerate((blob[:cut], blob[cut:])):
-        (assets / ('demo.tar.part-%02d' % index)).write_bytes(chunk)
+        (directory / ('demo.tar.part-%02d' % index)).write_bytes(chunk)
     archive_sha = hashlib.sha256(blob).hexdigest()
-    (assets / 'BASE.SHA256').write_text(archive_sha + '  demo.tar\n')
+    (directory / 'BASE.SHA256').write_text(archive_sha + '  demo.tar\n')
+    return archive_sha
 
-    handler = functools.partial(Quiet, directory=str(assets))
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
-    base = 'http://127.0.0.1:%d' % server.server_port
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    release = {'assets': [
-        {'name': path.name, 'size': path.stat().st_size, 'digest': None,
-         'browser_download_url': base + '/' + path.name}
-        for path in sorted(assets.iterdir())]}
-    release_json = json.dumps(release).encode()
 
-    class ReleaseApi(http.server.BaseHTTPRequestHandler):
+with tempfile.TemporaryDirectory(prefix='liuqin-agent-test-') as directory:
+    work = Path(directory)
+    assets = work / 'assets'
+    archive_sha = make_assets(assets, 'alpha')
+    # A second split set in the same release must not be treated as part of
+    # the base image that BASE.SHA256 names.
+    (assets / 'sources.tar.part-00').write_bytes(b'decoy source part')
+    release_v1 = {'id': 1, 'tag_name': 'v0.1.0-alpha.1', 'prerelease': True,
+                  'draft': False, 'published_at': '2026-11-07T00:00:00Z',
+                  'assets': [
+                      {'name': path.name, 'size': path.stat().st_size, 'digest': None,
+                       'browser_download_url': 'http://127.0.0.1:PORT/assets/' + path.name}
+                      for path in sorted(assets.iterdir())]}
+    release_v2 = dict(release_v1, id=2, tag_name='v0.2.0', prerelease=False,
+                      published_at='2026-11-08T00:00:00Z')
+    releases = [release_v1]
+
+    class ReleaseApi(Quiet):
         def do_GET(self):
+            path = self.path.split('?', 1)[0]
+            if path in ('/repos/owner/demo/releases', '/repos/owner/demo/releases/'):
+                body = json.dumps(releases).encode()
+            elif path.startswith('/repos/owner/demo/releases/tags/'):
+                tag = path.rsplit('/', 1)[-1]
+                found = next((item for item in releases if item['tag_name'] == tag), None)
+                if found is None:
+                    self.send_error(404)
+                    return
+                body = json.dumps(found).encode()
+            elif path == '/repos/owner/demo/releases/latest':
+                self.send_error(404)
+                return
+            elif path.startswith('/assets/'):
+                target = assets / path.split('/', 2)[-1]
+                data = target.read_bytes() if target.is_file() else None
+                if data is None:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            else:
+                self.send_error(404)
+                return
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
-            self.send_header('Content-Length', str(len(release_json)))
+            self.send_header('Content-Length', str(len(body)))
             self.end_headers()
-            self.wfile.write(release_json)
-
-        def log_message(self, *arguments):
-            pass
+            self.wfile.write(body)
 
     api_server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), ReleaseApi)
     api_base = 'http://127.0.0.1:%d' % api_server.server_port
+    for item in releases:
+        for asset in item['assets']:
+            asset['browser_download_url'] = asset['browser_download_url'].replace(
+                '127.0.0.1:PORT', '127.0.0.1:%d' % api_server.server_port)
     threading.Thread(target=api_server.serve_forever, daemon=True).start()
+
+    def fetch(out, tag=None, stable=False, api=api_base):
+        return agent.command_fetch(type('Args', (), {
+            'repo': 'owner/demo', 'tag': tag, 'stable': stable,
+            'out': out, 'api': api})())
+
     out = work / 'out'
-    result = agent.command_fetch(type('Args', (), {
-        'repo': 'owner/demo', 'tag': None, 'out': out, 'api': api_base + '/'})())
-    check('fetch joins and verifies the release parts and extracts the base',
+    result = fetch(out)
+    check('fetch discovers a prerelease through /releases when /releases/latest is 404',
           result == 0 and (out / 'image/image.json').is_file() and
           (out / 'demo.tar').is_file() and
           hashlib.sha256((out / 'demo.tar').read_bytes()).hexdigest() == archive_sha)
+    record = json.loads((out / 'release.json').read_text())
+    check('fetch records the exact release identity',
+          record['tag'] == 'v0.1.0-alpha.1' and record['id'] == 1 and record['complete'])
+    check('fetch ignores split assets that BASE.SHA256 does not name',
+          not (out / 'downloads/v0.1.0-alpha.1/sources.tar.part-00').exists())
+
+    explicit = work / 'explicit'
+    check('fetch accepts an explicit prerelease tag',
+          fetch(explicit, tag='v0.1.0-alpha.1') == 0 and
+          json.loads((explicit / 'release.json').read_text())['tag'] == 'v0.1.0-alpha.1')
+    try:
+        fetch(work / 'stable', stable=True)
+    except SystemExit as error:
+        check('fetch --stable refuses when only prereleases exist',
+              error.code == agent.EXIT_ENVIRONMENT)
+    else:
+        check('fetch --stable refuses when only prereleases exist', False)
+
     (out / 'demo.tar').write_bytes(b'corrupted')
     (out / 'image').rename(out / 'image-old')
-    result = agent.command_fetch(type('Args', (), {
-        'repo': 'owner/demo', 'tag': None, 'out': out, 'api': api_base + '/'})())
     check('fetch repairs a corrupted joined archive from the verified parts',
-          result == 0 and (out / 'image/image.json').is_file())
-    server.shutdown()
+          fetch(out) == 0 and (out / 'image/image.json').is_file())
+
+    # A same-size corrupted cached part must trigger a clean re-download, not
+    # silently merge stale bytes.  The release identity stays the same.
+    part = out / 'downloads/v0.1.0-alpha.1/demo.tar.part-00'
+    original = part.read_bytes()
+    part.write_bytes(bytes(len(original)))
+    (out / 'demo.tar').unlink()
+    (out / 'image').rename(out / 'image-old2')
+    check('fetch re-downloads cached parts after a merged-archive mismatch',
+          fetch(out) == 0 and
+          hashlib.sha256((out / 'demo.tar').read_bytes()).hexdigest() == archive_sha)
+
+    # --stable picks the newest non-prerelease when both are published.
+    releases[:] = [release_v1, release_v2]
+    stable_out = work / 'stable-ok'
+    check('fetch --stable picks the newest stable release',
+          fetch(stable_out, stable=True) == 0 and
+          json.loads((stable_out / 'release.json').read_text())['tag'] == 'v0.2.0')
+
+    # Another release in the same --out is refused before any download.
+    releases[:] = [release_v2]
+    try:
+        fetch(out)
+    except SystemExit as error:
+        check('fetch refuses to mix two release versions in one --out',
+              error.code == agent.EXIT_USAGE)
+    else:
+        check('fetch refuses to mix two release versions in one --out', False)
+
+    # A checksum mismatch is a hard failure, not a successful cache reuse.
+    bad = work / 'bad-checksum'
+    (assets / 'BASE.SHA256').write_text('0' * 64 + '  demo.tar\n')
+    try:
+        fetch(bad, tag='v0.2.0')
+    except SystemExit as error:
+        check('fetch refuses a merged archive that does not match BASE.SHA256',
+              error.code == agent.EXIT_VERIFY)
+    else:
+        check('fetch refuses a merged archive that does not match BASE.SHA256', False)
     api_server.shutdown()
-    server.server_close()
     api_server.server_close()
 
 
@@ -278,6 +373,28 @@ with tempfile.TemporaryDirectory(prefix='liuqin-report-test-') as directory:
           answer == 'probe-token\n' and boot == b'boot.img')
 
 
+# --- doctor --json is pure JSON ------------------------------------------
+with patch.object(agent, 'find_fastboot', return_value='fastboot'), \
+        patch.object(agent, 'fastboot_facts', return_value={'ok': True, 'version': ['fake']}):
+    buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buffer):
+            code = agent.command_doctor(type('Args', (), {
+                'json': True, 'bundle': None, 'serial': None,
+                'probe_device': False, 'fastboot': None})())
+    finally:
+        agent.JSON_OUTPUT = False
+try:
+    document = json.loads(buffer.getvalue())
+except ValueError as error:
+    check('doctor --json emits only a parseable JSON document', False, str(error))
+else:
+    check('doctor --json emits only a parseable JSON document',
+          code == agent.EXIT_OK and document['format'] == 'liuqin-agent-doctor/1' and
+          'STAGE' not in buffer.getvalue() and document['ok'] is True,
+          buffer.getvalue())
+
+
 # --- device-side Windows NCM descriptor ----------------------------------
 init = (PROJECT / 'initramfs/init').read_text()
 check('USB gadget advertises a composite IAD to Windows',
@@ -292,10 +409,15 @@ check('the OS descriptor is linked to the active configuration',
 
 # --- Windows bootstrap ----------------------------------------------------
 bootstrap = (INSTALLER / 'windows/install-liuqin.ps1').read_text()
-check('the Windows bootstrap prepares Python and platform-tools without WSL',
-      'embed-amd64.zip' in bootstrap and
-      'platform-tools-latest-windows.zip' in bootstrap and
+check('the Windows bootstrap prepares Python, fastboot and zstd without WSL or admin rights',
+      'embed-amd64.zip' in bootstrap and 'zstd-v$ZstdVersion-win64.zip' in bootstrap and
+      'repository2-3.xml' in bootstrap and 'Get-FileHash' in bootstrap and
+      '--scope user' in bootstrap and 'RunAsAdministrator' not in bootstrap and
       'wsl.exe' not in bootstrap.lower() and 'exit $LASTEXITCODE' in bootstrap)
+check('the Windows bootstrap verifies archives by pinned hash, not ZIP Authenticode',
+      'Get-AuthenticodeSignature' not in bootstrap and
+      '4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3' in bootstrap and
+      'acb4e8111511749dc7a3ebedca9b04190e37a17afeb73f55d4425dbf0b90fad9' in bootstrap)
 check('the Windows bootstrap forwards every argument to the single entry point',
       'installer\\liuqin-install.py' in bootstrap and '@Arguments' in bootstrap)
 

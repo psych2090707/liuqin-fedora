@@ -11,11 +11,11 @@
 3. 把照片、应用数据和其他重要文件备份到平板之外。分区/GPT 备份不能恢复被清空的个人文件。
 4. 阅读并确认你有权在本机使用本版本锁定的厂商固件。
 
-Windows 不需要 WSL 或 Linux 虚拟机。安装入口会在需要时把 Python 和 Android platform-tools 放到你的用户目录。
+Windows 不需要 WSL 或 Linux 虚拟机。安装入口会在需要时把 Python、Android platform-tools 和 zstd 放到你的用户目录，不要求管理员权限，也不修改系统 PATH。Python 和 zstd 压缩包用固定 SHA256 校验，platform-tools 用 Google 仓库发布的校验值。
 
 ## 安装入口
 
-同一套命令，Windows 用 `install-liuqin.ps1` 引导，Linux 直接运行 `liuqin-install.py`：
+同一套命令，Windows 用 `install-liuqin.ps1` 引导，Linux 直接运行 `liuqin-install.py`。在源码仓库里，这两个文件分别位于 `installer/windows/install-liuqin.ps1` 和 `installer/liuqin-install.py`；在 Release 解包目录里它们在根部。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File install-liuqin.ps1 doctor
@@ -35,6 +35,10 @@ python3 liuqin-install.py prepare --base install/image --firmware firmware --out
 python3 liuqin-install.py install --bundle prepared --layout linux-only \
   --serial SERIAL --backup backup-SERIAL --erase-userdata --allow-unverified --dry-run
 ```
+
+`fetch` 默认选择最新发布（包括预发布版）；`--tag vX.Y.Z` 指定版本，`--stable` 只选稳定版。`--out` 绑定一个版本，换版本时必须换新目录，安装器会拒绝混用。
+
+这个解包目录应包含 `liuqin-install.py`、`install.py`、`prepare-image.py`、`liuqin_layout.py`、`liuqin-rom-images.json`、`install-liuqin.ps1` 和 `install-liuqin.cmd`。缺少任何一个时应重新下载 Release，不要从别处补文件。
 
 `prepare` 会让你为平板用户 **`user`** 设置密码。`prepared/` 含本机固件和密码散列，只留作自用，不要上传。
 

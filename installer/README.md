@@ -31,7 +31,7 @@ PROVENANCE.md               来源、sha256、逐字/改造清单
 
 ```sh
 # Windows 11（不需要 WSL）：在仓库根目录
-powershell -ExecutionPolicy Bypass -File installer\windows\install-liuqin.ps1 doctor
+powershell -ExecutionPolicy Bypass -File installer\windows\install-liuqin.ps1 doctor --json
 
 # Linux：同一入口
 python3 installer/liuqin-install.py doctor --json
@@ -40,6 +40,10 @@ python3 installer/liuqin-install.py firmware --base install/image --out firmware
 python3 installer/liuqin-install.py prepare --base install/image --firmware firmware --out prepared
 python3 installer/liuqin-install.py install --bundle prepared --layout linux-only ... --dry-run
 ```
+
+`fetch` 默认选最新发布（包括预发布版）；`--tag vX.Y.Z` 指定版本，`--stable` 只选稳定版。`--out` 会记录版本身份，换版本时必须使用新目录。`doctor --json` 的标准输出只有 JSON。
+
+Release 镜像解包后，入口位于目录根部：`liuqin-install.py`、`install-liuqin.ps1`、`install.py`、`prepare-image.py` 和 `liuqin_layout.py`。源码仓库里对应 `installer/liuqin-install.py`、`installer/windows/install-liuqin.ps1`、`installer/install.py` 和 `tools/release/prepare-image.py`。
 
 `install` 会把未知参数原样转给 `install.py`，并在结束时写 `liuqin-install-report.json`（`--report` 可改路径）。真实写入仍需要 `install.py` 的 `--yes-write-device`，入口不会替你添加。
 

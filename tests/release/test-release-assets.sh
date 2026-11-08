@@ -89,7 +89,8 @@ sh "$script" --bundle "$bundle" --out "$assets" --part-size 1M --dev-release \
 	--private-local >"$work/pack.log" 2>&1 ||
 	fail 'packaging failed: ' "$(cat "$work/pack.log")"
 for expected in boot.img installer.img bundle.json LICENSE NOTICE README.md INSTALL.md \
-	install.py liuqin_layout.py liuqin-rom-images.json release-manifest.json SHA256SUMS; do
+	install.py liuqin-install.py prepare-image.py install-liuqin.ps1 install-liuqin.cmd \
+	liuqin_layout.py liuqin-rom-images.json release-manifest.json SHA256SUMS; do
 	[ -f "$assets/$expected" ] || fail "missing release asset: $expected"
 done
 [ ! -f "$assets/rootfs.tar.gz" ] || fail 'the unsplit rootfs.tar.gz was shipped next to its parts'
@@ -118,6 +119,10 @@ assert manifest['device_ready'] is False
 assert manifest['policy_label'] == 'DEVONLY-PRIVATE-LOCAL', manifest['policy_label']
 rootfs = manifest['payloads']['rootfs.tar.gz']
 assert rootfs['kind'] == 'split' and len(rootfs['parts']) == 3, rootfs
+names = {entry['name'] for entry in manifest['assets']}
+for required in ('liuqin-install.py', 'prepare-image.py', 'install-liuqin.ps1',
+                 'install-liuqin.cmd'):
+    assert required in names, required
 rootimg = manifest['payloads']['root.img']
 assert rootimg['kind'] == 'split' and len(rootimg['parts']) == 3, rootimg
 names = {asset['name'] for asset in manifest['assets']}
