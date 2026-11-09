@@ -1,35 +1,48 @@
-# Liuqin Linux — Fedora Remix for Xiaomi Pad 6 Pro
+# Liuqin Fedora
 
-为小米平板 6 Pro（**liuqin / SM8475**）适配的个人社区项目，使用 Fedora 45、GNOME 51 和 Linux 7.3.1。不是 Fedora、Red Hat 或小米的官方产品。
+**适用于小米平板 6 Pro（liuqin / SM8475）的 Fedora Linux 移植项目。**
 
-**首版是实验性预发布。新的完整安装组合仅完成离线检查，尚未独立验证从原厂 Android 开始的完整安装。** 已有单台维护设备运行这些核心组件的证据，不代表所有批次或容量都能正常安装。
+当前版本基于 Fedora 45、GNOME 51 和 Linux 7.3.1。仓库提供设备适配补丁、系统构建配置和安装工具，使 Fedora 能够在这款平板上启动并使用其硬件。
 
-## 开始安装
+## 安装
 
-系统下载在本仓库 **[Releases](https://github.com/psych2090707/liuqin-fedora/releases)**。GitHub 自动提供的 “Source code” 压缩包是项目源码，**不是系统镜像**。
+### 交给 AI 辅助安装
 
-- 首版只提供 Linux 单系统的实验安装路径，会清除 Android 用户数据。先读 **[安装说明](INSTALL.md)**。
-- **Windows 11 和 Linux 共用同一个入口**：源码仓库用 `installer/windows/install-liuqin.ps1` 或 `installer/liuqin-install.py`；Release 解包目录用根部的 `install-liuqin.ps1` 或 `liuqin-install.py`。Windows 不需要 WSL。Windows 上的 USB 网络和真实刷机尚未实机验证。
-- 公开镜像不含再分发许可未确认的厂商固件。使用者必须自行准备指定固件，在自己的电脑上运行本地补齐工具；该工具同时让使用者设置自己的密码。
-- 镜像账户为 **`user`**，家目录 `/home/user`。没有共享默认密码，不包含维护者个人文件、网络凭据、校准或指纹模板。
-- Android/Fedora 双系统仅列为未来计划，**未经验证，首版安装包拒绝双系统模式**。
+将下面的指令复制给**能够访问本机终端的 AI 编程助手**：
 
-## 镜像包含什么
+```text
+请协助我在小米平板 6 Pro（liuqin）上安装此仓库的 Fedora：
+https://github.com/psych2090707/liuqin-fedora
 
-默认包括设备启动和显示适配、匹配的内核模块、无线/音频/触控支持、电源键和合盖策略、键盘套防误唤醒，以及触控笔坐标修复和电量/充电状态界面。厂商固件需本地补齐。
+先阅读仓库的 README.md、INSTALL.md 和 AGENTS.md，按文档使用 Releases 中对应版本的安装工具。根据我的电脑系统和设备状态，完成环境检查、文件校验、固件准备、备份和安装演练（dry-run），然后告诉我检查结果和下一步操作。任何实际刷写、清除数据或修改分区的操作，都必须先取得我的明确确认；遇到型号、分区布局或校验不符时停止，不要自行猜测或绕过检查。
+```
 
-自定义屏幕键盘、输入快捷键和浅色主题/外观同步预装但默认关闭。输入定制仍未完善，默认使用原生 GNOME/IBus。见 [可选功能](OPTIONAL.md)。
+### 手动安装
 
-## 使用前请了解
+1. **确认设备**：仅适用于小米平板 6 Pro（`liuqin`），需要事先解锁 Bootloader。
+2. **获取文件**：从 [Releases](https://github.com/psych2090707/liuqin-fedora/releases) 下载同一版本的安装文件，按发布说明核对校验值。GitHub 自动生成的 *Source code* 压缩包不是系统镜像。
+3. **运行安装工具**：在 Windows 11 或 Linux 电脑上解压安装包，进入其目录，先检查安装环境：
+   - Windows：`powershell -ExecutionPolicy Bypass -File install-liuqin.ps1 doctor`
+   - Linux：`python3 liuqin-install.py doctor`
+4. **按步骤安装**：继续阅读 [INSTALL.md](INSTALL.md)，完成下载、在本地补齐设备固件、设置账户密码、安装演练和正式写入。不要跳过演练与备份。
+5. **首次登录**：使用账户 `user` 和准备安装包时设置的密码登录 Fedora。
 
-见 **[硬件状态](HARDWARE.md)**。目前仍包括控件色块、声音发闷、蓝牙睡醒失效、NVT 偶发恢复失败、自动旋转未解决和相机限制。完整内核自动更新/恢复链尚未验收；不要混用不同版本的 boot、模块或安装文件。
+**目前仅支持 Linux 单系统安装。** 安装将替换 Android、清除现有用户数据并修改分区表；请先将重要文件备份到其他设备。双系统尚不支持。
 
-这是个人业余项目，按现状提供，不承诺保修、救砖、数据恢复、逐一远程协助或固定更新期限。软件许可证中的免责条款不能代替备份和谨慎操作，也不代表在所有情况下都能排除法律责任。风险与反馈要求见 [支持说明](SUPPORT.md)。
+## 硬件支持
 
-## 项目来源
+显示、触屏、Wi-Fi、键盘套、音频等功能已有实机使用记录。触控笔、电源管理和充电功能也在持续适配；自动旋转、摄像头及部分睡眠唤醒问题仍未解决。
 
-- [构建说明](BUILD.md)、[对应源码与许可](SOURCES.md)
-- [一般使用建议](GENERAL-RECOMMENDATIONS.md)
-- 设备适配主要参考 [yzddmr6/xiaomipad-6pro-mainline](https://github.com/yzddmr6/xiaomipad-6pro-mainline)、[yzddmr6/linux-sm8450-liuqin](https://github.com/yzddmr6/linux-sm8450-liuqin) 和 [Seeker0472/liuqin-nixos](https://github.com/Seeker0472/liuqin-nixos)；Fedora 构建参考 [pipa-fedora-builder-43](https://github.com/rr1111/pipa-fedora-builder-43)。**pipa 是另一款设备，不能混用镜像。**
+具体支持范围、已知问题与测试状态见 [HARDWARE.md](HARDWARE.md)。可选的屏幕键盘和外观定制见 [OPTIONAL.md](OPTIONAL.md)。
 
-原创代码沿用 [MIT](LICENSE)；第三方代码和内核补丁保留其原许可，见 [NOTICE](NOTICE) 和 `LICENSES/`。公开仓库从审核后的当前成果开始，不包含维护者本地工作记录和旧 Git 历史。
+## 构建与维护
+
+如果需要自行构建镜像或修改设备补丁，请从 [BUILD.md](BUILD.md) 开始。对应的内核源码、补丁和第三方组件见 [SOURCES.md](SOURCES.md)。系统日常更新与软件管理可参考 [GENERAL-RECOMMENDATIONS.md](GENERAL-RECOMMENDATIONS.md)。
+
+遇到问题可在 [Issues](https://github.com/psych2090707/liuqin-fedora/issues) 反馈，提交前请阅读 [SUPPORT.md](SUPPORT.md)。
+
+## 来源与说明
+
+设备适配主要参考 [xiaomipad-6pro-mainline](https://github.com/yzddmr6/xiaomipad-6pro-mainline)、[linux-sm8450-liuqin](https://github.com/yzddmr6/linux-sm8450-liuqin) 和 [liuqin-nixos](https://github.com/Seeker0472/liuqin-nixos)；Fedora 构建参考 [pipa-fedora-builder-43](https://github.com/rr1111/pipa-fedora-builder-43)。各组件保留其原有许可证，详见 [NOTICE](NOTICE) 和 [LICENSES/](LICENSES/)。
+
+这是非官方的实验性项目。已有维护设备的运行记录，但公开安装流程尚未完成从原厂 Android 到 Fedora 首次启动的完整实机验证。请以对应版本的安装文档和硬件测试记录为准。
