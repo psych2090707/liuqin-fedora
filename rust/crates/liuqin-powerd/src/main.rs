@@ -28,10 +28,12 @@ use zbus::OwnedVariant;
 use zbus::Proxy;
 
 const CONFIG: &str = "/etc/liuqin/power-policy.conf";
-const STATE_DIR_NAME: &str = "liuqin-power-keyd";
+const STATE_DIR: &str = "/run/liuqin-powerd";
 const STATE_FILE: &str = "power-state.json";
 const DRY_RUN_STATE_FILE: &str = "power-state-dryrun.json";
 const MARKER_FILE: &str = "power-key-action";
+/// Rewrite an unchanged state file this often so its timestamp stays fresh.
+const STATE_HEARTBEAT_MS: u64 = 60_000;
 const STARTUP_MARKER_MS: u64 = 30_000;
 const SESSION_RECONNECT_MS: u64 = 2_000;
 
@@ -67,7 +69,7 @@ struct DisplayReading {
     dsi: Vec<PathBuf>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct StateSnapshot {
     state: &'static str,
     lid_closed: bool,
@@ -91,6 +93,7 @@ struct Runtime {
     marker_path: PathBuf,
     dry_run: bool,
     last_state_json: Option<String>,
+    last_state_write_ms: Option<u64>,
     last_config_text: String,
     last_config_check_ms: u64,
     last_session_attempt_ms: u64,
@@ -650,13 +653,25 @@ fn write_state(runtime: &mut Runtime, now: u64) {
         resuspend_at_monotonic_ms: runtime.core.retry_at_ms,
         updated_monotonic_ms: now,
     };
+    // `updated_monotonic_ms` changes on every 100 ms tick.  Compare a copy
+    // without it, otherwise the dedupe below never matches and the daemon
+    // rewrites (and re-audits) the state file ten times per second.
+    let mut comparable = snapshot.clone();
+    comparable.updated_monotonic_ms = 0;
+    let Ok(key) = serde_json::to_string(&comparable) else {
+        warn!("cannot encode power state");
+        return;
+    };
+    let heartbeat_due = runtime
+        .last_state_write_ms
+        .map_or(true, |last| now.saturating_sub(last) >= STATE_HEARTBEAT_MS);
+    if !heartbeat_due && runtime.last_state_json.as_deref() == Some(key.as_str()) {
+        return;
+    }
     let Ok(text) = serde_json::to_string(&snapshot) else {
         warn!("cannot encode power state");
         return;
     };
-    if runtime.last_state_json.as_deref() == Some(text.as_str()) {
-        return;
-    }
     let temp = runtime.state_path.with_extension("tmp");
     if let Err(error) = write_private(&temp, &format!("{text}\n")) {
         warn!("cannot write power state: {error}");
@@ -667,11 +682,14 @@ fn write_state(runtime: &mut Runtime, now: u64) {
         let _ = fs::remove_file(&temp);
         return;
     }
-    runtime.last_state_json = Some(text);
+    runtime.last_state_json = Some(key);
+    runtime.last_state_write_ms = Some(now);
 }
 
-fn state_dir_for_uid(uid: &str) -> PathBuf {
-    PathBuf::from(format!("/run/user/{uid}")).join(STATE_DIR_NAME)
+fn state_dir() -> PathBuf {
+    std::env::var_os("LIUQIN_STATE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(STATE_DIR))
 }
 
 fn parse_args() -> (bool, bool, bool, bool) {
@@ -736,14 +754,18 @@ async fn main() -> Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
     let user = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
     let runtime_dir = PathBuf::from(format!("/run/user/{uid}"));
-    let state_dir = state_dir_for_uid(&uid);
-    if let Err(error) = fs::create_dir_all(&state_dir) {
-        warn!("cannot create {}: {error}", state_dir.display());
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&state_dir, fs::Permissions::from_mode(0o700));
+    let state_dir = state_dir();
+    if !state_dir.exists() {
+        match fs::create_dir_all(&state_dir) {
+            Ok(()) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&state_dir, fs::Permissions::from_mode(0o700));
+                }
+            }
+            Err(error) => warn!("cannot create {}: {error}", state_dir.display()),
+        }
     }
     let state_path = state_dir.join(if dry_run {
         DRY_RUN_STATE_FILE
@@ -819,6 +841,7 @@ async fn main() -> Result<()> {
         marker_path,
         dry_run,
         last_state_json: None,
+        last_state_write_ms: None,
         last_config_text: config_text,
         last_config_check_ms: 0,
         last_session_attempt_ms: 0,

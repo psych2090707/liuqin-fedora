@@ -16,6 +16,10 @@ Wants=upower.service
 User=user
 Group=user
 SupplementaryGroups=input
+# State and marker files live here; systemd creates it owned by User=.
+RuntimeDirectory=liuqin-powerd
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
 Type=simple
 # The device and the stock image both create the desktop user with UID 1000.
 # systemd's %U specifier expands to the manager UID (0) in a system service,

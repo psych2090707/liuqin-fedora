@@ -68,6 +68,20 @@ daemon and the Python/shell helpers remain installed for rollback.  The preset
 enables only `liuqin-powerd.service` and explicitly disables the two old units,
 so a first boot cannot run two policy owners.
 
+## State file
+
+The daemon writes `/run/liuqin-powerd/power-state.json` (0600, `RuntimeDirectory=`
+in the unit; the separate SELinux policy is in
+[`overlays/rootfs/rootfs.d/70-liuqin-powerd-selinux`](../overlays/rootfs/rootfs.d/70-liuqin-powerd-selinux/README.md)).
+It is diagnostic only; no shipped reader depends on it.
+
+- It is rewritten only when a field other than `updated_monotonic_ms` changes,
+  plus one heartbeat per minute.  Do not put a per-tick timestamp back into the
+  dedupe key: that caused a ten-writes-per-second loop and a large AVC/audit
+  storm on 2026-11-08.
+- `LIUQIN_STATE_DIR` overrides the directory for local tests and manual
+  dry-runs that cannot create `/run/liuqin-powerd`.
+
 ## Read-only check
 
 ```sh
