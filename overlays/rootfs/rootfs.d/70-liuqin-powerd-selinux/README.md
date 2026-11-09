@@ -16,8 +16,9 @@ and a one-minute heartbeat remains.  This module stops the remaining heartbeat
 records by giving `/run/liuqin-powerd` its own type and allowing exactly the
 two service domains that may own it.
 
-- `liuqin-powerd.te` — minimal type + allow rules;
-- `install.sh` — builds and installs the module and the file-context rule.
+- `install.sh` — carries the minimal type + allow rules inline (the image
+  builder copies only this script into the chroot), builds and installs the
+  module and the file-context rule.
 
 The module is optional for correctness: without it the daemon still works and
 only logs a few AVCs per minute in permissive mode.  The install script warns

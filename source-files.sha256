@@ -294,9 +294,8 @@ eded446c826eb6fa2795a97367306cf738fee1572ec58b8e47c3869d60ba3a1a  overlays/rootf
 5325687770205ba9f532ef759bcc15c47a1bbd27a342643ae416d64344c33343  overlays/rootfs/rootfs.d/65-liuqin-keyboard/README.md
 edc820c92fd14f9041150371ca2e4230e96f56c5e37b49a19c8d9fc4a5a36ab4  overlays/rootfs/rootfs.d/65-liuqin-keyboard/files/etc/udev/rules.d/71-liuqin-keyboard-nowake.rules
 de3c796a5262bff9e0b25edd45225c88e233ce0b1089faab633833b89565bf1a  overlays/rootfs/rootfs.d/65-liuqin-keyboard/install.sh
-9b4e408c700c7488336447e598da657193dbd780df53483457d916b67a4263a2  overlays/rootfs/rootfs.d/70-liuqin-powerd-selinux/README.md
-bf1910fb78c026045d01390b597f9a9151cc670e0ef7dab395bb3d2f72e1f34b  overlays/rootfs/rootfs.d/70-liuqin-powerd-selinux/install.sh
-a6cb062d5fc76583022cdc90b9ec517d0428674f967ccfab7823a0d85e6bfc74  overlays/rootfs/rootfs.d/70-liuqin-powerd-selinux/liuqin-powerd.te
+a396c279731c999622f224c37dea74b11fe3549c3f3c68685223acb4db2b0083  overlays/rootfs/rootfs.d/70-liuqin-powerd-selinux/README.md
+de31e536419d4d6441b70f04d71324da11b12c560d91eac96d2181219225be74  overlays/rootfs/rootfs.d/70-liuqin-powerd-selinux/install.sh
 48cfd833872f6b3a6e4ebbaa2772d87e56483b6aba0942c272bfd6f5ba33dca9  packaging/README.md
 f3a9576f52e5ab615445c643661169c2069c4566e69429bba96dfbcd24119550  packaging/boot-tools/NOTICE
 eb836491c280f678347177cd224a468380d81eddeba6f9a4db8da7b83355a7f3  packaging/boot-tools/bin/build-bootimg.sh
