@@ -23,11 +23,14 @@
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Pango from 'gi://Pango';
 import St from 'gi://St';
 
+import * as IBusManager from 'resource:///org/gnome/shell/misc/ibusManager.js';
 import * as KeyboardUI from 'resource:///org/gnome/shell/ui/keyboard.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {shouldAllowOpen} from './popup-policy.js';
 import {sendShortcut} from './shortcuts.js';
 
 const LOG_PREFIX = 'liuqin-osk-layout';
@@ -43,6 +46,28 @@ export default class LiuqinOskLayoutExtension extends Extension {
         this._resource = null;
         this._origRelayout = null;
         this._origOpen = null;
+        this._origPublicOpen = null;
+        this._origGestureActivate = null;
+        this._swipeOpen = false;
+        this._seat = null;
+        this._touchModeId = 0;
+        this._candidatePopup = null;
+        this._origSetPanelService = null;
+        this._panelService = null;
+        this._panelHandlerIds = [];
+        this._keyboardVisibilityId = 0;
+        this._preeditHookInstalled = false;
+        this._origSetPreeditWithAttrs = null;
+        this._origSetPreedit = null;
+        this._clientPreeditText = '';
+        this._clientPreeditVisible = false;
+        this._preeditState = {
+            preedit: '',
+            preeditVisible: false,
+            auxiliary: '',
+            auxiliaryVisible: false,
+        };
+        this._pendingPreedit = '';
         this._needsRebuild = false;
         this._layoutOriginals = new Map();
         this._actors = new Map();
@@ -51,11 +76,25 @@ export default class LiuqinOskLayoutExtension extends Extension {
         this._patchLayouts();
         this._patchRelayout();
         this._patchOpen();
+        this._patchPopupPolicy();
+        this._watchTouchMode();
+        this._installPanelHooks();
+        this._installPreeditHooks();
+        this._keyboardVisibilityId = Main.keyboard?.connect(
+            'visibility-changed', () => this._applyBubblePreedit()) ?? 0;
         this._verifyLayoutResource();
         this._rebuildKeyboard('enable');
     }
 
     disable() {
+        if (this._keyboardVisibilityId) {
+            Main.keyboard?.disconnect(this._keyboardVisibilityId);
+            this._keyboardVisibilityId = 0;
+        }
+        this._removePreeditHooks();
+        this._removePanelHooks();
+        this._unwatchTouchMode();
+        this._restorePopupPolicy();
         this._restoreOpen();
         this._restoreRelayout();
         for (const [method, original] of this._layoutOriginals)
@@ -113,6 +152,10 @@ export default class LiuqinOskLayoutExtension extends Extension {
             buttons.forEach((button, index) => {
                 const key = visible[index];
                 button._liuqinDescriptor = key;
+                if (key.liuqinAccent)
+                    button.keyButton.add_style_class_name('liuqin-key-accent');
+                if (key.liuqinShape === 'pill')
+                    button.keyButton.add_style_class_name('liuqin-key-pill');
                 if (!key.action && key.keyval) {
                     button.connect('keyval', (_button, keyval) =>
                         extension._sendRaw(this, keyval));
@@ -148,6 +191,7 @@ export default class LiuqinOskLayoutExtension extends Extension {
                     // BinLayout ignores a child's alignment unless that child
                     // needs expansion; expanding only the parent centers both.
                     label.add_child(new St.Label({text: key.label ?? key.strings[0],
+                        style_class: 'liuqin-key-primary',
                         x_expand: true, y_expand: true,
                         x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER}));
                     label.add_child(new St.Label({text: key.liuqinShift,
@@ -252,6 +296,7 @@ export default class LiuqinOskLayoutExtension extends Extension {
             return;
         const originalAspect = actor._aspectContainer;
         const originalExpand = actor._suggestions.x_expand;
+        const originalAlign = actor._suggestions.x_align;
         const stretch = new St.Widget({layout_manager: new Clutter.BinLayout(),
             x_expand: true, y_expand: true});
         // Native code calls setRatio on every layer switch. A normal widget
@@ -268,9 +313,33 @@ export default class LiuqinOskLayoutExtension extends Extension {
         actor.remove_child(actor._suggestions);
         actor._suggestions.x_expand = true;
         const header = new St.BoxLayout({style_class: 'liuqin-osk-header', x_expand: true});
+
+        const preedit = new St.BoxLayout({
+            style_class: 'liuqin-osk-preedit',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        const preeditText = new St.Label({
+            style_class: 'liuqin-osk-preedit-text',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        preeditText.x_expand = true;
+        preeditText.clutter_text.line_wrap = false;
+        preeditText.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+        const preeditCaret = new St.Widget({
+            style_class: 'liuqin-osk-preedit-caret',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        preedit.add_child(preeditText);
+        preedit.add_child(preeditCaret);
+        preedit.hide();
+        actor._liuqinPreedit = {chip: preedit, text: preeditText,
+            caret: preeditCaret, originalAlign};
+
+        header.add_child(preedit);
         header.add_child(actor._suggestions);
-        const hide = new St.Button({label: '收起', style_class: 'liuqin-osk-hide',
-            can_focus: false, reactive: true});
+        const hide = new St.Button({style_class: 'liuqin-osk-hide',
+            can_focus: false, reactive: true, accessible_name: '收起键盘'});
+        hide.set_child(new St.Icon({icon_name: 'osk-hide-symbolic', icon_size: 18}));
         hide.connect('clicked', () => actor.close(true));
         header.add_child(hide);
         actor.insert_child_at_index(header, 0);
@@ -279,17 +348,22 @@ export default class LiuqinOskLayoutExtension extends Extension {
             originalAspect.destroy();
             this._actors.delete(actor);
         });
-        this._actors.set(actor, {originalAspect, originalExpand, stretch, header, destroyId});
+        this._actors.set(actor, {originalAspect, originalExpand, originalAlign,
+            stretch, header, destroyId});
+        this._applyPreedit(actor);
     }
 
     _restoreActors(actor) {
         const record = this._actors.get(actor);
         if (!record)
             return;
-        const {originalAspect, originalExpand, stretch, header, destroyId} = record;
+        const {originalAspect, originalExpand, originalAlign,
+            stretch, header, destroyId} = record;
         actor.disconnect(destroyId);
+        actor._liuqinPreedit = null;
         header.remove_child(actor._suggestions);
         actor._suggestions.x_expand = originalExpand;
+        actor._suggestions.x_align = originalAlign;
         actor.remove_child(header);
         header.destroy();
         actor.insert_child_at_index(actor._suggestions, 0);
@@ -410,6 +484,376 @@ export default class LiuqinOskLayoutExtension extends Extension {
             logError(e, `${LOG_PREFIX}: restoring _open`);
         }
         this._origOpen = null;
+    }
+
+    // ------------------------------------------------------ popup policy --
+
+    _patchPopupPolicy() {
+        try {
+            const extension = this;
+            this._origPublicOpen = KeyboardUI.Keyboard.prototype.open;
+            const originalOpen = this._origPublicOpen;
+            KeyboardUI.Keyboard.prototype.open = function (immediate = false) {
+                try {
+                    const touchMode = extension._seat?.get_touch_mode() ?? true;
+                    if (!shouldAllowOpen({
+                        touchMode,
+                        swipe: this._liuqinSwipeOpen,
+                        visible: this._keyboardVisible,
+                    }))
+                        return;
+                } catch (e) {
+                    // Never make the keyboard unusable because a seat query
+                    // failed; fall through to the stock behavior instead.
+                    logError(e, `${LOG_PREFIX}: popup policy`);
+                }
+                return originalOpen.call(this, immediate);
+            };
+
+            this._origGestureActivate = KeyboardUI.Keyboard.prototype.gestureActivate;
+            const originalGesture = this._origGestureActivate;
+            KeyboardUI.Keyboard.prototype.gestureActivate = function (...args) {
+                this._liuqinSwipeOpen = true;
+                try {
+                    return originalGesture.apply(this, args);
+                } finally {
+                    this._liuqinSwipeOpen = false;
+                }
+            };
+            logMsg('popup policy patched');
+        } catch (e) {
+            logError(e, `${LOG_PREFIX}: cannot patch popup policy`);
+            if (this._origPublicOpen)
+                KeyboardUI.Keyboard.prototype.open = this._origPublicOpen;
+            if (this._origGestureActivate)
+                KeyboardUI.Keyboard.prototype.gestureActivate = this._origGestureActivate;
+            this._origPublicOpen = null;
+            this._origGestureActivate = null;
+        }
+    }
+
+    _restorePopupPolicy() {
+        try {
+            if (this._origPublicOpen)
+                KeyboardUI.Keyboard.prototype.open = this._origPublicOpen;
+            if (this._origGestureActivate)
+                KeyboardUI.Keyboard.prototype.gestureActivate = this._origGestureActivate;
+        } catch (e) {
+            logError(e, `${LOG_PREFIX}: restoring popup policy`);
+        }
+        this._origPublicOpen = null;
+        this._origGestureActivate = null;
+    }
+
+    _watchTouchMode() {
+        try {
+            this._seat = global.stage.context.get_backend().get_default_seat();
+            this._touchModeId = this._seat.connect('notify::touch-mode', () => {
+                const touchMode = this._seat.get_touch_mode();
+                logMsg(`touch mode ${touchMode ? 'tablet (no cover)' : 'laptop (cover attached)'}`);
+                if (touchMode)
+                    return;
+                try {
+                    Main.keyboard?.keyboardActor?.close(true);
+                } catch (e) {
+                    logError(e, `${LOG_PREFIX}: closing OSK after cover attach`);
+                }
+            });
+            logMsg(`touch mode ${this._seat.get_touch_mode() ? 'tablet (no cover)' : 'laptop (cover attached)'}`);
+        } catch (e) {
+            logError(e, `${LOG_PREFIX}: cannot watch touch mode`);
+            this._seat = null;
+            this._touchModeId = 0;
+        }
+    }
+
+    _unwatchTouchMode() {
+        if (this._seat && this._touchModeId) {
+            try {
+                this._seat.disconnect(this._touchModeId);
+            } catch (e) {
+                logError(e, `${LOG_PREFIX}: disconnecting touch-mode handler`);
+            }
+        }
+        this._touchModeId = 0;
+        this._seat = null;
+    }
+
+    // ------------------------------------------------- IBus/OSK header --
+
+    _installPanelHooks() {
+        try {
+            const manager = IBusManager.getIBusManager();
+            const popup = manager._candidatePopup;
+            if (!popup)
+                return;
+
+            this._candidatePopup = popup;
+            this._origSetPanelService = popup.setPanelService;
+            const extension = this;
+            popup.setPanelService = function (panelService) {
+                const result = extension._origSetPanelService.call(this, panelService);
+                extension._connectPanelService(panelService);
+                return result;
+            };
+            this._connectPanelService(manager._panelService);
+            logMsg('IBus candidate popup hooked');
+        } catch (e) {
+            logError(e, `${LOG_PREFIX}: cannot hook IBus candidate popup`);
+            this._candidatePopup = null;
+            this._origSetPanelService = null;
+        }
+    }
+
+    _removePanelHooks() {
+        if (this._candidatePopup && this._origSetPanelService) {
+            this._candidatePopup.setPanelService = this._origSetPanelService;
+        }
+        this._disconnectPanelService();
+        this._candidatePopup = null;
+        this._origSetPanelService = null;
+    }
+
+    _installPreeditHooks() {
+        const inputMethod = Main.inputMethod;
+        if (!inputMethod || this._preeditHookInstalled)
+            return;
+
+        const extension = this;
+        this._origSetPreeditWithAttrs = inputMethod.set_preedit_text_with_attrs;
+        this._origSetPreedit = inputMethod.set_preedit_text;
+        inputMethod.set_preedit_text_with_attrs = function (text, ...args) {
+            extension._observeClientPreedit(text);
+            return extension._origSetPreeditWithAttrs.call(this, text, ...args);
+        };
+        inputMethod.set_preedit_text = function (text, ...args) {
+            extension._observeClientPreedit(text);
+            return extension._origSetPreedit.call(this, text, ...args);
+        };
+        this._preeditHookInstalled = true;
+        logMsg('client preedit hooked');
+    }
+
+    _removePreeditHooks() {
+        if (!this._preeditHookInstalled)
+            return;
+        const inputMethod = Main.inputMethod;
+        if (inputMethod) {
+            if (this._origSetPreeditWithAttrs)
+                inputMethod.set_preedit_text_with_attrs = this._origSetPreeditWithAttrs;
+            if (this._origSetPreedit)
+                inputMethod.set_preedit_text = this._origSetPreedit;
+        }
+        this._origSetPreeditWithAttrs = null;
+        this._origSetPreedit = null;
+        this._preeditHookInstalled = false;
+    }
+
+    _observeClientPreedit(text) {
+        const value = typeof text === 'string' ? text : '';
+        this._clientPreeditText = value;
+        this._clientPreeditVisible = Boolean(value);
+        if (!value) {
+            // The panel text can arrive slightly later or not at all; do not
+            // let an old panel preedit keep the chip/bubble alive after the
+            // client cleared its composition.
+            this._preeditState.preedit = '';
+            this._preeditState.preeditVisible = false;
+        }
+
+        // Observe text for our caption only. Cursor, selection, attributes and
+        // commit mode belong to the engine and must reach the client unchanged.
+        this._refreshPreedit();
+    }
+
+    _connectPanelService(panelService) {
+        if (this._panelService === panelService)
+            return;
+
+        this._disconnectPanelService();
+        if (!panelService)
+            return;
+
+        this._panelService = panelService;
+        const connect = (signal, handler) => {
+            try {
+                this._panelHandlerIds.push(
+                    panelService.connect(signal, handler.bind(this)));
+            } catch (e) {
+                logError(e, `${LOG_PREFIX}: connecting ${signal}`);
+            }
+        };
+
+        connect('update-preedit-text', this._onUpdatePreedit);
+        connect('show-preedit-text', this._onShowPreedit);
+        connect('hide-preedit-text', this._onHidePreedit);
+        connect('update-auxiliary-text', this._onUpdateAuxiliary);
+        connect('show-auxiliary-text', this._onShowAuxiliary);
+        connect('hide-auxiliary-text', this._onHideAuxiliary);
+        connect('update-lookup-table', this._onUpdateLookupTable);
+        connect('hide-lookup-table', this._clearSelectedCandidate);
+        connect('focus-out', this._clearPanelState);
+        logMsg('IBus panel service connected');
+    }
+
+    _disconnectPanelService() {
+        if (this._panelService) {
+            for (const id of this._panelHandlerIds) {
+                try {
+                    this._panelService.disconnect(id);
+                } catch {
+                    // The panel service may already be gone.
+                }
+            }
+        }
+        this._panelHandlerIds = [];
+        this._panelService = null;
+    }
+
+    _onUpdatePreedit(_service, text, _cursor, visible) {
+        this._preeditState.preedit = this._textOf(text);
+        this._preeditState.preeditVisible = Boolean(visible);
+        this._refreshPreedit();
+    }
+
+    _onShowPreedit() {
+        this._preeditState.preeditVisible = true;
+        this._refreshPreedit();
+    }
+
+    _onHidePreedit() {
+        this._preeditState.preeditVisible = false;
+        this._refreshPreedit();
+    }
+
+    _onUpdateAuxiliary(_service, text, visible) {
+        this._preeditState.auxiliary = this._textOf(text);
+        this._preeditState.auxiliaryVisible = Boolean(visible);
+        this._refreshPreedit();
+    }
+
+    _onShowAuxiliary() {
+        this._preeditState.auxiliaryVisible = true;
+        this._refreshPreedit();
+    }
+
+    _onHideAuxiliary() {
+        this._preeditState.auxiliaryVisible = false;
+        this._refreshPreedit();
+    }
+
+    _textOf(text) {
+        try {
+            return text?.get_text?.() ?? '';
+        } catch {
+            return '';
+        }
+    }
+
+    _cleanPreedit(text) {
+        return String(text ?? '').replace(/\s*\|\s*$/, '').trim();
+    }
+
+    _choosePreeditText() {
+        const state = this._preeditState;
+        const preedit = state.preeditVisible ? this._cleanPreedit(state.preedit) : '';
+        const auxiliary = state.auxiliaryVisible ? this._cleanPreedit(state.auxiliary) : '';
+        const client = this._clientPreeditVisible
+            ? this._cleanPreedit(this._clientPreeditText)
+            : '';
+        const shellClient = Main.inputMethod?._preeditVisible
+            ? this._cleanPreedit(Main.inputMethod._preeditStr)
+            : '';
+        // libpinyin compact puts pinyin in preedit; traditional puts the
+        // Chinese guess there and the pinyin in auxiliary.  The panel service
+        // does not always forward the client preedit, so fall back to the
+        // shell's client-side copy before deciding that there is no pinyin.
+        const candidates = [preedit, auxiliary, client, shellClient].filter(Boolean);
+        const pinyin = candidates.find(text =>
+            /[a-z]/i.test(text) && !/[\u3400-\u9fff]/u.test(text));
+        return pinyin || auxiliary || preedit || client || shellClient;
+    }
+
+    _refreshPreedit() {
+        this._pendingPreedit = this._choosePreeditText();
+        this._applyPreedit(Main.keyboard?.keyboardActor);
+        this._applyBubblePreedit();
+    }
+
+    _applyBubblePreedit() {
+        const popup = this._candidatePopup;
+        const label = popup?._preeditText;
+        if (!label)
+            return;
+
+        const text = this._pendingPreedit ?? '';
+        if (text && !Main.keyboard?.visible) {
+            if (label.text !== text)
+                label.text = text;
+            // The v8 bubble has one pinyin caption.  In traditional mode the
+            // same pinyin may also be in the auxiliary label; hide it there.
+            popup._auxText?.hide();
+            label.show();
+        } else if (!text) {
+            label.hide();
+        }
+        popup._updateVisibility?.();
+    }
+
+    _applyPreedit(actor) {
+        const record = actor?._liuqinPreedit;
+        if (!record)
+            return;
+
+        const text = this._pendingPreedit ?? '';
+        const visible = Boolean(text);
+        record.chip.visible = visible;
+        if (visible)
+            record.text.text = text;
+        actor._suggestions.x_align = visible
+            ? Clutter.ActorAlign.START
+            : record.originalAlign;
+    }
+
+    _onUpdateLookupTable(_service, lookupTable, visible) {
+        this._clearSelectedCandidate();
+        if (!lookupTable || !visible)
+            return;
+
+        try {
+            if (!lookupTable.is_cursor_visible())
+                return;
+            const pageSize = lookupTable.get_page_size();
+            if (pageSize <= 0)
+                return;
+            const index = lookupTable.get_cursor_pos() % pageSize;
+            const suggestions = Main.keyboard?.keyboardActor?._suggestions;
+            suggestions?.get_child_at_index(index)?.add_style_class_name(
+                'liuqin-candidate-selected');
+        } catch (e) {
+            logError(e, `${LOG_PREFIX}: marking selected candidate`);
+        }
+    }
+
+    _clearSelectedCandidate() {
+        const suggestions = Main.keyboard?.keyboardActor?._suggestions;
+        for (const child of suggestions?.get_children?.() ?? [])
+            child.remove_style_class_name('liuqin-candidate-selected');
+    }
+
+    _clearPanelState() {
+        this._preeditState = {
+            preedit: '',
+            preeditVisible: false,
+            auxiliary: '',
+            auxiliaryVisible: false,
+        };
+        this._clientPreeditText = '';
+        this._clientPreeditVisible = false;
+        this._pendingPreedit = '';
+        this._applyPreedit(Main.keyboard?.keyboardActor);
+        this._applyBubblePreedit();
+        this._clearSelectedCandidate();
     }
 
     _rebuildKeyboard(reason) {

@@ -23,7 +23,8 @@ class InputRouting(unittest.TestCase):
         for name in ('GNOME', 'GNOME:GNOME-Classic'):
             env = self.routed(name)
             self.assertEqual(env['QT_IM_MODULES'], 'wayland;ibus')
-            self.assertEqual(env['GTK_IM_MODULE'], 'ibus')
+            self.assertNotIn('GTK_IM_MODULE', env,
+                'GNOME Wayland GTK must use text-input-v3, not GTK IBus')
             self.assertEqual(env['QT_IM_MODULE'], 'ibus')
             self.assertEqual(env['XMODIFIERS'], '@im=ibus')
 
@@ -43,6 +44,7 @@ class InputRouting(unittest.TestCase):
         defaults = dict(line.split('=', 1) for line in path.read_text().splitlines()
                         if line and not line.startswith('#'))
         env = self.routed('GNOME')
+        self.assertNotIn('GTK_IM_MODULE', env)
         for key, value in defaults.items():
             self.assertEqual(env[key], value)
 

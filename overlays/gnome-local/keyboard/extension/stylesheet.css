@@ -1,35 +1,234 @@
-/* Shared proposal A geometry. Both color variants import this file.
- * GNOME loads only the first matching stylesheet, not this plus a variant. */
-#keyboard.liuqin-osk-a {
-    padding: 0 12px 12px;
+/* Shared geometry for the Liuqin tablet keyboard (Material 3, design v8).
+ * GNOME Shell loads exactly one of stylesheet-light.css / stylesheet-dark.css
+ * for the active Shell variant; both import this file for metrics.
+ * Design contract and class list: tasks/keyboard-material3/DESIGN.md
+ *
+ * Shape: letters/symbols and most function keys use 12px (M3 "medium");
+ * only the action keys carry .liuqin-key-pill (fully rounded, 24px).
+ * Keys are flat: no border, no shadow. Press feedback is colour + a tighter
+ * corner radius, never a scale animation. */
+
+#keyboard {
+    padding: 0 8px 8px;
 }
+
+/* ---- header: [preedit chip] [candidates ...........] [more] [hide] ---- */
+
 #keyboard.liuqin-osk-a .liuqin-osk-header {
-    height: 42px;
-    spacing: 10px;
+    height: 48px;
+    spacing: 4px;
+    padding: 0 4px;
 }
+
 #keyboard.liuqin-osk-a .liuqin-osk-header .word-suggestions {
     padding: 0;
-    spacing: 12px;
+    spacing: 4px;
+    min-height: 48px;
 }
+
+#keyboard .liuqin-osk-preedit {
+    min-height: 36px;
+    max-width: 300px;
+    margin: 6px 8px 6px 0;
+    padding: 0 14px;
+    spacing: 2px;
+    border-radius: 18px;
+}
+
+#keyboard .liuqin-osk-preedit-text {
+    font-size: 17px;
+    font-weight: 500;
+    letter-spacing: 0.4px;
+}
+
+#keyboard .liuqin-osk-preedit-caret {
+    width: 2px;
+    height: 20px;
+    margin: 0 0 0 1px;
+    border-radius: 1px;
+}
+
+#keyboard .liuqin-osk-more,
 #keyboard.liuqin-osk-a .liuqin-osk-hide {
-    margin: 6px 3px;
-    padding: 3px 18px;
-    border-radius: 8px;
-    font-size: 13px;
+    min-width: 36px;
+    min-height: 36px;
+    margin: 6px 4px;
+    padding: 0;
+    border-radius: 18px;
 }
-#keyboard.liuqin-osk-a .key-container { padding: 3px; }
-#keyboard.liuqin-osk-a .keyboard-key {
+
+#keyboard .word-suggestions StButton {
+    min-width: 36px;
+    min-height: 36px;
+    margin: 6px 0;
+    padding: 0 16px;
+    border-radius: 18px;
+    font-size: 18px;
+    font-weight: 400;
+}
+
+#keyboard .word-suggestions StButton.liuqin-candidate-selected {
+    font-weight: 500;
+}
+
+/* ---- keys ---- */
+
+#keyboard .key-container {
+    padding: 3px;
+}
+
+#keyboard .keyboard-key {
     min-height: 0;
     min-width: 0;
-    padding: 4px 6px;
-    border-radius: 7px;
-    font-size: 20px;
-    font-weight: normal;
+    padding: 2px 4px;
+    border-width: 0;
+    border-radius: 12px;
+    font-size: 22px;
+    font-weight: 400;
+    transition-duration: 90ms;
 }
-#keyboard.liuqin-osk-a .keyboard-key.default-key {
+
+#keyboard .keyboard-key.default-key {
     font-size: 14px;
+    font-weight: 500;
 }
-#keyboard.liuqin-osk-a .liuqin-key-label { text-align: center; }
-#keyboard.liuqin-osk-a .liuqin-key-secondary {
-    font-size: 10px;
+
+#keyboard .keyboard-key.liuqin-key-pill {
+    border-radius: 24px;
+}
+
+#keyboard .keyboard-key.liuqin-key-pill:active {
+    border-radius: 12px;
+}
+
+#keyboard .keyboard-key:active {
+    border-radius: 8px;
+}
+
+#keyboard .keyboard-key StIcon {
+    icon-size: 20px;
+}
+
+#keyboard .liuqin-key-label {
+    text-align: center;
+}
+
+#keyboard .liuqin-key-primary {
+    font-size: 22px;
+    font-weight: 400;
+}
+
+/* Shifted-symbol corner label. With a 12px radius the label must stay clear
+ * of the corner arc: total inset from the key edge is key padding (4px/2px)
+ * plus this margin = 9px right, 5px top (>= 0.6r / 0.35r). Never put it on a
+ * .liuqin-key-pill key. */
+#keyboard .liuqin-key-secondary {
+    font-size: 11px;
+    font-weight: 500;
+    margin: 3px 5px 0 0;
+}
+
+/* ---- popups ---- */
+
+.keyboard-subkeys-boxpointer {
+    -arrow-border-radius: 16px;
+    -arrow-border-width: 0;
+    -arrow-base: 18px;
+    -arrow-rise: 8px;
+    -boxpointer-gap: 6px;
+}
+
+/* IBus candidate bubble (shown with a physical keyboard, where the OSK is
+ * hidden). Same language as the OSK header: typed pinyin on top, candidate
+ * chips below, the selected one tonal. M3 menus/popups have no pointer arrow,
+ * so -arrow-rise is 0 (the arrow is not drawn) and elevation does the
+ * separation: the colour files use one soft shadow close to M3 elevation 2
+ * (ambient layer). Larger blurs (e.g. 0 4px 12px) get clipped to the
+ * BoxPointer allocation and show up as a faint rectangle around the bubble.
+ * Radius 24 = chip 16 + padding 8. */
+.candidate-popup-boxpointer {
+    -arrow-border-radius: 24px;
+    -arrow-border-width: 0;
+    -arrow-base: 0;
+    -arrow-rise: 0;
+    -boxpointer-gap: 6px;
+}
+
+.candidate-popup-content {
+    padding: 4px 8px 8px;
+    spacing: 0;
+    border-width: 0;
+    border-radius: 24px;
+}
+
+/* The typed pinyin is a quiet caption (no fill, like Sogou/Baidu on Android),
+ * attached directly to the candidate row. Its left edge lines up with the
+ * first candidate's index (8px padding + 14px box padding). */
+.candidate-popup-text {
+    min-height: 24px;
+    padding: 4px 14px 0;
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 0.6px;
+}
+
+.candidate-popup-content .horizontal {
+    spacing: 2px;
+}
+
+.candidate-popup-content .vertical {
+    spacing: 2px;
+}
+
+.candidate-popup-content .candidate-box {
+    min-height: 36px;
+    padding: 0 14px;
+    border-radius: 16px;
+    transition-duration: 90ms;
+}
+
+/* St labels are top-aligned and CSS cannot centre them: the paddings below
+ * centre an 18px label and baseline-align the 14px index in a 36px box
+ * (checked by 3x zoom of the headless render). If
+ * the labels get y_align CENTER in JS, drop the vertical padding. */
+.candidate-popup-content .candidate-index {
+    padding: 11px 8px 0 0;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.candidate-popup-content .candidate-label {
+    padding: 6px 0 4px;
+    font-size: 18px;
+    font-weight: 400;
+}
+
+.candidate-popup-content .candidate-box:selected .candidate-label {
+    font-weight: 500;
+}
+
+.candidate-popup-content .candidate-page-button-box {
+    height: 36px;
+    spacing: 2px;
+}
+
+.candidate-popup-content .horizontal .candidate-page-button-box {
+    padding: 0 0 0 8px;
+}
+
+.candidate-popup-content .vertical .candidate-page-button-box {
+    padding: 4px 0 0 0;
+}
+
+.candidate-popup-content .candidate-page-button {
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    border-width: 0;
+    border-radius: 18px;
+    box-shadow: none;
+}
+
+.candidate-popup-content .candidate-page-button StIcon {
+    icon-size: 16px;
 }

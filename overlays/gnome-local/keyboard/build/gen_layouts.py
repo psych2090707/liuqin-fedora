@@ -27,8 +27,8 @@ def action(label, kind, width=1, **extra):
     return dict(label=label, action=kind, width=width, liuqin=True, **extra)
 
 
-def raw(label, keyval, width=1):
-    return dict(label=label, keyval=hex(keyval), width=width, liuqin=True)
+def raw(label, keyval, width=1, **extra):
+    return dict(label=label, keyval=hex(keyval), width=width, liuqin=True, **extra)
 
 
 def make_level(name):
@@ -51,20 +51,27 @@ def make_level(name):
         return char(value, shifted, caps, width)
 
     switch = action('Shift', 'levelSwitch', 2, level=default if shifted else upper,
-                    iconName='osk-shift-symbolic')
+                    iconName='osk-shift-symbolic', liuqinShape='pill')
     cap = action('Caps', 'levelSwitch', 1.5, level='default' if caps else 'caps')
-    backspace = raw('Del', 0xffff, 2) if fn else action('⌫', 'delete', 2, iconName='osk-delete-symbolic')
+    if fn:
+        backspace = raw('Del', 0xffff, 2, liuqinShape='pill')
+    else:
+        backspace = action('⌫', 'delete', 2,
+            iconName='osk-delete-symbolic', liuqinShape='pill')
+    space = c(' ', 4)
+    space['liuqinShape'] = 'pill'
     return dict(level=name, mode='locked' if caps or fn else ('latched' if shifted else 'default'), rows=[
         [c(v) for v in '`1234567890-='] + [backspace],
         [raw('Tab', 0xff09, 1.5)] + [c(v) for v in 'qwertyuiop[]'] + [c('\\', 1.5)],
-        [cap] + [c(v) for v in "asdfghjkl;'"] + [raw('Enter', 0xff0d, 2.5)],
+        [cap] + [c(v) for v in "asdfghjkl;'"] +
+        [raw('Enter', 0xff0d, 2.5, liuqinAccent=True, liuqinShape='pill')],
         [switch] + [c(v) for v in 'zxcvbnm,./'] + [switch.copy(), raw('↑', 0xff52)],
         [action('Ctrl', 'modifier', keyval='0xffe3'), action('Super', 'modifier', keyval='0xffeb'),
          action('Alt', 'modifier', keyval='0xffe9'),
          action('Fn', 'levelSwitch', level='default' if fn else 'opt'),
          action('中/英', 'languageMenu', iconName='osk-layout-symbolic'),
          raw('PrtSc', 0xff61) if fn else action('☺', 'emoji', iconName='osk-emoji-picker-symbolic'),
-         c(' ', 4), raw('Home', 0xff50), raw('End', 0xff57),
+         space, raw('Home', 0xff50), raw('End', 0xff57),
          raw('←', 0xff51), raw('↓', 0xff54), raw('→', 0xff53)],
     ])
 

@@ -25,19 +25,14 @@ class Keyboard {
     _disableAllModifiers() { this.resets++; }
     _setLatched(x) { assert.equal(x, false); this.resets++; }
 }
-class KeyboardManager {
-    maybeHandleEvent() { return 'stock'; }
-}
 const originalLayout = Keyboard.prototype._updateLayout;
-const originalEvent = KeyboardManager.prototype.maybeHandleEvent;
 let clock = 0;
 const logs = [];
 const models = new Set(['us', 'us-extended', 'de', 'de-extended']);
 const modelIdentity = (group, purpose) => resolveModel(group, purpose, purposes,
     name => models.has(name));
-const restore = installLayoutReuse({Keyboard, KeyboardManager, purposes,
-    eventActor: event => event.actor, now: () => clock++, log: x => logs.push(x),
-    modelIdentity});
+const restore = installLayoutReuse({Keyboard, purposes,
+    now: () => clock++, log: x => logs.push(x), modelIdentity});
 const keyboard = new Keyboard();
 keyboard._updateLayout('us', purposes.NORMAL);
 keyboard._updateLayout('us', purposes.PASSWORD);
@@ -69,14 +64,10 @@ assert.equal(second.builds, 1, 'new keyboard never inherits another actor cache'
 keyboard._languagePopup = {destroy: () => keyboard.resets++};
 keyboard._updateLayout('us', purposes.PASSWORD);
 assert.equal(keyboard._languagePopup, null, 'language popup closed at boundary');
-const manager = new KeyboardManager();
-assert.equal(manager.maybeHandleEvent({actor: null}), false);
-assert.equal(manager.maybeHandleEvent({actor: {}}), 'stock');
 assert.notEqual(layoutKey('us', purposes.PIN, purposes),
     layoutKey('us', purposes.PASSWORD, purposes));
 restore();
 assert.equal(Keyboard.prototype._updateLayout, originalLayout);
-assert.equal(KeyboardManager.prototype.maybeHandleEvent, originalEvent);
 assert.ok(logs.some(x => x.startsWith('build')));
 assert.ok(logs.some(x => x.startsWith('reuse')));
-console.log('PASS: layout reuse, special-purpose isolation, state reset, null event and teardown');
+console.log('PASS: layout reuse, special-purpose isolation, state reset and teardown');

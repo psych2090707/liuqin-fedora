@@ -27,4 +27,7 @@ GNOME 抑制与电源键标记。不连接真实桌面、设备或网络。
 `python3 tests/desktop-admission/test-keyboard-nowake.py` 静态检查键盘套 nowake 规则仍在
 桌面无关层、KDE 目录没有第二份副本，并在有 `udevadm` 时运行规则语法检查。
 
-`node tests/desktop-admission/test-layout-reuse.mjs` 验证维护版 v6 键盘的布局复用、特殊用途隔离和临时状态复位，不运行 GNOME 或操作界面。
+`node tests/desktop-admission/test-layout-reuse.mjs` 验证维护版键盘的布局复用、特殊用途隔离和临时状态复位，不运行 GNOME 或操作界面。
+
+`node tests/desktop-admission/test-keyboard-popup-policy.mjs` 验证键盘套吸附时的弹出策略：
+焦点自动打开被拦截，底部上滑和已经可见的键盘仍放行；不查询真实 seat 或操作界面。

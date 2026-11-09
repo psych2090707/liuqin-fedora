@@ -23,8 +23,9 @@ Fedora 首次启动会执行一次 `systemctl preset-all`。`/usr/lib/systemd/sy
 | 目录 | 内容 | 来源 |
 |---|---|---|
 | `power/` | 电源设置应用、旧按键 wrapper、旧合盖服务、配置样例、窄范围 polkit 规则、`liuqin-powerd.service` 与 preset | 旧实现（回退用）；Rust 统一服务 unit/preset 的程序在 `rust/` |
-| `keyboard/extension/` | v6 扩展与完整依赖：基础布局、快捷键、布局资源、三份 CSS | v6 包装与布局复用，以及核对过的 v4 基础文件；原始 `extension.js` 在此叫 `base-layout.js` |
+| `keyboard/extension/` | v8 扩展与完整依赖：基础布局、快捷键、布局资源、浅/深 CSS、拼音芯片/候选选中 JS、键盘套弹出策略 | 外观由用户更新后接入；v7 视觉已被否决 |
 | `keyboard/build/` | 小型布局生成器和资源打包脚本 | 只生成键盘资源，不构建系统 |
+| `keyboard/apply-input-settings.sh` | 输入法安全基线；`v`/预编辑的尝试已撤回 | 用户级 GSettings，需在桌面用户下执行 |
 | `appearance/` | 亮暗桥接程序、用户服务、Ptyxis 双面配色 | 独立维护 |
 | `stylus/` | GNOME 51 触控笔电量扩展；读 `qcom-battmgr-pen` sysfs，顶栏显示电量/充电状态 | 2026-11 新增 |
 
@@ -46,6 +47,7 @@ scripts/build-powerd.sh
 python3 tests/desktop-admission/test-lid-policy.py
 python3 tests/desktop-admission/test-lid-service.py
 node tests/desktop-admission/test-layout-reuse.mjs
+node tests/desktop-admission/test-keyboard-popup-policy.mjs
 ```
 
 这些只验证 Rust 核心状态机/构建、旧 Python 状态机、私有测试总线和布局复用逻辑，

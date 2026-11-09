@@ -1,8 +1,8 @@
 {
   "uuid": "liuqin-tablet-keyboard@liuqin",
-  "name": "Liuqin tablet keyboard (layout reuse)",
-  "description": "Existing Liuqin v4 tablet keyboard with redundant layout rebuilds removed. Stays loaded through the lock screen; preserves native authentication. Keep the old liuqin-osk-layout@liuqin extension disabled.",
+  "name": "Liuqin tablet keyboard (Material 3)",
+  "description": "Material 3 tablet keyboard with the Liuqin computer-key layout, native IBus input, pinyin chip, cover-aware popup policy and reduced layout rebuilds. Stays loaded through the lock screen; preserves native authentication. Keep the old liuqin-osk-layout@liuqin extension disabled.",
   "shell-version": ["51"],
   "session-modes": ["user", "unlock-dialog"],
-  "version": 6
+  "version": 9
 }
