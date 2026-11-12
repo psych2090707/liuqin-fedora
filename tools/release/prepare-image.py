@@ -397,6 +397,11 @@ def export_base(args):
 
     def strip(member, data):
         name = safe_name(member.name)
+        if name.startswith('usr/lib/firmware/cirrus/cs35l41-dsp1-spk-prot-10251826-') and \
+                name.rsplit('/', 1)[-1].split('-')[-1] in {
+                    channel + '.' + suffix for channel in ('tl', 'tr', 'bl', 'br')
+                    for suffix in ('bin', 'wmfw')} and not stock_audio_source:
+            raise ValueError('private stock speaker tuning found; export requires --stock-audio')
         original = root_paths.get(name)
         recipe = catalog.get(digest(data)) if member.isreg() else None
         if original or recipe:
