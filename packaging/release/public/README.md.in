@@ -45,6 +45,6 @@ https://github.com/psych2090707/liuqin-fedora
 
 ## 来源与说明
 
-设备适配主要参考 [xiaomipad-6pro-mainline](https://github.com/yzddmr6/xiaomipad-6pro-mainline)、[linux-sm8450-liuqin](https://github.com/yzddmr6/linux-sm8450-liuqin) 和 [liuqin-nixos](https://github.com/Seeker0472/liuqin-nixos)；Fedora 构建参考 [pipa-fedora-builder-43](https://github.com/rr1111/pipa-fedora-builder-43)。各组件保留其原有许可证，详见 [NOTICE](NOTICE) 和 [LICENSES/](LICENSES/)。
+设备适配主要参考 [xiaomipad-6pro-mainline](https://github.com/yzddmr6/xiaomipad-6pro-mainline)、[linux-sm8450-liuqin](https://github.com/yzddmr6/linux-sm8450-liuqin) 和 [liuqin-nixos](https://github.com/Seeker0472/liuqin-nixos)；Fedora 构建参考 [pipa-fedora-builder-43](https://github.com/rr1111/pipa-fedora-builder-43)。各组件保留其原有许可证，详见 [NOTICE](NOTICE) 和 `LICENSES/`。
 
 这是非官方的实验性项目。已有维护设备的运行记录，但公开安装流程尚未完成从原厂 Android 到 Fedora 首次启动的完整实机验证。请以对应版本的安装文档和硬件测试记录为准。
