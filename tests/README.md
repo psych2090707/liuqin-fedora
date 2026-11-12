@@ -5,6 +5,7 @@
 | 文档相对链接 | `scripts/check-docs.sh --quiet` | 公开 Markdown 中的相对链接可解析；不判断自然语言矛盾 |
 | GNOME 按键/合盖/输入 | [desktop-admission](desktop-admission/README.md) | 合成输入、状态机、私有测试总线；不操作桌面或真实设备 |
 | boot 更新元数据/回退逻辑 | `tests/boot-update/` | 合成镜像和文件；不能当真实内核更新验收 |
+| Release 上传重试与公开门槛 | `python3 tests/release/test-upload.py` | 模拟断网和单附件中断，验证保留完成附件、只删不完整残留，以及提交/摘要不符时拒绝公开；不访问 GitHub |
 | 固件/设备验证/构建适配 | `tests/integration/test-firmware-pool.py`、`tests/device-validation/` 等 | 先看具体脚本是否依赖产物或写 rootfs，不默认全跑 |
 | WCD938x RX 中断空指针 | [audio-driver/test-wcd938x-irq.py](audio-driver/test-wcd938x-irq.py) `--source <实际源码>` | 编译实际回调，模拟 RX 无 regmap 与 TX 状态处理；不是硬件中断或睡醒验收 |
 | 充电认证受控候选 | [charging/test-staged-auth.py](charging/test-staged-auth.py) | 假 sysfs 下角色请求/SVID/HMAC/失败清理分支；不是实机认证或功率验收 |
