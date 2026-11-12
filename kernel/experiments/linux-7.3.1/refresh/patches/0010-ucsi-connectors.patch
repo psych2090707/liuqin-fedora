@@ -1,0 +1,19 @@
+From: liuqin Fedora adaptation <liuqin@localhost>
+Subject: [PATCH] liuqin 7.3.1: ucsi-connectors
+
+f43a4aa7; clear released connector pointer.
+Original-Author: Codex <codex@openai.com>
+Upstream-commit: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/f43a4aa7fa89c6e227c5ec763e695576e66e2eb7
+Link: https://github.com/slwyts/Project-SunUEFI/pull/5
+Linux-derived code retains original GPL notices. Offline port; no hardware claim.
+---
+--- a/drivers/usb/typec/ucsi/ucsi.c
++++ b/drivers/usb/typec/ucsi/ucsi.c
+@@ -2423,6 +2423,7 @@
+ 	}
+ 
+ 	kfree(ucsi->connector);
++	ucsi->connector = NULL;
+ }
+ EXPORT_SYMBOL_GPL(ucsi_unregister);
+ 

@@ -1,0 +1,15 @@
+0001-restore-ipcc.patch
+0002-battmgr-nowake.patch
+0003-gpu-hfi.patch
+0004-gpu-terminal-recovery.patch
+0005-apm-lifetime.patch
+0006-capture-start.patch
+0007-bluetooth-ibs.patch
+0008-usb-pcs.patch
+0009-ucsi-registration.patch
+0010-ucsi-connectors.patch
+0011-dsi-errors.patch
+0012-iris-clock-order.patch
+0013-glink-endpoint-rx.patch
+0014-geni-suspend-irq.patch
+0015-nvt-remove-raw-attributes.patch

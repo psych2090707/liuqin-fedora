@@ -1,0 +1,34 @@
+From: liuqin Fedora adaptation <liuqin@localhost>
+Subject: [PATCH] liuqin 7.3.1: bluetooth-ibs
+
+e4a305e1; reset work, timers and both IBS directions after power loss.
+Original-Author: Birk Skyum <birk.skyum@pm.me>
+Upstream-commit: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/e4a305e114378f4b39cf217288909b2f9f10a3b3
+Assisted-by: Claude:claude-opus-5-5
+Co-developed-by: Vladyslav Tymoshchuk <tvlad744@gmail.com>
+Signed-off-by: Vladyslav Tymoshchuk <tvlad744@gmail.com>
+Signed-off-by: Birk Skyum <birk.skyum@pm.me>
+Link: https://lkml.iu.edu/2610.1/16019.html
+Linux-derived code retains original GPL notices. Offline port; no hardware claim.
+---
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -2234,7 +2234,18 @@
+ 	 */
+ 	spin_lock_irqsave(&qca->hci_ibs_lock, flags);
+ 	set_bit(QCA_IBS_DISABLED, &qca->flags);
++	spin_unlock_irqrestore(&qca->hci_ibs_lock, flags);
++
++	/* The powered-off controller loses both sides of its IBS state. */
++	cancel_work_sync(&qca->ws_awake_device);
++	cancel_work_sync(&qca->ws_awake_rx);
++	timer_delete_sync(&qca->wake_retrans_timer);
++	timer_delete_sync(&qca->tx_idle_timer);
++
++	spin_lock_irqsave(&qca->hci_ibs_lock, flags);
+ 	qca_flush(hu);
++	qca->tx_ibs_state = HCI_IBS_TX_ASLEEP;
++	qca->rx_ibs_state = HCI_IBS_RX_ASLEEP;
+ 	spin_unlock_irqrestore(&qca->hci_ibs_lock, flags);
+ 
+ 	/* Non-serdev device usually is powered by external power

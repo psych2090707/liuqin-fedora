@@ -10,6 +10,13 @@ OUT=${LIUQIN_731_OUT:-$PROJECT/out/kernel-7.3.1/rebuild}
 ARCHIVE=${LIUQIN_731_ARCHIVE:-$PROJECT/out/kernel-7.3.1/downloads/linux-7.3.1.tar.xz}
 JOBS=${JOBS:-10}
 PREPARE_ONLY=0
+PROFILE=${LIUQIN_731_PROFILE:-}
+EXPECTED_RELEASE=7.3.1-liuqin-exp1
+if [[ -n $PROFILE ]]; then
+  PROFILE=$(realpath -- "$PROFILE")
+  [[ -f $PROFILE/patches/series && -f $PROFILE/experiment.config && -f $PROFILE/release ]] || exit 2
+  EXPECTED_RELEASE=$(cat "$PROFILE/release")
+fi
 case ${1:-} in
   --prepare-only) PREPARE_ONLY=1 ;;
   '') ;;
@@ -29,6 +36,10 @@ with open(sys.argv[2], 'rb') as f:
 assert actual == spec['target_sha256'], 'source archive checksum mismatch'
 PY
 INPUTS=$(cd -- "$HERE"; sha256sum source.json seed.config experiment.config patches/series patches/*.patch modules/pon/* | sha256sum | cut -d' ' -f1)
+if [[ -n $PROFILE ]]; then
+  EXTRA_INPUTS=$(cd -- "$PROFILE"; sha256sum release experiment.config patches/series patches/*.patch | sha256sum | cut -d' ' -f1)
+  INPUTS=$(printf '%s\n%s\n' "$INPUTS" "$EXTRA_INPUTS" | sha256sum | cut -d' ' -f1)
+fi
 mkdir -p "$WORK/logs"
 if [[ -e $WORK/prepared.sha256 ]]; then
   [[ $(cat "$WORK/prepared.sha256") == "$INPUTS" ]] || { echo 'Inputs changed; use a fresh WORK directory.' >&2; exit 1; }
@@ -41,16 +52,24 @@ else
     git -C "$WORK/src" apply --check "$HERE/patches/$name"
     git -C "$WORK/src" apply "$HERE/patches/$name"
   done < "$HERE/patches/series"
+  if [[ -n $PROFILE ]]; then
+    while IFS= read -r name; do
+      [[ -z $name || $name == \#* ]] && continue
+      git -C "$WORK/src" apply --check "$PROFILE/patches/$name"
+      git -C "$WORK/src" apply "$PROFILE/patches/$name"
+    done < "$PROFILE/patches/series"
+  fi
   printf '%s\n' "$INPUTS" > "$WORK/prepared.sha256"
 fi
 cp "$HERE/seed.config" "$WORK/build/.config"
 cp "$HERE/experiment.config" "$WORK/experiment.config"
+if [[ -n $PROFILE ]]; then cat "$PROFILE/experiment.config" >> "$WORK/experiment.config"; fi
 MAKE=(make -C "$WORK/src" O="$WORK/build" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION=)
 (cd -- "$WORK/src"; scripts/kconfig/merge_config.sh -m -O "$WORK/build" "$WORK/build/.config" "$WORK/experiment.config") > "$WORK/logs/config-merge.log" 2>&1
 "${MAKE[@]}" olddefconfig > "$WORK/logs/olddefconfig.log" 2>&1
 "${MAKE[@]}" prepare > "$WORK/logs/prepare.log" 2>&1
 RELEASE=$("${MAKE[@]}" -s --no-print-directory kernelrelease)
-[[ $RELEASE == 7.3.1-liuqin-exp1 ]] || { echo "Unexpected release: $RELEASE" >&2; exit 1; }
+[[ $RELEASE == "$EXPECTED_RELEASE" ]] || { echo "Unexpected release: $RELEASE" >&2; exit 1; }
 echo "Prepared $RELEASE in $WORK"
 [[ $PREPARE_ONLY == 0 ]] || exit 0
 nice -n 10 "${MAKE[@]}" -j"$JOBS" Image qcom/sm8475-xiaomi-liuqin.dtb modules > "$WORK/logs/build.log" 2>&1

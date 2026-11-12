@@ -324,5 +324,36 @@ class ScreenLatestTests(unittest.TestCase):
         self.assertIsNone(intervals[1]["exit"])
 
 
+class ChargeCounterTests(unittest.TestCase):
+    def test_c1_same_boot_delta_and_rate(self):
+        pre = snapshot(boottime=1000.0, monotonic=500.0)
+        post = snapshot(boottime=1000.0 + 8 * 3600, monotonic=500.0,
+                        success="8")
+        pre["power_supply"] = {"qcom-battmgr-bat": {"charge_counter": "5000"}}
+        post["power_supply"] = {"qcom-battmgr-bat": {"charge_counter": "4200"}}
+        line = collector.charge_line(pre, post)
+        self.assertIn("5000 -> 4200 (-800 raw fw units", line)
+        self.assertIn("-100.0 units/h", line)
+        self.assertIn("over 8.00h", line)
+        report = collector.build_report(pre, post, "suspend",
+                                        Path("/tmp/event"))
+        self.assertIn("power delta: 5000 -> 4200", collector.render(report))
+
+    def test_c2_missing_counter_is_unavailable(self):
+        pre = snapshot()
+        post = snapshot(boottime=1064.0, success="8")
+        self.assertEqual(collector.charge_line(pre, post),
+                         "unavailable in pre/post")
+
+    def test_c3_cross_boot_has_no_rate(self):
+        pre = snapshot(boottime=1000.0, boot_id="boot-1")
+        post = snapshot(boottime=1064.0, success="8", boot_id="boot-2")
+        pre["power_supply"] = {"qcom-battmgr-bat": {"charge_counter": "10"}}
+        post["power_supply"] = {"qcom-battmgr-bat": {"charge_counter": "8"}}
+        line = collector.charge_line(pre, post)
+        self.assertIn("-2 raw fw units", line)
+        self.assertNotIn("units/h", line)
+
+
 if __name__ == "__main__":
     unittest.main()

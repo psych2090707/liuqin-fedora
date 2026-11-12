@@ -51,6 +51,7 @@ WORK_ROOT="${LIUQIN_RPMBUILD_ROOT:-/var/tmp/liuqin-rpmbuild}"
 PKGREL="liuqin1"
 RPM_VERSION=""
 RPM_RELEASE=""
+CMDLINE_OVERRIDE=""
 NO_CONTAINER=0
 SKIP_VERIFY=0
 
@@ -71,6 +72,7 @@ usage: scripts/build-kernel-rpm.sh [options]
   --pkgrel TAG           RPM release tag (default: liuqin1 -> %{release} ...liuqin1.fc45)
   --rpm-version V        override the RPM Version (e.g. 7.3.1 for the experiment)
   --rpm-release R        override the RPM Release prefix (e.g. 0.liuqin1)
+  --bootargs FILE        reviewed DT bootargs installed with the kernel tools
   --no-container         use a host rpmbuild if one exists (offline fallback)
   --skip-verify          skip post-build verification (not recommended)
   --help                 this help
@@ -89,6 +91,7 @@ while [ $# -gt 0 ]; do
 	--pkgrel) PKGREL=${2:?}; shift 2 ;;
 	--rpm-version) RPM_VERSION=${2:?}; shift 2 ;;
 	--rpm-release) RPM_RELEASE=${2:?}; shift 2 ;;
+	--bootargs) CMDLINE_OVERRIDE=${2:?}; shift 2 ;;
 	--no-container) NO_CONTAINER=1; shift ;;
 	--skip-verify) SKIP_VERIFY=1; shift ;;
 	--help|-h) usage; exit 0 ;;
@@ -112,6 +115,7 @@ done
 MKBOOTIMG_DIR="$PROJECT_ROOT/cache/upstream-v0.6.0/mkbootimg"
 [ -f "$MKBOOTIMG_DIR/mkbootimg.py" ] || die "AOSP mkbootimg.py missing: $MKBOOTIMG_DIR"
 CMDLINE_FILE="$PROJECT_ROOT/upstream/xiaomipad-6pro-mainline/device/native-bootargs.txt"
+[ -z "$CMDLINE_OVERRIDE" ] || CMDLINE_FILE=$(realpath "$CMDLINE_OVERRIDE")
 [ -f "$CMDLINE_FILE" ] || die "native bootargs missing: $CMDLINE_FILE"
 
 # ---------------------------------------------------------------- kernel identity

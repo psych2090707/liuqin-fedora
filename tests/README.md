@@ -8,6 +8,7 @@
 | 固件/设备验证/构建适配 | `tests/integration/test-firmware-pool.py`、`tests/device-validation/` 等 | 先看具体脚本是否依赖产物或写 rootfs，不默认全跑 |
 | WCD938x RX 中断空指针 | [audio-driver/test-wcd938x-irq.py](audio-driver/test-wcd938x-irq.py) `--source <实际源码>` | 编译实际回调，模拟 RX 无 regmap 与 TX 状态处理；不是硬件中断或睡醒验收 |
 | 充电认证受控候选 | [charging/test-staged-auth.py](charging/test-staged-auth.py) | 假 sysfs 下角色请求/SVID/HMAC/失败清理分支；不是实机认证或功率验收 |
+| 0.6.1 快充移植 | [upstream-refresh/mipps-role-first.py](upstream-refresh/mipps-role-first.py) | 使用实际 helper 的模拟接入、角色切换、认证及拔线分支；不访问设备 |
 | 旧安装器 | `tests/installer/` | 历史布局与协议的定向回归，不安装当前平板 |
 
 离线与实机结论分开。文档修改不构建系统、不运行 QEMU 整机模拟或硬件检查。

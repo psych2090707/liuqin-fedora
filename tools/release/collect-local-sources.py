@@ -37,6 +37,8 @@ def ignore(directory, names):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', required=True, type=Path)
+    parser.add_argument('--kernel-out', type=Path, default=PROJECT / 'out/kernel-7.3.1/pen-ui5')
+    parser.add_argument('--mobile-sources', type=Path, default=PROJECT / 'out/f45/rpms-mobile/work/SOURCES')
     args = parser.parse_args()
     if args.out.exists():
         parser.error('output exists; choose a new directory')
@@ -61,6 +63,10 @@ def main():
         # filtering would remove legitimate inputs and break offline rebuilds.
         shutil.copytree(source, args.out / name, symlinks=True,
                         ignore=None if name == 'rust-vendor' else ignore)
+    # Keep fingerprint sources from the base RPM set alongside the refreshed
+    # sensor sources, which do not rebuild the fingerprint packages.
+    shutil.copytree(args.mobile_sources, args.out / 'mobile-sources',
+                    symlinks=True, ignore=ignore, dirs_exist_ok=True)
     topology = PROJECT / 'out/audio-topology/build-info.json'
     topology_candidates = sorted(Path('/var/tmp/liuqin-pack-cache').glob('audioreach-topology-*.tar'))
     if len(topology_candidates) != 1:
@@ -74,11 +80,13 @@ def main():
     shutil.copy2(busybox, args.out / busybox.name)
     for name in ('busybox-1.36.1.config', 'busybox-build-info.json'):
         shutil.copy2(PROJECT / 'out/boot/toolchain' / name, args.out / name)
-    kernel = json.loads((PROJECT / 'out/kernel-7.3.1/pen-ui5/build-info.json').read_text())
+    kernel = json.loads((args.kernel_out / 'build-info.json').read_text())
     public_kernel = {k: kernel[k] for k in ('kernel_release', 'gnu_build_id', 'patches',
                                           'config_sha256', 'compiler', 'module_count')}
+    if 'profile' in kernel:
+        public_kernel['profile'] = kernel['profile']
     (args.out / 'kernel-build.json').write_text(json.dumps(public_kernel, indent=2) + '\n')
-    shutil.copy2(PROJECT / 'out/kernel-7.3.1/pen-ui5/dist/config', args.out / 'kernel-final.config')
+    shutil.copy2(args.kernel_out / 'dist/config', args.out / 'kernel-final.config')
     rust_licenses = Path('/opt/rust-1.99.1/share/doc/rust')
     shutil.copytree(rust_licenses / 'licenses', args.out / 'rust-toolchain-licenses')
     shutil.copy2(rust_licenses / 'COPYRIGHT-library.html', args.out / 'Rust-COPYRIGHT-library.html')

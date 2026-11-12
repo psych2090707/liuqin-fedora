@@ -4,7 +4,7 @@
 
 ## 构建内核
 
-本版采用 kernel.org 的 Linux 7.3.1，加上 `kernel/experiments/linux-7.3.1/patches/series` 中的设备补丁。准确来源和原始归档摘要在该目录的 `source.json`，最终配置及 GNU Build ID 记录随版本提供。
+本版采用 kernel.org 的 Linux 7.3.1，加上 `kernel/experiments/linux-7.3.1/patches/series` 中的设备补丁。之后追加 `refresh/patches/series` 的 15 组定向上游修复，使用 `refresh/build.sh`、`refresh/bootargs.txt` 和 `7.3.1-liuqin-upstream1`。完整镜像与内核 RPM 均传 `--bootargs kernel/experiments/linux-7.3.1/refresh/bootargs.txt`，避免回到 deep 默认。准确来源和原始归档摘要在该目录的 `source.json`，最终配置及 GNU Build ID 记录随版本提供。
 
 把 Release 附件 `linux-7.3.1.tar.xz` 放到 `out/kernel-7.3.1/downloads/`。在装有 aarch64 交叉 GCC/binutils、make、dtc、kmod 和 Python 的 Linux 电脑上，按目录 README 构建。工作目录需要无空格，且独立于只读上游克隆。
 
@@ -18,7 +18,7 @@
 
 ## 准备公开包
 
-发布者先在构建主机生成完整候选并验证，再用 `tools/release/prepare-image.py export` 生成去固件的基础包。公开版只包含经过筛选的源码、基础镜像和对应源码附件；带入本地固件或密码的安装包留在使用者电脑上。
+发布者先在构建主机生成完整候选并验证，再用 `tools/release/prepare-image.py export` 生成去固件的基础包。本版组装传 `--stock-audio DIR`，导出时也传相同参数，以移除全部原厂扬声器调音并写入本地恢复配方。公开版只包含经过筛选的源码、基础镜像和对应源码附件；带入本地固件或密码的安装包留在使用者电脑上。
 
 这一阶段记录原始 boot 结构和被移除文件的路径、摘要及元数据。使用者的 `prepare` 操作按这份清单恢复文件，保留数字属主、权限、ACL、capability 和 SELinux 扩展属性，并设置个人密码。
 

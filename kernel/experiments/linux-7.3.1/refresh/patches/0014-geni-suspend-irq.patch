@@ -1,0 +1,85 @@
+From: liuqin Fedora adaptation <liuqin@localhost>
+Subject: [PATCH] liuqin 7.3.1: geni-suspend-irq
+
+59413493; retain force-PM, unwind failed suspend, preserve active console IRQ.
+Original-Author: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Upstream-commit: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/59413493369901ffc7bae4b2be707e2b0d511673
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Linux-derived code retains original GPL notices. Offline port; no hardware claim.
+---
+--- a/drivers/tty/serial/qcom_geni_serial.c
++++ b/drivers/tty/serial/qcom_geni_serial.c
+@@ -2090,42 +2090,47 @@
+ 	struct qcom_geni_serial_port *port = dev_get_drvdata(dev);
+ 	struct uart_port *uport = &port->uport;
+ 	struct qcom_geni_private_data *private_data = uport->private_data;
++	bool keep_console = !console_suspend_enabled && uart_console(uport);
+ 	int ret;
+ 
+-	/*
+-	 * This is done so we can hit the lowest possible state in suspend
+-	 * even with no_console_suspend
+-	 */
+ 	if (uart_console(uport)) {
+ 		geni_icc_set_tag(&port->se, QCOM_ICC_TAG_ACTIVE_ONLY);
+ 		geni_icc_set_bw(&port->se);
+ 	}
+ 
++	/* A running no_console_suspend console still needs its interrupt. */
++	if (!keep_console)
++		disable_irq(uport->irq);
+ 	ret = uart_suspend_port(private_data->drv, uport);
+ 	if (ret)
+-		return ret;
+-
+-	/*
+-	 * When no_console_suspend is set the console must remain active
+-	 * across system sleep, so skip the force suspend path.
+-	 */
+-	if (!console_suspend_enabled && uart_console(uport))
++		goto enable_irq;
++	if (keep_console)
+ 		return 0;
+ 
+-	return pm_runtime_force_suspend(dev);
++	ret = pm_runtime_force_suspend(dev);
++	if (!ret)
++		return 0;
++
++	/* The PM core will not call resume for a failed suspend callback. */
++	uart_resume_port(private_data->drv, uport);
++enable_irq:
++	if (!keep_console)
++		enable_irq(uport->irq);
++	return ret;
+ }
+ 
+ static int qcom_geni_serial_resume(struct device *dev)
+ {
+-	int ret;
+ 	struct qcom_geni_serial_port *port = dev_get_drvdata(dev);
+ 	struct uart_port *uport = &port->uport;
+ 	struct qcom_geni_private_data *private_data = uport->private_data;
+-
+-	if (console_suspend_enabled || !uart_console(uport)) {
++	bool keep_console = !console_suspend_enabled && uart_console(uport);
++	int ret;
++
++	if (!keep_console) {
+ 		ret = pm_runtime_force_resume(dev);
+ 		if (ret)
+-			return ret;
++			goto enable_irq;
+ 	}
+ 
+ 	ret = uart_resume_port(private_data->drv, uport);
+@@ -2133,6 +2138,9 @@
+ 		geni_icc_set_tag(&port->se, QCOM_ICC_TAG_ALWAYS);
+ 		geni_icc_set_bw(&port->se);
+ 	}
++enable_irq:
++	if (!keep_console)
++		enable_irq(uport->irq);
+ 	return ret;
+ }
+ 

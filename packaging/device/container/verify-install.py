@@ -185,7 +185,7 @@ def verify_device_support(root: Path, checks: Checks) -> None:
         "liuqin-bt-preconfigure.service", "liuqin-wlan-mac.service",
         "liuqin-mipps-auth.service", "liuqin-hide-gunyah-node.service",
         "liuqin-power-keyd.service.d/20-liuqin-session-runtime.conf",
-        "liuqin-mipps-auth.service.d/10-allow-unverified-adapter.conf",
+        "liuqin-mipps-battery-auth.service",
         "bluetooth.service.d/20-liuqin-public-address.conf",
         "NetworkManager.service.d/20-liuqin-wlan-mac.conf",
     ]

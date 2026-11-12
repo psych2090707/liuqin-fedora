@@ -1,0 +1,375 @@
+From: liuqin Fedora adaptation <liuqin@localhost>
+Subject: [PATCH] liuqin 7.3.1: gpu-terminal-recovery
+
+018982b5; preserve 7.3 VM and perf-counter handling; recover before fence advance.
+Original-Author: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Upstream-commit: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/018982b5e1ac830617c6aed9cacb6cc68f4eae1a
+Co-Authored-By: gpt-6-astra <noreply@openai.com>
+Linux-derived code retains original GPL notices. Offline port; no hardware claim.
+---
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+@@ -1566,12 +1566,38 @@
+ 	adreno_dump(gpu);
+ }
+ 
++/* Drop and restore recovery references without accidentally waking the GPU. */
++static int a6xx_recover_suspend(struct msm_gpu *gpu, int active_submits)
++{
++	struct a6xx_gmu *gmu = &to_a6xx_gpu(to_adreno_gpu(gpu))->gmu;
++	struct device *dev = &gpu->pdev->dev;
++	int ret;
++
++	reinit_completion(&gmu->pd_gate);
++	ret = dev_pm_genpd_add_notifier(gmu->cxpd, &gmu->pd_nb);
++	if (ret)
++		return ret;
++	dev_pm_genpd_synced_poweroff(gmu->cxpd);
++	if (active_submits)
++		pm_runtime_put_noidle(dev);
++	ret = pm_runtime_put_sync_suspend(dev);
++	if (ret >= 0 &&
++	    !wait_for_completion_timeout(&gmu->pd_gate, msecs_to_jiffies(1000)))
++		ret = -ETIMEDOUT;
++	dev_pm_genpd_remove_notifier(gmu->cxpd);
++	if (active_submits)
++		pm_runtime_get_noresume(dev);
++	pm_runtime_get_noresume(dev);
++	return ret < 0 ? ret : 0;
++}
++
+ static void a6xx_recover(struct msm_gpu *gpu)
+ {
+ 	struct adreno_gpu *adreno_gpu = to_adreno_gpu(gpu);
+ 	struct a6xx_gpu *a6xx_gpu = to_a6xx_gpu(adreno_gpu);
+ 	struct a6xx_gmu *gmu = &a6xx_gpu->gmu;
+-	int active_submits;
++	int active_submits, ret;
++	bool quiesced = false;
+ 
+ 	adreno_dump_info(gpu);
+ 
+@@ -1612,34 +1638,41 @@
+ 		a6xx_gpu_sw_reset(gpu, false);
+ 	}
+ 
+-	reinit_completion(&gmu->pd_gate);
+-	dev_pm_genpd_add_notifier(gmu->cxpd, &gmu->pd_nb);
+-	dev_pm_genpd_synced_poweroff(gmu->cxpd);
+-
+-	/* Drop the rpm refcount from active submits */
+-	if (active_submits)
+-		pm_runtime_put(&gpu->pdev->dev);
+-
+-	/* And the final one from recover worker */
+-	pm_runtime_put_sync(&gpu->pdev->dev);
+-
+-	if (!wait_for_completion_timeout(&gmu->pd_gate, msecs_to_jiffies(1000)))
+-		DRM_DEV_ERROR(&gpu->pdev->dev, "cx gdsc didn't collapse\n");
+-
+-	dev_pm_genpd_remove_notifier(gmu->cxpd);
+-
+-	pm_runtime_use_autosuspend(&gpu->pdev->dev);
+-
+-	if (active_submits)
+-		pm_runtime_get(&gpu->pdev->dev);
+-
+-	pm_runtime_get_sync(&gpu->pdev->dev);
+-
++	ret = a6xx_recover_suspend(gpu, active_submits);
++	if (ret)
++		goto failed;
++
++	/* No submitted commands can survive a confirmed CX power collapse. */
++	quiesced = true;
++	ret = pm_runtime_resume(&gpu->pdev->dev);
++	if (ret < 0)
++		goto failed;
++
++	quiesced = false;
++	ret = msm_gpu_hw_init(gpu);
++	if (ret) {
++		/* hw_init may have started the CP; stop it before ending fences. */
++		gmu->hung = true;
++		quiesced = !a6xx_recover_suspend(gpu, active_submits);
++		goto failed;
++	}
++
++	a6xx_gpu->hung = false;
++	goto out;
++
++failed:
++	WRITE_ONCE(gpu->wedged, true);
++	timer_delete_sync(&gpu->hangcheck_timer);
++	DRM_DEV_ERROR(&gpu->pdev->dev, "GPU recovery failed: %d; device wedged\n", ret);
++	if (quiesced)
++		msm_gpu_fail_submits(gpu);
++	else
++		DRM_DEV_ERROR(&gpu->pdev->dev,
++			      "GPU not quiescent; retaining pending fences and buffers\n");
++out:
+ 	gpu->active_submits = active_submits;
+ 	mutex_unlock(&gpu->active_lock);
+-
+-	msm_gpu_hw_init(gpu);
+-	a6xx_gpu->hung = false;
++	pm_runtime_use_autosuspend(&gpu->pdev->dev);
+ }
+ 
+ static const char *a6xx_uche_fault_block(struct msm_gpu *gpu, u32 mid)
+--- a/drivers/gpu/drm/msm/adreno/adreno_device.c
++++ b/drivers/gpu/drm/msm/adreno/adreno_device.c
+@@ -307,7 +307,12 @@
+ static int adreno_runtime_resume(struct device *dev)
+ {
+ 	struct msm_gpu *gpu = dev_to_gpu(dev);
+-	int ret = gpu->funcs->pm_resume(gpu);
++	int ret;
++
++	if (READ_ONCE(gpu->wedged))
++		return -EIO;
++
++	ret = gpu->funcs->pm_resume(gpu);
+ 	if (!ret)
+ 		ret = msm_perfcntr_resume(gpu);
+ 	return ret;
+--- a/drivers/gpu/drm/msm/msm_gem_submit.c
++++ b/drivers/gpu/drm/msm/msm_gem_submit.c
+@@ -564,6 +564,9 @@
+ 
+ 	if (!gpu)
+ 		return -ENXIO;
++
++	if (READ_ONCE(gpu->wedged))
++		return -EIO;
+ 
+ 	if (!vm)
+ 		return UERR(ENOMEM, dev, "no VM");
+--- a/drivers/gpu/drm/msm/msm_gpu.c
++++ b/drivers/gpu/drm/msm/msm_gpu.c
+@@ -437,6 +437,37 @@
+ 
+ static void retire_submits(struct msm_gpu *gpu);
+ 
++/* Only call after the GPU can no longer access the submitted buffers. */
++void msm_gpu_fail_submits(struct msm_gpu *gpu)
++{
++	int i;
++
++	lockdep_assert_held(&gpu->lock);
++
++	for (i = 0; i < gpu->nr_rings; i++) {
++		struct msm_ringbuffer *ring = gpu->rb[i];
++		struct msm_gem_submit *submit;
++		unsigned long flags;
++
++		spin_lock_irqsave(&ring->submit_lock, flags);
++		list_for_each_entry(submit, &ring->submits, node) {
++			struct dma_fence *fence = submit->hw_fence;
++			unsigned long fence_flags;
++
++			dma_fence_lock_irqsave(fence, fence_flags);
++			if (!dma_fence_is_signaled_locked(fence)) {
++				dma_fence_set_error(fence, -EIO);
++				dma_fence_signal_locked(fence);
++			}
++			dma_fence_unlock_irqrestore(fence, fence_flags);
++		}
++		spin_unlock_irqrestore(&ring->submit_lock, flags);
++
++		ring->memptrs->fence = ring->fctx->last_fence;
++		msm_update_fence(ring->fctx, ring->fctx->last_fence);
++	}
++}
++
+ static void get_comm_cmdline(struct msm_gem_submit *submit, char **comm, char **cmd)
+ {
+ 	struct msm_context *ctx = submit->queue->ctx;
+@@ -467,13 +498,18 @@
+ 	struct drm_device *dev = gpu->dev;
+ 	struct msm_drm_private *priv = dev->dev_private;
+ 	struct msm_gem_submit *submit;
+-	struct msm_ringbuffer *cur_ring = gpu->funcs->active_ring(gpu);
++	struct msm_ringbuffer *cur_ring;
+ 	char *comm = NULL, *cmd = NULL;
+ 	unsigned int noreclaim_flag;
+ 	struct task_struct *task;
+ 	int i;
+ 
+ 	mutex_lock(&gpu->lock);
++
++	if (gpu->wedged)
++		goto out_unlock;
++
++	cur_ring = gpu->funcs->active_ring(gpu);
+ 
+ 	DRM_DEV_ERROR(dev->dev, "%s: hangcheck recover!\n", gpu->name);
+ 
+@@ -534,6 +570,10 @@
+ 	kfree(cmd);
+ 	kfree(comm);
+ 
++	gpu->funcs->recover(gpu);
++	if (gpu->wedged)
++		goto out_pm;
++
+ 	/*
+ 	 * Update all the rings with the latest and greatest fence.. this
+ 	 * needs to happen after msm_rd_dump_submit() to ensure that the
+@@ -555,8 +595,6 @@
+ 	}
+ 
+ 	priv->disable_err_irq = false;
+-
+-	gpu->funcs->recover(gpu);
+ 
+ 	/* retire completed submits, plus the one that hung: */
+ 	retire_submits(gpu);
+@@ -582,6 +620,7 @@
+ 		spin_unlock_irqrestore(&ring->submit_lock, flags);
+ 	}
+ 
++out_pm:
+ 	pm_runtime_put(&gpu->pdev->dev);
+ 
+ out_unlock:
+@@ -593,11 +632,16 @@
+ void msm_gpu_fault_crashstate_capture(struct msm_gpu *gpu, struct msm_gpu_fault_info *fault_info)
+ {
+ 	struct msm_gem_submit *submit;
+-	struct msm_ringbuffer *cur_ring = gpu->funcs->active_ring(gpu);
++	struct msm_ringbuffer *cur_ring;
+ 	char *comm = NULL, *cmd = NULL;
+ 	unsigned int noreclaim_flag;
+ 
+ 	mutex_lock(&gpu->lock);
++
++	if (gpu->wedged)
++		goto resume_smmu;
++
++	cur_ring = gpu->funcs->active_ring(gpu);
+ 
+ 	submit = find_submit(cur_ring, cur_ring->memptrs->fence + 1);
+ 	if (submit && submit->fault_dumped)
+@@ -655,8 +699,14 @@
+ {
+ 	struct msm_gpu *gpu = timer_container_of(gpu, t, hangcheck_timer);
+ 	struct drm_device *dev = gpu->dev;
+-	struct msm_ringbuffer *ring = gpu->funcs->active_ring(gpu);
+-	uint32_t fence = ring->memptrs->fence;
++	struct msm_ringbuffer *ring;
++	u32 fence;
++
++	if (READ_ONCE(gpu->wedged))
++		return;
++
++	ring = gpu->funcs->active_ring(gpu);
++	fence = ring->memptrs->fence;
+ 
+ 	if (fence != ring->hangcheck_fence) {
+ 		/* some progress has been made.. ya! */
+@@ -790,16 +840,25 @@
+ }
+ 
+ /* add bo's to gpu's ring, and kick gpu: */
+-void msm_gpu_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit)
++int msm_gpu_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit)
+ {
+ 	struct msm_ringbuffer *ring = submit->ring;
+ 	unsigned long flags;
++	int ret;
+ 
+ 	WARN_ON(!mutex_is_locked(&gpu->lock));
+ 
+-	pm_runtime_get_sync(&gpu->pdev->dev);
+-
+-	msm_gpu_hw_init(gpu);
++	ret = pm_runtime_resume_and_get(&gpu->pdev->dev);
++	if (ret < 0)
++		return ret;
++
++	ret = msm_gpu_hw_init(gpu);
++	if (ret) {
++		pm_runtime_put(&gpu->pdev->dev);
++		return ret;
++	}
++
++	msm_fence_init(submit->hw_fence, ring->fctx);
+ 
+ 	submit->seqno = submit->hw_fence->seqno;
+ 
+@@ -827,6 +886,8 @@
+ 
+ 	pm_runtime_put(&gpu->pdev->dev);
+ 	hangcheck_timer_reset(gpu);
++
++	return 0;
+ }
+ 
+ /*
+--- a/drivers/gpu/drm/msm/msm_gpu.h
++++ b/drivers/gpu/drm/msm/msm_gpu.h
+@@ -212,6 +212,9 @@
+ 	/* does gpu need hw_init? */
+ 	bool needs_hw_init;
+ 
++	/* Terminal recovery failure; protected by lock, read with READ_ONCE. */
++	bool wedged;
++
+ 	/**
+ 	 * global_faults: number of GPU hangs not attributed to a particular
+ 	 * address space
+@@ -743,7 +746,8 @@
+ int msm_gpu_hw_init(struct msm_gpu *gpu);
+ 
+ void msm_gpu_retire(struct msm_gpu *gpu);
+-void msm_gpu_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit);
++void msm_gpu_fail_submits(struct msm_gpu *gpu);
++int msm_gpu_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit);
+ 
+ int msm_gpu_init(struct drm_device *drm, struct platform_device *pdev,
+ 		struct msm_gpu *gpu, const struct msm_gpu_funcs *funcs,
+--- a/drivers/gpu/drm/msm/msm_ringbuffer.c
++++ b/drivers/gpu/drm/msm/msm_ringbuffer.c
+@@ -14,13 +14,10 @@
+ static struct dma_fence *msm_job_run(struct drm_sched_job *job)
+ {
+ 	struct msm_gem_submit *submit = to_msm_submit(job);
+-	struct msm_fence_context *fctx = submit->ring->fctx;
+ 	struct msm_gpu *gpu = submit->gpu;
+ 	struct drm_device *dev = gpu->dev;
+ 	unsigned nr_cmds = submit->nr_cmds;
+-	int i;
+-
+-	msm_fence_init(submit->hw_fence, fctx);
++	int i, ret;
+ 
+ 	mutex_lock(&dev->gem_lru_mutex);
+ 
+@@ -37,14 +34,25 @@
+ 	/* TODO move submit path over to using a per-ring lock.. */
+ 	mutex_lock(&gpu->lock);
+ 
++	if (gpu->wedged) {
++		mutex_unlock(&gpu->lock);
++		msm_submit_retire(submit);
++		return ERR_PTR(-EIO);
++	}
++
+ 	if (submit->queue->ctx->closed)
+ 		submit->nr_cmds = 0;
+ 
+-	msm_gpu_submit(gpu, submit);
++	ret = msm_gpu_submit(gpu, submit);
+ 
+ 	submit->nr_cmds = nr_cmds;
+ 
+ 	mutex_unlock(&gpu->lock);
++
++	if (ret) {
++		msm_submit_retire(submit);
++		return ERR_PTR(ret);
++	}
+ 
+ 	return dma_fence_get(submit->hw_fence);
+ }

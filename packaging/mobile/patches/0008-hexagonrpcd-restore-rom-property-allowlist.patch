@@ -1,0 +1,27 @@
+From: liuqin Fedora adaptation <liuqin@localhost>
+Subject: [PATCH] restore the exact-ROM SSC property allowlist
+
+The temporary wildcard experiment did not resolve the SLPI reset. Restore
+the original two-property boundary before integrating v0.6.1 continuation
+tests. Preserve the write-only/discard file stub; do not expose properties.
+---
+--- a/hexagonrpcd/sns_registry.c
++++ b/hexagonrpcd/sns_registry.c
+@@ -28,15 +28,8 @@
+ 
+ static int property_is_allowed(const void *name, size_t len)
+ {
+-	/*
+-	 * Experimental: accept every property name and return an empty value.
+-	 * The liuqin firmware enumerates more names than the pinned ROM config;
+-	 * rejecting them may abort sensor initialization.  This remains a
+-	 * read-only shim and never exposes a generic Android property bridge.
+-	 */
+-	(void)name;
+-	(void)len;
+-	return 1;
++	return (len == sizeof(property0) && !memcmp(name, property0, len))
++	    || (len == sizeof(property1) && !memcmp(name, property1, len));
+ }
+ 
+ static uint32_t sns_registry_get_property(void *data,

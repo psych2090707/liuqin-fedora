@@ -2,6 +2,9 @@
 
 本目录是当前发布镜像使用的 7.3.1 设备内核输入：补丁、配置、离线构建脚本和归集工具。它不替换仓库的默认通用内核流程；构建和启动身份以 Release 说明及本目录输出的 `build-info` 为准。
 
+Ubuntu 0.6.1 修复的独立离线移植使用 [refresh profile](refresh/README.md)，在原队列后追加
+15 组补丁、使用不同 release。已 RAM 启动核对身份，人工功能/短睡眠待验收，不替换下面的既有验收。
+
 ## 输入
 
 - `source.json`：准确的 kernel.org 7.3.1 tarball SHA256、原产品锁与社区参考 revision。

@@ -1,0 +1,13 @@
+{
+  "rom": "liuqin HyperOS OS2.0.6.0.VMYCNXM",
+  "partition": "vendor_a",
+  "directory": "/firmware",
+  "license": "Vendor proprietary; user-supplied local files only; no redistribution permission confirmed",
+  "files": {
+    "TL-cs35l41-dsp1-spk-prot.bin": "082721e8d36e4afa5892f056297b887962ffdda308d7c4752511a176cc85d84c",
+    "TR-cs35l41-dsp1-spk-prot.bin": "121b0ff4e6bd14cadc852ae1588ec8f309da883b49b95eeda973372244546953",
+    "BL-cs35l41-dsp1-spk-prot.bin": "9f879b9298dd6460e9e938d2dde271e750778a83dee398176292eb1fbd7e7418",
+    "BR-cs35l41-dsp1-spk-prot.bin": "426417eb23849d539699a6a8fafd0ce7f4733a5841951f76ada5450f4bb7cad6",
+    "cs35l41-dsp1-spk-prot.wmfw": "1bb7ea70dd6b8e01ca5563cb051c025e1c8f361c57c28780ac559c0fc6b55f87"
+  }
+}

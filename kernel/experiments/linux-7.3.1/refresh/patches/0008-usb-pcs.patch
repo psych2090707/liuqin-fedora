@@ -1,0 +1,24 @@
+From: liuqin Fedora adaptation <liuqin@localhost>
+Subject: [PATCH] liuqin 7.3.1: usb-pcs
+
+10bddb42; retain 7.3 shared DP/USB initialization.
+Original-Author: nadelacruz-00 <323917690+nadelacruz-00@users.noreply.github.com>
+Upstream-commit: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/10bddb4202c87dd395743467939c852fae46e93a
+Link: https://github.com/TheMojoMan/oneplus-erhai-linux/commit/1fd1e0452839b8699b5b71c83959461c7995672e
+Signed-off-by: nadelacruz-00 <323917690+nadelacruz-00@users.noreply.github.com>
+Assisted-by: LLM
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Linux-derived code retains original GPL notices. Offline port; no hardware claim.
+---
+--- a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
++++ b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
+@@ -4229,6 +4229,9 @@
+ 	unsigned int val;
+ 	int ret;
+ 
++	/* Common init may be retained while the USB PCS is powered down. */
++	qphy_setbits(pcs, cfg->regs[QPHY_PCS_POWER_DOWN_CONTROL], SW_PWRDN);
++
+ 	qmp_configure(qmp->dev, serdes, cfg->serdes_tbl, cfg->serdes_tbl_num);
+ 
+ 	/* Tx, Rx, and PCS configurations */

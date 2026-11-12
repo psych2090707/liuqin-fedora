@@ -1,0 +1,135 @@
+{
+  "base": "pen-ui5; standard 0018 series",
+  "hardware_verified": false,
+  "patches": [
+    {
+      "path": "0001-restore-ipcc.patch",
+      "sha256": "44d8602fce41a9047a38d53450dee7d913eb3e43cb736f0f34d8232f7d60a8c7",
+      "source": "Revert 0012; restore upstream IPCC IRQF_NO_SUSPEND; pair with battmgr wakeup filtering.",
+      "files": [
+        "drivers/mailbox/qcom-ipcc.c"
+      ]
+    },
+    {
+      "path": "0002-battmgr-nowake.patch",
+      "sha256": "5a48046c60b7d832709a56bdfddfbbc1c6ca17ff7c808271c48db4cd7e3f8ba9",
+      "source": "4320cc40; also cover the project-specific pen supply.",
+      "files": [
+        "drivers/power/supply/qcom_battmgr.c"
+      ]
+    },
+    {
+      "path": "0003-gpu-hfi.patch",
+      "sha256": "9a2e144cd0aab323d33524b4107e5361c3384a4f1d001a57ddce92bc660fd1fc",
+      "source": "b9e43fbe, cb8be68e; ARMADA PR662 bounded devcoredump wait.",
+      "files": [
+        "drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+        "drivers/gpu/drm/msm/adreno/a6xx_hfi.c"
+      ]
+    },
+    {
+      "path": "0004-gpu-terminal-recovery.patch",
+      "sha256": "0ba02d10190d86a0fd97b7bb5caee5fb905964135c1fbd364f053e970394a183",
+      "source": "018982b5; preserve 7.3 VM and perf-counter handling; recover before fence advance.",
+      "files": [
+        "drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+        "drivers/gpu/drm/msm/adreno/adreno_device.c",
+        "drivers/gpu/drm/msm/msm_gem_submit.c",
+        "drivers/gpu/drm/msm/msm_gpu.c",
+        "drivers/gpu/drm/msm/msm_gpu.h",
+        "drivers/gpu/drm/msm/msm_ringbuffer.c"
+      ]
+    },
+    {
+      "path": "0005-apm-lifetime.patch",
+      "sha256": "9888ab8ac3aa0524d86585515d5ece52e8e7a63632b7bb569fae01c046df53e7",
+      "source": "43ec60d3; retain 7.3 managed packet cleanup and component removal.",
+      "files": [
+        "sound/soc/qcom/qdsp6/q6apm.c"
+      ]
+    },
+    {
+      "path": "0006-capture-start.patch",
+      "sha256": "fe009004c4b5df234819c375c1a97169bf4e09ad54bd9e6825bf130d18607470",
+      "source": "ecc36e1d; leave push/pull graph startup unchanged.",
+      "files": [
+        "sound/soc/qcom/qdsp6/q6apm-dai.c"
+      ]
+    },
+    {
+      "path": "0007-bluetooth-ibs.patch",
+      "sha256": "4bb7a0bd8e716c0a5e00d7916b5a16d92ec56b0bf161fa4f32f7a22d22da7d83",
+      "source": "e4a305e1; reset work, timers and both IBS directions after power loss.",
+      "files": [
+        "drivers/bluetooth/hci_qca.c"
+      ]
+    },
+    {
+      "path": "0008-usb-pcs.patch",
+      "sha256": "a0c60d1fda60466eac13db64343605bd4e8a92ac69b86a37b6594f970f4f4ae2",
+      "source": "10bddb42; retain 7.3 shared DP/USB initialization.",
+      "files": [
+        "drivers/phy/qualcomm/phy-qcom-qmp-combo.c"
+      ]
+    },
+    {
+      "path": "0009-ucsi-registration.patch",
+      "sha256": "68207ae3bdb5083f63c2424c762e11d6529e39eabe46d6e6de0e1f8e750e4ac2",
+      "source": "9f9cd5ac; actual worker KUnit fixtures retained.",
+      "files": [
+        "drivers/usb/typec/ucsi/Kconfig",
+        "drivers/usb/typec/ucsi/ucsi_glink.c",
+        "drivers/usb/typec/ucsi/ucsi_glink_test.c"
+      ]
+    },
+    {
+      "path": "0010-ucsi-connectors.patch",
+      "sha256": "a7454f6aebc46043bc5b655968745078ec897d9cee90ed8c18b457a1e7c0a863",
+      "source": "f43a4aa7; clear released connector pointer.",
+      "files": [
+        "drivers/usb/typec/ucsi/ucsi.c"
+      ]
+    },
+    {
+      "path": "0011-dsi-errors.patch",
+      "sha256": "5569e5f1dbc725d772b7efaaea9504706ba366ea861019955178bc2232764301",
+      "source": "9bc411d0; propagate errors and balance successful PM acquisitions.",
+      "files": [
+        "drivers/gpu/drm/msm/dsi/dsi_host.c"
+      ]
+    },
+    {
+      "path": "0012-iris-clock-order.patch",
+      "sha256": "7e4959f7251464d7402fa79bf677494645cc9fc51086c6327eeb7b1cb9148701",
+      "source": "a9035926 / 9cfae772; disable all three 7.3 clocks before power domain.",
+      "files": [
+        "drivers/media/platform/qcom/iris/iris_vpu_common.c"
+      ]
+    },
+    {
+      "path": "0013-glink-endpoint-rx.patch",
+      "sha256": "cf058030282cdd6fc45930790cd798a23b0b35eba3cc0c125de122fce3dc4ff9",
+      "source": "5bbdbea6; preserve 7.3 endpoint destruction and return held intents.",
+      "files": [
+        "drivers/rpmsg/qcom_glink_native.c"
+      ]
+    },
+    {
+      "path": "0014-geni-suspend-irq.patch",
+      "sha256": "fdb7a03ff34438b7dc01c629d222b13a975a5c337c6d5c190d9b4ed0020537b1",
+      "source": "59413493; retain force-PM, unwind failed suspend, preserve active console IRQ.",
+      "files": [
+        "drivers/tty/serial/qcom_geni_serial.c"
+      ]
+    },
+    {
+      "path": "0015-nvt-remove-raw-attributes.patch",
+      "sha256": "0e5a78dfd38b1483feffd606a67e520f42796e16cd3d6ebc88cba2e47fa2f085",
+      "source": "9e9c3fd0; preserve pen scaling, normal input and early-wake diagnostics.",
+      "files": [
+        "drivers/input/touchscreen/nt36523/nt36xxx.c",
+        "drivers/input/touchscreen/nt36523/nt36xxx.h"
+      ]
+    }
+  ]
+}

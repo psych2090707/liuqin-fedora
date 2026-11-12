@@ -1,0 +1,94 @@
+From: liuqin Fedora adaptation <liuqin@localhost>
+Subject: [PATCH] liuqin 7.3.1: apm-lifetime
+
+43ec60d3; retain 7.3 managed packet cleanup and component removal.
+Original-Author: slwyts <slwyts@foxmail.com>
+Upstream-commit: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/43ec60d3acfae41ecf8dc8d6261160227c3f530b
+
+Linux-derived code retains original GPL notices. Offline port; no hardware claim.
+---
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -28,6 +28,15 @@
+ #define APM_GRAPH_MGMT_PSIZE(p, n) ALIGN(struct_size(p, sub_graph_id_list, n), 8)
+ 
+ static struct q6apm *g_apm;
++static DEFINE_MUTEX(g_apm_lock);
++
++static void q6apm_clear_global(struct q6apm *apm)
++{
++	mutex_lock(&g_apm_lock);
++	if (g_apm == apm)
++		g_apm = NULL;
++	mutex_unlock(&g_apm_lock);
++}
+ 
+ int q6apm_send_cmd_sync(struct q6apm *apm, const struct gpr_pkt *pkt,
+ 			uint32_t rsp_opcode)
+@@ -152,20 +161,29 @@
+ {
+ 	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_apm_cmd_pkt(0,
+ 								APM_CMD_GET_SPF_STATE, 0);
++	int ret;
++
+ 	if (IS_ERR(pkt))
+ 		return PTR_ERR(pkt);
+ 
+-	q6apm_send_cmd_sync(apm, pkt, APM_CMD_RSP_GET_SPF_STATE);
++	ret = q6apm_send_cmd_sync(apm, pkt, APM_CMD_RSP_GET_SPF_STATE);
++	if (ret < 0)
++		return ret;
+ 
+ 	return apm->state;
+ }
+ 
+ bool q6apm_is_adsp_ready(void)
+ {
++	bool ready = false;
++
++	/* Serialize the entire synchronous query with device removal. */
++	mutex_lock(&g_apm_lock);
+ 	if (g_apm)
+-		return q6apm_get_apm_state(g_apm);
+-
+-	return false;
++		ready = q6apm_get_apm_state(g_apm) > 0;
++	mutex_unlock(&g_apm_lock);
++
++	return ready;
+ }
+ EXPORT_SYMBOL_GPL(q6apm_is_adsp_ready);
+ 
+@@ -889,8 +907,6 @@
+ 
+ 	idr_init(&apm->modules_idr);
+ 
+-	g_apm = apm;
+-
+ 	q6apm_get_apm_state(apm);
+ 
+ 	ret = snd_soc_register_component(dev, &q6apm_audio_component, NULL, 0);
+@@ -899,15 +915,22 @@
+ 		return ret;
+ 	}
+ 
++	mutex_lock(&g_apm_lock);
++	g_apm = apm;
++	mutex_unlock(&g_apm_lock);
++
+ 	ret = of_platform_populate(dev->of_node, NULL, NULL, dev);
+-	if (ret)
++	if (ret) {
++		q6apm_clear_global(apm);
+ 		snd_soc_unregister_component(dev);
++	}
+ 
+ 	return ret;
+ }
+ 
+ static void apm_remove(gpr_device_t *gdev)
+ {
++	q6apm_clear_global(dev_get_drvdata(&gdev->dev));
+ 	of_platform_depopulate(&gdev->dev);
+ 	snd_soc_unregister_component(&gdev->dev);
+ }

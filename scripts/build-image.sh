@@ -102,6 +102,8 @@ desktop_bin=gnome-shell
 build_mode=dev
 dtb_source=auto
 stock_rom_dir=
+bootargs_file=
+stock_audio_dir=
 root_size=
 stages=all
 resume=0
@@ -178,6 +180,8 @@ Inputs
   --stock-rom-dir DIR     stock ROM analysis tree for the canonical DTB path:
                           <dir>/dtbo/entry.NN (44) + <dir>/vendor_boot/dtbs/
                           dtb-NN.dtb (14); also accepts .../analysis/<...>
+  --bootargs FILE         reviewed DT /chosen bootargs (default: upstream native)
+  --stock-audio DIR       private stock speaker files; hash checked before staging
 
 Output
   --out DIR               images root (default: <project>/images)
@@ -243,6 +247,8 @@ while [ $# -gt 0 ]; do
 	--build-mode) [ $# -ge 2 ] || die_usage "--build-mode needs a value"; build_mode=$2; shift ;;
 	--dtb-source) [ $# -ge 2 ] || die_usage "--dtb-source needs a value"; dtb_source=$2; shift ;;
 	--stock-rom-dir) [ $# -ge 2 ] || die_usage "--stock-rom-dir needs a value"; stock_rom_dir=$2; shift ;;
+	--bootargs) [ $# -ge 2 ] || die_usage "--bootargs needs a value"; bootargs_file=$2; shift ;;
+	--stock-audio) [ $# -ge 2 ] || die_usage "--stock-audio needs a value"; stock_audio_dir=$2; shift ;;
 	--out) [ $# -ge 2 ] || die_usage "--out needs a value"; images_root=$2; shift ;;
 	--work) [ $# -ge 2 ] || die_usage "--work needs a value"; work_root=$2; shift ;;
 	--name) [ $# -ge 2 ] || die_usage "--name needs a value"; bundle_name=$2; shift ;;
@@ -557,6 +563,10 @@ install_rpm_dir() {
 }
 
 write_firmware_provenance() {
+	if [ -n "$stock_audio_dir" ]; then
+		sudo python3 "$project_root/packaging/device/stage-stock-audio.py" \
+			"$rootfs_stage" "$stock_audio_dir" || die "stock speaker tuning staging failed"
+	fi
 	# Record actual installed bytes and the private-use restriction before the
 	# rootfs file manifest is generated. The generic mkosi base has no blobs.
 	sudo python3 "$project_root/packaging/device/write-firmware-provenance.py" \
@@ -1634,6 +1644,7 @@ stage_boot_img() {
 	set -- --kernel-out "$kernel_out" --ramdisk "$ramdisk" --out "$boot_out" \
 		--strict-kernel --dtb-source "$dtb_source" --kernel-provenance "$kernel_source"
 	[ "$dtb_source" = stock-rom ] && set -- "$@" --stock-rom-dir "$stock_rom_dir"
+	[ -z "$bootargs_file" ] || set -- "$@" --cmdline-file "$bootargs_file"
 	scripts/build-bootimg.sh "$@" || die "boot.img assembly failed"
 	boot_img=$boot_out/boot-liuqin-dev.img
 	boot_img_source="rebuilt from $(basename "$ramdisk") + kernel payload ($kernel_source)"
@@ -1698,6 +1709,7 @@ stage_installer_img() {
 		--strict-kernel --dtb-source "$dtb_source" --kernel-provenance "$kernel_source" \
 		--ramdisk-mode installer
 	[ "$dtb_source" = stock-rom ] && set -- "$@" --stock-rom-dir "$stock_rom_dir"
+	[ -z "$bootargs_file" ] || set -- "$@" --cmdline-file "$bootargs_file"
 	scripts/build-bootimg.sh "$@" || die "installer.img assembly failed"
 	installer_img=$installer_out/boot-liuqin-dev.img
 	installer_img_source="rebuilt from RAM-installer ramdisk + kernel payload ($kernel_source)"

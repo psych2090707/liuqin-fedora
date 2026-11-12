@@ -195,6 +195,10 @@ cp "$topology_tar" "$stage/SOURCES/audioreach-topology.tar"
 log 'packing device-support sources and cross-building helpers'
 tar "${TAR_OPTS[@]}" -C "$upstream" -cf "$stage/SOURCES/device-support-tree.tar" \
 	device/gnome-overlay device/power-key device/charger-mode
+# Keep the locked clone read-only; layer the reviewed v0.6.1 fastcharge files
+# into the source archive as a separately identified Fedora overlay.
+tar "${TAR_OPTS[@]}" --transform='s,^upstream-v061,device/fedora-fastcharge,' \
+	-C "$packaging" -rf "$stage/SOURCES/device-support-tree.tar" upstream-v061
 
 cross_cc=${CROSS_COMPILE:-aarch64-linux-gnu-}
 cross_gcc=${cross_cc}gcc

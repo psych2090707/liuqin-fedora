@@ -44,7 +44,8 @@ die() { printf 'build-mobile-rpms: ERROR: %s\n' "$*" >&2; exit 1; }
 
 podman() { sudo -n podman "$@"; }
 podman_exec() { sudo -n podman exec -u 0 "$@" ; }
-user_exec() { sudo -n podman exec -u "$(id -u):$(id -g)" -e HOME=/tmp/mobile-home "$@"; }
+user_exec() { sudo -n podman exec -u "$(id -u):$(id -g)" -e HOME=/tmp/mobile-home \
+  -e QEMU_CPU=max,pauth-impdef=on "$@"; }
 
 ensure_container() {
   if ! podman container exists "$container" 2>/dev/null; then
@@ -57,7 +58,7 @@ ensure_container() {
   if [ "$(podman inspect -f '{{.State.Running}}' "$container")" != true ]; then
     podman start "$container" >/dev/null
   fi
-  if ! podman_exec "$container" test -f /opt/liuqin-mobile-build.deps-v1; then
+  if ! podman_exec "$container" test -f /opt/liuqin-mobile-build.deps-v2; then
     say "installing build dependencies in container (first run, qemu-user; slow)"
     podman cp "$project_root/packaging/mobile/container/install-deps.sh" "$container":/root/install-deps.sh
     podman_exec "$container" bash /root/install-deps.sh
@@ -90,6 +91,7 @@ fetch_sources() {
   done <"$manifest"
   # patches (from the pinned upstream repo, sha256-checked in the original tooling)
   cp "$patch_dir"/*.patch "$work/SOURCES/"
+  cp "$patch_dir"/v061/*/patches/*.patch "$work/SOURCES/"
   say "sources: $(ls "$work/SOURCES" | wc -l) files"
 }
 
@@ -108,7 +110,7 @@ support_tarball() {
   } >"$stage/usr/share/doc/liuqin/sensor-stack-sources.manifest"
   {
     printf '# patch\tsha256\n'
-    (cd "$patch_dir" && sha256sum *.patch)
+    (cd "$patch_dir" && sha256sum *.patch v061/*/patches/*.patch)
   } >"$stage/usr/share/doc/liuqin/sensor-stack-patches.manifest"
   tar --sort=name --owner=0 --group=0 --numeric-owner \
       --mtime="@$SOURCE_DATE_EPOCH" -C "$work/support-stage" -czf \
@@ -145,6 +147,7 @@ rpmbuild_spec() {
     --define "_buildrootdir $container_out/work/BUILDROOT" \
     --define "debug_package %{nil}" \
     --define "jobs $jobs" \
+    --define "_smp_build_ncpus $jobs" \
     "/work/packaging/mobile/specs/$(basename "$spec")"
   install_built_deps "$name"
 }
@@ -309,7 +312,7 @@ for f in sorted(out.glob('*.rpm')):
     rpms.append({'file': f.name, 'sha256': hashlib.sha256(f.read_bytes()).hexdigest(),
                  'size': f.stat().st_size})
 info = {'built_at_utc': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-        'target': 'fedora-44-aarch64', 'rpms': rpms}
+        'target': 'fedora-45-aarch64', 'rpms': rpms}
 (out / 'build-info.json').write_text(json.dumps(info, indent=2, ensure_ascii=False) + '\n')
 print('wrote build-info.json with', len(rpms), 'RPMs')
 PY

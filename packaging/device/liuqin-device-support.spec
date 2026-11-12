@@ -23,7 +23,7 @@
 
 Name:           liuqin-device-support
 Version:        0.6.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        Xiaomi Pad 6 Pro (liuqin) system services and helpers
 License:        MIT AND GPL-2.0-only
 URL:            https://github.com/yzddmr6/xiaomipad-6pro-mainline
@@ -98,7 +98,7 @@ sh %{SOURCE1} \
 python3 %{SOURCE5} --static \
 	%{buildroot}%{_libexecdir}/liuqin/liuqin-power-keyd \
 	%{buildroot}%{_libexecdir}/liuqin/liuqin-reboot
-[ "$(find %{buildroot}%{_unitdir} -maxdepth 1 -name 'liuqin-*.service' | wc -l)" = 6 ] ||
+[ "$(find %{buildroot}%{_unitdir} -maxdepth 1 -name 'liuqin-*.service' | wc -l)" = 7 ] ||
 	{ echo 'unexpected number of liuqin systemd units' >&2; exit 1; }
 [ -x %{buildroot}%{_libexecdir}/liuqin/liuqin-switch ] ||
 	{ echo 'liuqin-switch is not executable' >&2; exit 1; }
@@ -126,7 +126,8 @@ install -D -m0644 %{SOURCE14} %{buildroot}%{_unitdir}/liuqin-gpu-hang-watch.serv
 %{_unitdir}/liuqin-bt-preconfigure.service
 %{_unitdir}/liuqin-wlan-mac.service
 %{_unitdir}/liuqin-mipps-auth.service
-%{_unitdir}/liuqin-mipps-auth.service.d/10-allow-unverified-adapter.conf
+%{_unitdir}/liuqin-mipps-battery-auth.service
+%{_prefix}/lib/systemd/system-preset/90-liuqin-mipps.preset
 %{_unitdir}/liuqin-hide-gunyah-node.service
 %{_unitdir}/bluetooth.service.d/20-liuqin-public-address.conf
 %{_unitdir}/NetworkManager.service.d/20-liuqin-wlan-mac.conf

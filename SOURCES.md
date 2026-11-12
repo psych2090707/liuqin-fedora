@@ -8,7 +8,7 @@ Release 同时提供系统下载和源码材料。安装系统只需要基础镜
 
 ## 内核
 
-`linux-7.3.1.tar.xz` 是对应的原始完整源码。项目的 7.3.1 补丁、配置和构建脚本在 `kernel/experiments/linux-7.3.1/`；两者一起用于重建本版设备内核。Linux 内核和衍生补丁遵循 GPL-2.0 及各文件标明的许可。
+`linux-7.3.1.tar.xz` 是对应的原始完整源码。项目的 7.3.1 补丁、配置和构建脚本在 `kernel/experiments/linux-7.3.1/`；其中包括原适配和 `refresh/` 的 15 组追加修复；使用 `refresh/build.sh` 重建本版设备内核。Linux 内核和衍生补丁遵循 GPL-2.0 及各文件标明的许可。
 
 ## 本地组件
 

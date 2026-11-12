@@ -451,6 +451,23 @@ def command_firmware(args):
              '--accept-firmware-terms, or pass --upstream DIR with a copy you already have. '
              'This tool never uploads or redistributes the files.', EXIT_USAGE)
     out = Path(args.out).expanduser().resolve()
+    # Stock speaker tuning is not in the pinned device Git repository. Require
+    # an explicit local input; never substitute the unrelated laptop tuning.
+    audio_root = getattr(args, 'stock_audio', None)
+    audio_recipes = {name: recipe for name, recipe in recipes.items()
+                     if recipe.get('origin') == 'stock-audio'}
+    for name, recipe in audio_recipes.items():
+        target = safe_join(out, name)
+        if target.is_file() and digest(target) == recipe['source_sha256']:
+            continue
+        if not audio_root:
+            fail('this release requires stock speaker tuning. Pass --stock-audio DIR '
+                 'with the five original vendor/firmware files listed in '
+                 'image.json stock_audio_source (see STOCK-AUDIO.md).', EXIT_USAGE)
+        candidate = safe_join(Path(audio_root).expanduser().resolve(),
+                              name.removeprefix('stock-audio/'))
+        if not candidate.is_file() or digest(candidate) != recipe['source_sha256']:
+            fail('stock speaker tuning missing or checksum mismatch: ' + name, EXIT_VERIFY)
     raw = 'https://raw.githubusercontent.com/' + owner + '/' + repo + '/' + commit + '/' + \
         subdirectory.strip('/') + '/'
     failures = []
@@ -459,7 +476,12 @@ def command_firmware(args):
         if target.is_file() and digest(target) == recipe['source_sha256']:
             continue
         stage('firmware-file', '%d/%d %s' % (index, len(recipes), name))
-        if upstream is None:
+        if recipe.get('origin') == 'stock-audio':
+            candidate = safe_join(Path(audio_root).expanduser().resolve(),
+                                  name.removeprefix('stock-audio/'))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(candidate, target)
+        elif upstream is None:
             target.parent.mkdir(parents=True, exist_ok=True)
             download(raw + name, target, recipe['source_sha256'])
         else:
@@ -549,6 +571,8 @@ def main(argv=None):
     firmware.add_argument('--out', type=Path, required=True)
     firmware.add_argument('--upstream', type=Path,
                           help='existing device/firmware/usr/lib/firmware copy')
+    firmware.add_argument('--stock-audio', type=Path,
+                          help='local stock vendor/firmware directory containing the five pinned speaker files')
     firmware.add_argument('--accept-firmware-terms', action='store_true',
                           help='confirm you may use the vendor firmware on your own tablet')
     firmware.set_defaults(function=command_firmware)

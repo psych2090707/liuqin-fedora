@@ -1,0 +1,70 @@
+From: liuqin Fedora adaptation <liuqin@localhost>
+Subject: [PATCH] liuqin 7.3.1: capture-start
+
+ecc36e1d; leave push/pull graph startup unchanged.
+Original-Author: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Upstream-commit: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/ecc36e1df9a9d93cd6e115c9161540aef47511fe
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Linux-derived code retains original GPL notices. Offline port; no hardware claim.
+---
+--- a/sound/soc/qcom/qdsp6/q6apm-dai.c
++++ b/sound/soc/qcom/qdsp6/q6apm-dai.c
+@@ -55,6 +55,7 @@
+ 	Q6APM_STREAM_IDLE = 0,
+ 	Q6APM_STREAM_STOPPED,
+ 	Q6APM_STREAM_RUNNING,
++	Q6APM_STREAM_PREPARED,
+ };
+ 
+ struct q6apm_dai_rtd {
+@@ -291,18 +292,16 @@
+ 		return ret;
+ 	}
+ 
++	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE &&
++	    !q6apm_is_graph_in_push_pull_mode(prtd->graph)) {
++		prtd->state = Q6APM_STREAM_PREPARED;
++		return 0;
++	}
++
+ 	ret = q6apm_graph_start(prtd->graph);
+ 	if (ret) {
+ 		dev_err(dev, "Failed to Start Graph %d\n", ret);
+ 		return ret;
+-	}
+-	if (!q6apm_is_graph_in_push_pull_mode(prtd->graph)) {
+-		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
+-			int i;
+-			/* Queue the buffers for Capture ONLY after graph is started */
+-			for (i = 0; i < runtime->periods; i++)
+-				q6apm_read(prtd->graph);
+-		}
+ 	}
+ 
+ 	/* The DSP graph is running: allow the client's initial buffer prefill. */
+@@ -343,12 +342,24 @@
+ {
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	struct q6apm_dai_rtd *prtd = runtime->private_data;
+-	int ret = 0;
++	int i, ret = 0;
+ 
+ 	switch (cmd) {
+ 	case SNDRV_PCM_TRIGGER_START:
+ 	case SNDRV_PCM_TRIGGER_RESUME:
+ 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE &&
++		    prtd->state == Q6APM_STREAM_PREPARED) {
++			ret = q6apm_graph_start(prtd->graph);
++			if (ret)
++				return ret;
++
++			for (i = 0; i < runtime->periods; i++) {
++				ret = q6apm_read(prtd->graph);
++				if (ret < 0)
++					return ret;
++			}
++		}
+ 		prtd->state = Q6APM_STREAM_RUNNING;
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_STOP:

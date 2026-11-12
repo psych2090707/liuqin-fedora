@@ -349,6 +349,18 @@ def export_base(args):
     if private['device'] != 'liuqin' or not provenance['files']:
         raise ValueError('expected a complete private liuqin assembly with firmware provenance')
     catalog = firmware_catalog(args.firmware, args.firmware_manifest)
+    stock_audio = getattr(args, 'stock_audio', None)
+    stock_audio_source = None
+    if stock_audio:
+        stock_audio_source = json.loads((Path(__file__).resolve().parents[2] /
+                                        'packaging/release/stock-audio.json').read_text())
+        for name, expected in stock_audio_source['files'].items():
+            path = stock_audio / name
+            if file_digest(path) != expected:
+                raise ValueError('stock audio firmware checksum mismatch: ' + name)
+            catalog[expected] = {'source': 'stock-audio/' + name,
+                                 'source_sha256': expected, 'decode': None,
+                                 'origin': 'stock-audio'}
     root_paths = {r['path'].lstrip('/'): r for r in provenance['files']}
     result = {'format': 'liuqin-public-base/1', 'device': 'liuqin', 'release': '45',
               'desktop': 'gnome', 'desktop_user': args.user,
@@ -359,6 +371,8 @@ def export_base(args):
                                   'commit': 'f5a535f5c1c980f042b58cb77467ff8f02a5518e',
                                   'subdirectory': 'device/firmware/usr/lib/firmware'},
               'rootfs_restore': [], 'ramdisk_restore': {}, 'files': {}}
+    if stock_audio_source:
+        result['stock_audio_source'] = stock_audio_source
     new_directory(args.out)
     for filename in ('boot.img', 'installer.img'):
         data = (bundle / filename).read_bytes()
@@ -401,6 +415,14 @@ def export_base(args):
     removed_names = {safe_name(r['tar']['name']) for r in result['rootfs_restore']}
     if not set(root_paths) <= removed_names:
         raise ValueError('some private firmware paths were not removed')
+    if stock_audio_source:
+        expected_audio = {
+            'usr/lib/firmware/cirrus/cs35l41-dsp1-spk-prot-10251826-' + channel + '.' + suffix
+            for channel in ('tl', 'tr', 'bl', 'br') for suffix in ('bin', 'wmfw')}
+        actual_audio = {safe_name(r['tar']['name']) for r in result['rootfs_restore']
+                        if r.get('origin') == 'stock-audio'}
+        if actual_audio != expected_audio:
+            raise ValueError('expected all eight stock speaker files in the private rootfs')
     result['files']['rootfs.base.tar.gz'] = file_digest(args.out / 'rootfs.base.tar.gz')
     (args.out / 'image.json').write_text(json.dumps(result, indent=2) + '\n')
     write_checksums(args.out)
@@ -522,6 +544,8 @@ def main():
     export.add_argument('--root', type=Path, required=True)
     export.add_argument('--firmware', type=Path, required=True)
     export.add_argument('--firmware-manifest', type=Path, required=True)
+    export.add_argument('--stock-audio', type=Path,
+                        help='private stock ROM audio files; stripped and required for local preparation')
     export.add_argument('--kernel-build-id', required=True)
     export.add_argument('--user', default='user')
     export.add_argument('--out', type=Path, required=True)

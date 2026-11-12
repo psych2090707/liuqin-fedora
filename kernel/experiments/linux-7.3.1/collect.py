@@ -2,6 +2,7 @@
 """Collect an isolated, completed build; never deploy or create a boot image."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -13,7 +14,9 @@ here = Path(__file__).resolve().parent
 work, out = (Path(p).resolve() for p in sys.argv[1:])
 build = work / "build"
 release = (build / "include/config/kernel.release").read_text().strip()
-if release != "7.3.1-liuqin-exp1":
+profile = Path(os.environ["LIUQIN_731_PROFILE"]).resolve() if os.environ.get("LIUQIN_731_PROFILE") else None
+expected_release = (profile / "release").read_text().strip() if profile else "7.3.1-liuqin-exp1"
+if release != expected_release:
     raise SystemExit(f"Unexpected release: {release}")
 
 
@@ -65,6 +68,14 @@ info = {
     "work_root": str(work),
     "device_actions": [],
 }
+if profile:
+    info["profile"] = {
+        "path": str(profile.relative_to(here)),
+        "fragment_sha256": sha(profile / "experiment.config"),
+        "patches": [{"path": name, "sha256": sha(profile / "patches" / name)}
+                    for name in (profile / "patches/series").read_text().splitlines()
+                    if name and not name.startswith("#")],
+    }
 (out / "build-info.json").write_text(json.dumps(info, indent=2) + "\n")
 checksums = []
 for path in sorted(dist.iterdir()):

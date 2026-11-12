@@ -76,6 +76,11 @@ def main():
     original, _ = read_tree(args.private_bundle / 'rootfs.tar.gz')
     public, public_special = read_tree(args.base / 'rootfs.base.tar.gz')
     removed = {p.safe_name(r['tar']['name']) for r in manifest['rootfs_restore']}
+    if 'stock_audio_source' in manifest:
+        audio = [r for r in manifest['rootfs_restore'] if r.get('origin') == 'stock-audio']
+        assert len(audio) == 8 and len({r['source'] for r in audio}) == 5
+        assert all(p.safe_name(r['tar']['name']) not in public for r in audio)
+        print('PASS: all eight stock speaker files removed; five local originals required', flush=True)
     assert set(original) - removed == set(public), 'unexpected added/removed rootfs members'
     for name, value in public.items():
         assert original[name] == value, 'content or metadata changed during export: ' + name

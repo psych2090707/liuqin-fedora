@@ -324,6 +324,49 @@ with tempfile.TemporaryDirectory(prefix='liuqin-firmware-test-') as directory:
         check('firmware requires an explicit licensing acknowledgement', False)
 
 
+# Stock audio comes from a separate local ROM, never the GitHub firmware URL.
+with tempfile.TemporaryDirectory(prefix='liuqin-stock-audio-test-') as directory:
+    work = Path(directory)
+    base = work / 'base'
+    base.mkdir()
+    audio = work / 'stock'
+    audio.mkdir()
+    payload = b'original four-channel tuning'
+    expected = hashlib.sha256(payload).hexdigest()
+    name = 'stock-audio/TL-cs35l41-dsp1-spk-prot.bin'
+    (base / 'image.json').write_text(json.dumps({
+        'device': 'liuqin',
+        'firmware_source': {'repository': 'https://github.com/owner/name',
+                            'commit': '0' * 40, 'subdirectory': 'firmware'},
+        'rootfs_restore': [{'source': name, 'source_sha256': expected,
+                            'decode': None, 'origin': 'stock-audio'}]}))
+    args = type('Args', (), {'base': base, 'out': work / 'firmware',
+                            'upstream': None, 'accept_firmware_terms': True,
+                            'stock_audio': None})()
+    with patch.object(agent, 'download', side_effect=AssertionError('must not download ROM tuning')):
+        try:
+            agent.command_firmware(args)
+        except SystemExit as error:
+            check('missing stock tuning stops before downloading', error.code == agent.EXIT_USAGE)
+        else:
+            check('missing stock tuning stops before downloading', False)
+        args.stock_audio = audio
+        original = audio / 'TL-cs35l41-dsp1-spk-prot.bin'
+        original.write_bytes(b'wrong device tuning')
+        try:
+            agent.command_firmware(args)
+        except SystemExit as error:
+            check('stock tuning from a different device is rejected', error.code == agent.EXIT_VERIFY)
+        else:
+            check('stock tuning from a different device is rejected', False)
+        original.write_bytes(payload)
+        check('stock tuning is copied locally with a verified checksum',
+              agent.command_firmware(args) == 0 and (args.out / name).read_bytes() == payload)
+        args.stock_audio = None
+        check('verified stock tuning can be reused without the original directory',
+              agent.command_firmware(args) == 0)
+
+
 # --- install.py machine report and failure hint ---------------------------
 with tempfile.TemporaryDirectory(prefix='liuqin-report-test-') as directory:
     work = Path(directory)

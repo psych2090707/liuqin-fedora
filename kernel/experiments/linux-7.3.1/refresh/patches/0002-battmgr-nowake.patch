@@ -1,0 +1,32 @@
+From: liuqin Fedora adaptation <liuqin@localhost>
+Subject: [PATCH] liuqin 7.3.1: battmgr-nowake
+
+4320cc40; also cover the project-specific pen supply.
+Original-Author: gennro <gennro2004@gmail.com>
+Upstream-commit: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/4320cc40084ae5754cb98ca90af9e744ae522894
+Link: https://github.com/kettlelinux/kettlelinux/commit/6f00c5e5b457b95d69137b0c086de0785c6e7b52
+Assisted-by: LLM
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Linux-derived code retains original GPL notices. Offline port; no hardware claim.
+---
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -2727,6 +2727,7 @@
+ 	struct power_supply_config cfg = {
+ 		.drv_data = battmgr,
+ 		.fwnode = dev_fwnode(battmgr->dev),
++		.no_wakeup_source = true,
+ 	};
+ 
+ 	if (battmgr->pen_psy)
+@@ -2793,6 +2794,10 @@
+ 	psy_cfg_supply.fwnode = dev_fwnode(&adev->dev);
+ 	psy_cfg_supply.supplied_to = qcom_battmgr_battery;
+ 	psy_cfg_supply.num_supplicants = 1;
++
++	/* Status updates must not turn every firmware message into a wakeup. */
++	psy_cfg.no_wakeup_source = true;
++	psy_cfg_supply.no_wakeup_source = true;
+ 
+ 	mutex_init(&battmgr->lock);
+ 	init_completion(&battmgr->ack);

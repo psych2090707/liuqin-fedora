@@ -88,7 +88,6 @@ for unit in \
 	liuqin-bt-preconfigure.service \
 	liuqin-wlan-mac.service \
 	liuqin-mipps-auth.service \
-	liuqin-mipps-auth.service.d/10-allow-unverified-adapter.conf \
 	liuqin-hide-gunyah-node.service \
 	bluetooth.service.d/20-liuqin-public-address.conf \
 	NetworkManager.service.d/20-liuqin-wlan-mac.conf; do
@@ -180,6 +179,12 @@ for text in \
 		-e 's|/usr/local/bin/|/usr/libexec/liuqin/|g' \
 		"$text"
 done
+
+# Apply only the reviewed fastcharge subset; never replace desktop policy.
+refresh=$tree/device/fedora-fastcharge
+[ -d "$refresh/usr" ] || die 'v0.6.1 fastcharge source overlay missing'
+cp -a "$refresh/usr/." "$root/usr/"
+chmod 0755 "$root/usr/libexec/liuqin/liuqin-mipps-auth"
 
 # --- assertions --------------------------------------------------------------
 if grep -rIl '/usr/local/' "$root" >/dev/null 2>&1; then

@@ -3,7 +3,7 @@
 
 Name:           hexagonrpc
 Version:        0.5.0
-Release:        2.git%{shortcommit}%{?dist}
+Release:        3.git%{shortcommit}%{?dist}
 Summary:        FastRPC ioctl wrapper and a reverse tunnel
 License:        GPL-3.0-or-later
 URL:            https://github.com/linux-msm/hexagonrpc
@@ -11,6 +11,12 @@ Source0:        %{name}-%{version}.tar.gz
 Patch0001:      0001-hexagonrpcd-expose-the-SSC-registry-version-sibling.patch
 Patch0002:      0002-hexagonrpcd-add-a-narrow-sns_registry-property-shim.patch
 Patch0003:      0007-hexagonrpcd-add-narrow-write-stub.patch
+Patch0004:      0008-hexagonrpcd-restore-rom-property-allowlist.patch
+Patch0010:      0001-fix-type-sequence-marshalling.patch
+Patch0011:      0002-avoid-unaligned-metadata-store-and-null-test-comparison.patch
+Patch0012:      0005-upstream-fetch-large-listener-inputs.patch
+Patch0013:      0006-test-and-validate-large-listener-inputs.patch
+Patch0014:      0007-liuqin-registry-error-reply-test.patch
 BuildRequires:  meson >= 1.1
 BuildRequires:  gcc
 BuildRequires:  json-c-devel
@@ -31,10 +37,19 @@ temp file the SLPI firmware requests during initialization.
 %patch -P 1 -p1
 %patch -P 2 -p1
 %patch -P 3 -p1
+%patch -P 4 -p1
+%patch -P 10 -p1
+%patch -P 11 -p1
+%patch -P 12 -p1
+%patch -P 13 -p1
+%patch -P 14 -p1
 
 %build
 %meson -Dhexagonrpcd_verbose=false
 %meson_build
+
+%check
+%meson_test
 
 %install
 %meson_install
@@ -56,6 +71,9 @@ install -Dpm0644 COPYING %{buildroot}%{_licensedir}/%{name}/COPYING
 %{_mandir}/man1/hexagonrpcd.1*
 
 %changelog
+* Wed Nov 11 2026 liuqin project <liuqin@localhost> - 0.5.0-3.git598b591
+- Import v0.6.1 RPC safety and listener continuation; retain narrow write stub
+
 * Sat Nov 07 2026 liuqin project <liuqin@localhost> - 0.5.0-2.git598b591
 - add narrow write-only stub for SLPI registry temp files; no host file is written
 

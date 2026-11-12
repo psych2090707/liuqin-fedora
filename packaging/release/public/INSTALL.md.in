@@ -30,7 +30,7 @@ python3 liuqin-install.py doctor
 ```sh
 python3 liuqin-install.py doctor --bundle prepared --serial SERIAL
 python3 liuqin-install.py fetch --repo https://github.com/psych2090707/liuqin-fedora --out install
-python3 liuqin-install.py firmware --base install/image --out firmware --accept-firmware-terms
+python3 liuqin-install.py firmware --base install/image --out firmware --accept-firmware-terms --stock-audio stock-audio
 python3 liuqin-install.py prepare --base install/image --firmware firmware --out prepared
 python3 liuqin-install.py install --bundle prepared --layout linux-only \
   --serial SERIAL --backup backup-SERIAL --erase-userdata --allow-unverified --dry-run
@@ -39,6 +39,9 @@ python3 liuqin-install.py install --bundle prepared --layout linux-only \
 `fetch` 默认选择最新发布（包括预发布版）；`--tag vX.Y.Z` 指定版本，`--stable` 只选稳定版。`--out` 绑定一个版本，换版本时必须换新目录，安装器会拒绝混用。
 
 这个解包目录应包含 `liuqin-install.py`、`install.py`、`prepare-image.py`、`liuqin_layout.py`、`liuqin-rom-images.json`、`install-liuqin.ps1` 和 `install-liuqin.cmd`。缺少任何一个时应重新下载 Release，不要从别处补文件。
+
+
+本次 alpha.2 还需要从 liuqin 原厂 HyperOS OS2.0.6.0.VMYCNXM 的 vendor 分区提取五份扬声器调音文件，放进 `stock-audio/`。文件名与摘要见 [STOCK-AUDIO.md](STOCK-AUDIO.md)；缺少时安装入口停止，不会静默使用错误的笔记本调音。此要求不改变 alpha.1 的旧包。
 
 `prepare` 会让你为平板用户 **`user`** 设置密码。`prepared/` 含本机固件和密码散列，只留作自用，不要上传。
 
@@ -62,5 +65,6 @@ python3 liuqin-install.py install --bundle prepared --layout linux-only \
 - 保留安装输出、`backup-SERIAL/` 和 `liuqin-install-report.json`。
 - 分区表无法识别或校验失败时停止，不要手动改分区、猜设备路径或换镜像硬试。
 - 恢复 GPT 只恢复分区表，刷回 boot 只恢复启动镜像；都不能恢复已覆盖的个人数据。
+- 启动镜像回退不等于完整系统回滚；软件包、系统配置和个人文件需要各自的备份。
 
 更完整的项目说明见仓库 <https://github.com/psych2090707/liuqin-fedora>；Agent 执行边界见仓库根 `AGENTS.md`。

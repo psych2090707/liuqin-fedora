@@ -245,7 +245,8 @@ def collect(phase):
         for supply in supplies:
             item = {}
             for key in ("type", "online", "status", "capacity",
-                        "current_now", "voltage_now", "temp"):
+                        "current_now", "voltage_now", "voltage_ocv",
+                        "charge_counter", "temp"):
                 candidate = supply / key
                 if candidate.exists():
                     item[key] = read_text(candidate, 512).strip()
@@ -436,6 +437,34 @@ def bat_line(power):
             f"current={battery.get('current_now', '?')}; "
             f"usb_online={usb.get('online', '?')} "
             f"usb_current={usb.get('current_now', '?')}")
+
+
+def charge_line(pre, post):
+    """Firmware charge-counter difference; raw driver units, no unit guess.
+
+    qcom_battmgr exposes the firmware BATT_CHG_COUNTER value without a unit
+    conversion, so the report keeps the raw numbers and only derives a rate
+    from a same-boot monotonic window.  This unit reads about 1 mAh per
+    counter step (see the forensics page); other devices may differ.
+    """
+    before_bat = pre.get("power_supply", {}).get("qcom-battmgr-bat", {})
+    after_bat = post.get("power_supply", {}).get("qcom-battmgr-bat", {})
+    try:
+        before = int(before_bat["charge_counter"])
+        after = int(after_bat["charge_counter"])
+    except (KeyError, TypeError, ValueError):
+        return "unavailable in pre/post"
+    detail = f"{before} -> {after} ({after - before:+d} raw fw units"
+    if pre.get("boot_id") and pre.get("boot_id") == post.get("boot_id"):
+        try:
+            seconds = (post["collected_boottime_ns"] -
+                       pre["collected_boottime_ns"]) / 1e9
+        except (KeyError, TypeError):
+            seconds = None
+        if seconds and seconds > 0:
+            detail += (f", {(after - before) / (seconds / 3600.0):+.1f} units/h"
+                       f" over {seconds / 3600.0:.2f}h")
+    return detail + ")"
 
 
 def metrics(pre, post):
@@ -633,6 +662,7 @@ def render(report):
         "--- power / rtc / suspend stats ---",
         f"power pre : {bat_line(pre.get('power_supply', {}))}",
         f"power post: {bat_line(post.get('power_supply', {}))}",
+        f"power delta: {charge_line(pre, post)}",
         f"rtc wakealarm pre : {pre.get('rtc', {}).get('wakealarm', '')!r}",
         f"rtc wakealarm post: {post.get('rtc', {}).get('wakealarm', '')!r}",
         f"mem_sleep: {post.get('mem_sleep', '?')}",
