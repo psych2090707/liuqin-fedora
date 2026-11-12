@@ -31,3 +31,8 @@ GNOME 抑制与电源键标记。不连接真实桌面、设备或网络。
 
 `node tests/desktop-admission/test-keyboard-popup-policy.mjs` 验证键盘套吸附时的弹出策略：
 焦点自动打开被拦截，底部上滑和已经可见的键盘仍放行；不查询真实 seat 或操作界面。
+
+`python3 tools/release/render-keyboard.py --out out/keyboard-render/blue --evidence out/keyboard-render/blue --accent blue --variant light`
+复用既有 GNOME 键盘集成脚手架，加载维护版扩展，在独立 XDG 目录、私有 D-Bus 和
+headless 虚拟显示上渲染浅色/深色。不会操作当前桌面或平板；示例 IBus 候选不代表真实输入
+验收。脚手架源码在 `keyboard-render/`，图片由 Shell 按键盘 actor 范围直接输出，无重绘。

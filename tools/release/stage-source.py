@@ -17,7 +17,8 @@ from urllib.parse import unquote
 PROJECT = Path(__file__).resolve().parents[2]
 ROOTS = ('kernel', 'initramfs', 'installer', 'mkosi', 'overlays', 'packaging',
          'rust', 'scripts', 'tools', 'tests')
-EXTRA = ('docs/research/liuqin-assets.json', '.github/workflows/installer-ci.yml')
+EXTRA = ('docs/research/liuqin-assets.json', '.github/workflows/installer-ci.yml',
+         'docs/assets/keyboard-themes.png', 'docs/assets/keyboard-themes.svg')
 OMIT = ('tools/afk/keys/id_', 'tests/docs/',
         'tools/resume-install-root.py', 'packaging/device/SPEC-DELTA.md',
         'packaging/mobile/fingerprint/README-libfprint-tod-BLOCKED.md')

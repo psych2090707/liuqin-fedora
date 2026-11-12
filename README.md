@@ -4,6 +4,16 @@
 
 当前版本基于 Fedora 45、GNOME 51 和 Linux 7.3.1（`7.3.1-liuqin-upstream1`）。仓库提供设备适配补丁、系统构建配置和安装工具，使 Fedora 能够在这款平板上启动并使用其硬件。
 
+**[v0.1.0-alpha.2 已发布](https://github.com/psych2090707/liuqin-fedora/releases/tag/v0.1.0-alpha.2)** · 2026-11-12。新版汇总首版以来的键盘与输入、电源、声音、内核和启动修复。[查看更新说明](https://github.com/psych2090707/liuqin-fedora/releases/tag/v0.1.0-alpha.2)。
+
+## 键盘新视觉
+
+![Liuqin 键盘随主题变化：浅蓝、深绿、浅金三种配色，保留五行电脑键布局、胶囊动作键和拼音候选栏](docs/assets/keyboard-themes.png)
+
+浅蓝、深绿、浅金：键盘跟随 GNOME 的明暗模式与强调色变化。五行电脑键布局，圆角字母键与胶囊动作键混排，拼音与候选词放在同一条输入栏；保留 Ctrl、Super、Alt、Fn 和方向键。
+
+吸附键盘套时不自动弹出，需要时仍可从底部上滑唤出。扩展已预装，[点击查看启用方法](OPTIONAL.md#定制屏幕键盘实验性)。
+
 ## 安装
 
 ### 交给 AI 辅助安装
@@ -33,7 +43,7 @@ https://github.com/psych2090707/liuqin-fedora
 
 显示、触屏、Wi-Fi、键盘套、音频等功能已有实机使用记录。触控笔、电源管理和充电功能也在持续适配；自动旋转、摄像头及部分睡眠唤醒问题仍未解决。
 
-**下一版 alpha.2 收齐首版后的输入、电源、内核、充电/传感器和启动成功标记修复。** 原厂四声道扬声器调音通过本地补齐纳入；安装前需准备 [五份原厂文件](STOCK-AUDIO.md)。公开镜像仍不含厂商固件。新完整安装组合仅离线验收，最终音质、长睡耗电和恢复仍待验证。
+扬声器四声道调音已纳入本地准备流程，所需文件见 [原厂调音说明](STOCK-AUDIO.md)。
 
 具体支持范围、已知问题与测试状态见 [HARDWARE.md](HARDWARE.md)。可选的屏幕键盘和外观定制见 [OPTIONAL.md](OPTIONAL.md)。
 
@@ -45,6 +55,6 @@ https://github.com/psych2090707/liuqin-fedora
 
 ## 来源与说明
 
-设备适配主要参考 [xiaomipad-6pro-mainline](https://github.com/yzddmr6/xiaomipad-6pro-mainline)、[linux-sm8450-liuqin](https://github.com/yzddmr6/linux-sm8450-liuqin) 和 [liuqin-nixos](https://github.com/Seeker0472/liuqin-nixos)；Fedora 构建参考 [pipa-fedora-builder-43](https://github.com/rr1111/pipa-fedora-builder-43)。各组件保留其原有许可证，详见 [NOTICE](NOTICE) 和 [LICENSES/](LICENSES/)。
+设备适配主要参考 [xiaomipad-6pro-mainline](https://github.com/yzddmr6/xiaomipad-6pro-mainline)、[linux-sm8450-liuqin](https://github.com/yzddmr6/linux-sm8450-liuqin) 和 [liuqin-nixos](https://github.com/Seeker0472/liuqin-nixos)；Fedora 构建参考 [pipa-fedora-builder-43](https://github.com/rr1111/pipa-fedora-builder-43)。各组件保留其原有许可证，详见 [NOTICE](NOTICE) 和 `LICENSES/`。
 
-这是非官方的实验性项目。已有维护设备的运行记录，但公开安装流程尚未完成从原厂 Android 到 Fedora 首次启动的完整实机验证。请以对应版本的安装文档和硬件测试记录为准。
+这是个人维护的社区项目。安装方式与硬件支持情况随版本记录在 [INSTALL.md](INSTALL.md) 和 [HARDWARE.md](HARDWARE.md)。

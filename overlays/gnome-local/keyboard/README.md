@@ -25,11 +25,11 @@
 bash overlays/gnome-local/keyboard/build/build.sh
 node tests/desktop-admission/test-keyboard-popup-policy.mjs
 node tests/desktop-admission/test-layout-reuse.mjs
-tasks/keyboard-material3/integration-harness/run.sh light /tmp/opencode/kbint-light.png
-tasks/keyboard-material3/integration-harness/run.sh dark /tmp/opencode/kbint-dark.png
+python3 tools/release/render-keyboard.py --out out/keyboard-render/blue --evidence out/keyboard-render/blue --accent blue --variant light
 ```
 
-集成脚手架在宿主机 headless GNOME Shell 51.1 中加载真实扩展和假 IBus panel service，
+维护中的集成脚手架位于 `tests/desktop-admission/keyboard-render/`，复用原任务脚手架；
+在宿主机 headless GNOME Shell 51.1 中加载真实扩展和假 IBus panel service，
 验证拼音芯片、选中候选、胶囊键和收起图标；它不碰平板或当前桌面会话。
 
 `build.sh` 只更新 `extension/osk-layouts.gresource` 和 `extension/expected.sha256`；
