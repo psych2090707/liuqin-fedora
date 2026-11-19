@@ -31,7 +31,7 @@ Fedora 首次启动会执行一次 `systemctl preset-all`。`/usr/lib/systemd/sy
 
 ## 不能从这些源码推断什么
 
-- **短按行为曾出现混乱，可能夹杂慢唤醒，合盖/打开也受影响**。现在由 `liuqin-powerd` 统一处理，但实机短按/合盖/唤醒仍需逐项验收；不能仅凭源码或服务 active 判体验通过。
+- **短按行为曾出现混乱，可能夹杂慢唤醒，合盖/打开也受影响**。11-07 已由 `liuqin-powerd` 统一处理并通过主要短按/合盖/唤醒实测，11-12 用户近期无明显新按键异常；NVT、GDM-only 黑屏和长睡仍独立保留。不能仅凭源码或服务 active 判全部场景通过，见当前状态。
 - `power/etc/liuqin/power-policy.conf` 是维护默认值：`SHORT_ACTION=suspend`、`LID_ACTION=suspend`、`LID_RESUSPEND=1`。屏幕灭时第一下只唤醒，屏幕亮时才执行 `SHORT_ACTION`；合盖睡眠中短按保持屏幕灭。短按/盖子/恢复仍不能合并判通过。**关键前提是挂起前先调用 `org.gnome.ScreenSaver.Lock`、确认 `GetActive` 后再 suspend；`liuqin-powerd` 保留了这条路径，删掉会重现 GDM greeter 抢占和“半屏内核日志”。**
 - `power/` 没有复制旧整套安装脚本；旧脚本会改现场设置，不能作为本目录的部署方式。
 - `liuqin-powerd` 是 aarch64 Rust 二进制，构建方式见 [rust/README.md](../../rust/README.md)；镜像构建要求先运行 `scripts/build-powerd.sh`。

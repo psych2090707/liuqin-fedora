@@ -2,15 +2,15 @@
 
 **适用于小米平板 6 Pro（liuqin / SM8475）的 Fedora Linux 移植项目。**
 
-当前版本基于 Fedora 45、GNOME 51 和 Linux 7.3.1（`7.3.1-liuqin-upstream1`）。仓库提供设备适配补丁、系统构建配置和安装工具，使 Fedora 能够在这款平板上启动并使用其硬件。
+当前版本基于 Fedora 45、GNOME 51 和 Linux 7.3.5（`7.3.5-liuqin-upstream2`）。仓库提供设备适配补丁、系统构建配置和安装工具。
 
-**[v0.1.0-alpha.2 已发布](https://github.com/psych2090707/liuqin-fedora/releases/tag/v0.1.0-alpha.2)** · 2026-11-12。新版汇总首版以来的键盘与输入、电源、声音、内核和启动修复。[查看更新说明](https://github.com/psych2090707/liuqin-fedora/releases/tag/v0.1.0-alpha.2)。
+**[v0.1.0-alpha.3](https://github.com/psych2090707/liuqin-fedora/releases/tag/v0.1.0-alpha.3)** 更新了后摄、扬声器模式、触控笔、屏幕键盘和电源管理。
 
 ## 键盘新视觉
 
-![Liuqin 键盘随主题变化：浅蓝、深绿、浅金三种配色，保留五行电脑键布局、胶囊动作键和拼音候选栏](docs/assets/keyboard-themes.png)
+![Liuqin 键盘随GNOME主题色变化](docs/assets/keyboard-themes.png)
 
-浅蓝、深绿、浅金：键盘跟随 GNOME 的明暗模式与强调色变化。五行电脑键布局，圆角字母键与胶囊动作键混排，拼音与候选词放在同一条输入栏；保留 Ctrl、Super、Alt、Fn 和方向键。
+键盘跟随 GNOME 的明暗模式与强调色变化。五行电脑键布局，圆角字母键与胶囊动作键混排，拼音与候选词放在同一条输入栏；保留 Ctrl、Super、Alt、Fn 和方向键。
 
 吸附键盘套时不自动弹出，需要时仍可从底部上滑唤出。扩展已预装，[点击查看启用方法](OPTIONAL.md#定制屏幕键盘实验性)。
 
@@ -41,7 +41,7 @@ https://github.com/psych2090707/liuqin-fedora
 
 ## 硬件支持
 
-显示、触屏、Wi-Fi、键盘套、音频等功能已有实机使用记录。触控笔、电源管理和充电功能也在持续适配；自动旋转、摄像头及部分睡眠唤醒问题仍未解决。
+显示、触屏、Wi-Fi、键盘套和触控笔已有实机使用记录。后摄已在维护设备上验证预览、拍照和软件编码录像。公开安装包的自动旋转仍默认关闭，长时间待机还有待验证。
 
 扬声器四声道调音已纳入本地准备流程，所需文件见 [原厂调音说明](STOCK-AUDIO.md)。
 

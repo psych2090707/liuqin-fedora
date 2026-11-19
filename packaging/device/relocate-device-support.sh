@@ -105,6 +105,12 @@ for rule in \
 done
 install_dir 0644 "$overlay/etc/modprobe.d/liuqin-camera.conf" \
 	"$root/usr/lib/modprobe.d/liuqin-camera.conf"
+# The CCI controller takes its clocks from camcc as well.  Upstream only orders
+# qcom_camss before camcc; if udev loads i2c-qcom-cci first, clk_get() returns
+# -ETIMEDOUT after the deferred-probe timeout and the whole camera graph never
+# enumerates.  This is a local delta on top of the untouched upstream tree.
+printf '%s\n' 'softdep i2c_qcom_cci pre: camcc_sm8450' \
+	>> "$root/usr/lib/modprobe.d/liuqin-camera.conf"
 install_dir 0644 "$overlay/usr/share/polkit-1/actions/io.github.liuqin.switch.policy" \
 	"$root/usr/share/polkit-1/actions/io.github.liuqin.switch.policy"
 install_dir 0644 "$overlay/usr/local/share/applications/liuqin-reboot-to-android.desktop" \

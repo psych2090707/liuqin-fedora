@@ -4,5 +4,5 @@
   "description": "Material 3 tablet keyboard with the Liuqin computer-key layout, native IBus input, pinyin chip, cover-aware popup policy and reduced layout rebuilds. Stays loaded through the lock screen; preserves native authentication. Keep the old liuqin-osk-layout@liuqin extension disabled.",
   "shell-version": ["51"],
   "session-modes": ["user", "unlock-dialog"],
-  "version": 9
+  "version": 10
 }

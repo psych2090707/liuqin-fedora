@@ -1,0 +1,52 @@
+From: liuqin Fedora experiment <liuqin@localhost>
+Subject: [PATCH] liuqin 7.3.1: expose CS35L41 ASPRX slot controls
+
+The four CS35L41 amps on liuqin share one tertiary TDM bus.  Each amp defaults
+to ASP RX slots 0/1, so the stock UCM makes all four replay the same stereo
+pair.  To support both the daily stereo layout and an independent 4-channel
+profile, expose the two RX slot positions as mixer controls, as the vendor
+driver does.  UCM can then select either mode without a kernel-side
+device-name table:
+
+  stereo:  all amps RX1=0, RX2=1
+  quad:    TL 0/1, TR 1/0, BL 2/3, BR 3/2
+
+The quad profile must also select ASPRX1 on all four DSP RX1 muxes.  This is
+deliberately a runtime switch, not a fixed mapping: ordinary stereo keeps all
+four speakers, while a four-channel stream gets four independent slots.
+
+Also ignore -ENOTSUPP from the codec set_tdm_slot() call, matching the
+project's earlier 6.17 helper; without this, a future successful DAI-link parse
+would fail the whole PCM on cs35l41.
+
+This remains an experimental refresh-profile patch.  It is only useful with
+the matching UCM profiles in tasks/audio-quad-channel; no hardware claim until
+the objective RAM probe is rerun.
+
+Linux-derived code retains the original GPL notices.
+---
+--- a/sound/soc/codecs/cs35l41.c
++++ b/sound/soc/codecs/cs35l41.c
+@@ -351,6 +351,10 @@
+ 			  3, 0x4CF, 0x391, dig_vol_tlv),
+ 	SOC_SINGLE_TLV("Analog PCM Volume", CS35L41_AMP_GAIN_CTRL, 5, 0x14, 0,
+ 		       amp_gain_tlv),
++	SOC_SINGLE_RANGE("ASPRX1 Slot Position", CS35L41_SP_FRAME_RX_SLOT, 0,
++			 0, 7, 0),
++	SOC_SINGLE_RANGE("ASPRX2 Slot Position", CS35L41_SP_FRAME_RX_SLOT, 8,
++			 0, 7, 0),
+ 	SOC_ENUM("PCM Soft Ramp", pcm_sft_ramp),
+ 	SOC_SINGLE("HW Noise Gate Enable", CS35L41_NG_CFG, 8, 63, 0),
+ 	SOC_SINGLE("HW Noise Gate Delay", CS35L41_NG_CFG, 4, 7, 0),
+--- a/sound/soc/qcom/common.c
++++ b/sound/soc/qcom/common.c
+@@ -156,7 +156,8 @@
+ 					       codec_cfg->rx_mask,
+ 					       codec_cfg->slots,
+ 					       codec_cfg->slot_width);
+-		if (ret)
++		/* Some codecs, including CS35L41, use fixed first-slot routing. */
++		if (ret && ret != -ENOTSUPP)
+ 			return ret;
+ 	}
+ 

@@ -24,7 +24,9 @@ total window from the suspend residency estimate, and never turns missing
 clocks or statistics into "real_sleep=yes".
 """
 import argparse
+from contextlib import contextmanager
 import datetime
+import fcntl
 import json
 import os
 import re
@@ -35,10 +37,12 @@ import sys
 import time
 from pathlib import Path
 
-VERSION = 2
+VERSION = 3
 DEFAULT_STATE = Path("/var/lib/liuqin-suspend-log")
 MAX_TEXT = 512 * 1024
 DEFAULT_KEEP = 30
+MAX_STATE_BYTES = 256 * 1024 * 1024
+MIN_FREE_BYTES = 512 * 1024 * 1024
 EARLY_WAKE_AUTO = Path("/etc/liuqin/early-wake-auto")
 EARLY_WAKE_HELPER = "/usr/local/sbin/liuqin-early-wake-log"
 ID_RE = re.compile(r"^[0-9a-f]{8}-\d{10}(?:-\d+)?$")
@@ -755,13 +759,95 @@ def early_wake_enabled(args, state):
             and read_text(EARLY_WAKE_AUTO, 32).strip() == "1")
 
 
+@contextmanager
+def mutation_lock(state):
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd = os.open(state / "retention.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
+    finally:
+        os.close(fd)
+
+
+def retention_index(state):
+    """Validate the entire ordering before permitting any deletion.
+
+    Legacy/unsequenced directories have unknown order and are never pruned.
+    A missing/corrupt/regressed counter or duplicate sequence stops pruning.
+    Wall time, directory mtime and boot ID lexical order are not chronology.
+    """
+    state = Path(state)
+    events = state / "events"
+    items = [p for p in events.iterdir() if p.is_dir() and not p.is_symlink()
+             and ID_RE.fullmatch(p.name)] if events.exists() else []
+    counter_path = state / "event-sequence.json"
+    counter = 0
+    if counter_path.exists() or counter_path.is_symlink():
+        if counter_path.is_symlink() or counter_path.stat().st_size > 1024:
+            raise ValueError("unsafe event counter; preserving all events")
+        data = json.loads(counter_path.read_text())
+        if (not isinstance(data, dict) or data.get("version") != 1
+                or type(data.get("last")) is not int or data["last"] < 0):
+            raise ValueError("invalid event counter; preserving all events")
+        counter = data["last"]
+    sequences, seen = {}, set()
+    for item in items:
+        meta = item / "sequence.json"
+        if not meta.exists() and not meta.is_symlink():
+            sequences[item.name] = None
+            continue
+        if meta.is_symlink() or meta.stat().st_size > 1024:
+            raise ValueError("unsafe event sequence; preserving all events")
+        data = json.loads(meta.read_text())
+        seq = data.get("sequence") if isinstance(data, dict) else None
+        if (not isinstance(data, dict) or data.get("version") != 1
+                or type(seq) is not int or not 0 < seq <= counter or seq in seen):
+            raise ValueError("invalid/duplicate event sequence; preserving all events")
+        seen.add(seq)
+        sequences[item.name] = seq
+    return items, sequences, counter
+
+
+def sequence_event(state, event_dir):
+    _, _, counter = retention_index(state)
+    # Counter first: a crash may leave a gap, never re-use an allocated number.
+    write_atomic(Path(state) / "event-sequence.json",
+                 json.dumps({"version": 1, "last": counter + 1}))
+    write_atomic(event_dir / "sequence.json",
+                 json.dumps({"version": 1, "sequence": counter + 1}))
+
+
+def protect_event(event_dir, reason):
+    if event_dir.is_symlink() or not event_dir.is_dir() or not ID_RE.fullmatch(event_dir.name):
+        raise ValueError("invalid event directory")
+    marker = event_dir / "protected.json"
+    # Any existing marker protects the data, including malformed markers.
+    if marker.exists() or marker.is_symlink():
+        return
+    write_atomic(marker, json.dumps({"version": 1, "reason": reason[:500]}))
+
+
+def check_capacity(state):
+    used = sum(p.stat().st_size for p in state.rglob("*") if p.is_file() and not p.is_symlink())
+    if used >= MAX_STATE_BYTES or shutil.disk_usage(state).free < MIN_FREE_BYTES:
+        raise OSError("evidence capacity/low disk: stopped collecting without deleting protected records")
+
+
 def reserve_event_dir(events, event_id):
+    if not ID_RE.fullmatch(event_id):
+        raise ValueError("invalid event ID")
     path = events / event_id
     suffix = 0
     while path.exists():
         suffix += 1
         path = events / f"{event_id}-{suffix}"
     path.mkdir(mode=0o700, parents=True)
+    try:
+        sequence_event(events.parent, path)
+    except (OSError, ValueError) as exc:
+        # Still capture evidence; unsequenced events are protected implicitly.
+        print(f"retention unavailable: {exc}", file=sys.stderr)
     return path
 
 
@@ -784,6 +870,7 @@ def do_pre(args):
     state = state_path(args)
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(state, 0o700)
+    check_capacity(state)
     events = state / "events"
     events.mkdir(mode=0o700, exist_ok=True)
     pending_path = state / "pending.json"
@@ -791,12 +878,18 @@ def do_pre(args):
         try:
             old = json.loads(pending_path.read_text())
             old_id = old.get("id", "unknown")
+            if not ID_RE.fullmatch(old_id):
+                raise ValueError("invalid pending event ID")
             orphan = events / old_id
             orphan.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if (orphan / "orphan-pre.json").exists():
+                orphan = reserve_event_dir(events, old_id)
             write_atomic(orphan / "orphan-pre.json",
                          json.dumps(old, ensure_ascii=False, indent=1))
-        except (OSError, ValueError):
-            pass
+            protect_event(orphan, "previous pre had no completed post")
+        except (OSError, ValueError) as exc:
+            # Never overwrite a pending record that could not be preserved.
+            raise ValueError(f"cannot preserve previous pending evidence: {exc}") from exc
     pre = collect("pre")
     record = {
         "version": VERSION,
@@ -805,16 +898,14 @@ def do_pre(args):
         "started_realtime_ns": time.time_ns(),
         "pre": pre,
     }
-    event_dir = None
-    if early_wake_enabled(args, state):
-        event_dir = reserve_event_dir(events, record["id"])
-        record["id"] = event_dir.name
-        record["event_dir_reserved"] = True
-        write_atomic(event_dir / "pre.json", json.dumps(pre, ensure_ascii=False, indent=1))
+    event_dir = reserve_event_dir(events, record["id"])
+    record["id"] = event_dir.name
+    record["event_dir_reserved"] = True
+    write_atomic(event_dir / "pre.json", json.dumps(pre, ensure_ascii=False, indent=1))
     # Persist association BEFORE arm. If killed afterward, next pre can recover
     # a sealed buffer without silently overwriting the preceding sample.
     write_atomic(pending_path, json.dumps(record, ensure_ascii=False, indent=1))
-    if event_dir is not None:
+    if early_wake_enabled(args, state):
         record["early_wake"] = early_wake_call("pre", state, event_dir, pre)
         write_atomic(pending_path, json.dumps(record, ensure_ascii=False, indent=1))
     print(f"pre snapshot: {state}/pending.json id={record['id']}")
@@ -873,24 +964,27 @@ def do_post(args):
     if pending_path.exists():
         try:
             pending = json.loads(pending_path.read_text())
-        except (OSError, ValueError):
-            pending = None
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"invalid pending evidence preserved: {exc}") from exc
+    else:
+        check_capacity(state)
     pre = (pending or {}).get("pre") or None
     event_dir, early = None, None
-    if early_wake_enabled(args, state) and pre is not None:
+    if pre is not None:
         event_id = pending.get("id", "")
         candidate = events / event_id
         if (pending.get("event_dir_reserved") and ID_RE.fullmatch(event_id)
                 and candidate.is_dir() and not candidate.is_symlink()
                 and not (candidate / "report.json").exists()):
             event_dir = candidate
-            armed = pending.get("early_wake", {})
-            cycle = armed.get("cycle")
-            if armed.get("state") == "armed" and type(cycle) is int and cycle > 0:
-                # Export BEFORE post's active battery/firmware queries.
-                early = early_wake_call("post", state, event_dir, pre, cycle)
-            else:
-                early = {"state": "error", "error": "pre did not confirm an armed cycle", "pre_result": armed}
+    if early_wake_enabled(args, state) and event_dir is not None:
+        armed = pending.get("early_wake", {})
+        cycle = armed.get("cycle")
+        if armed.get("state") == "armed" and type(cycle) is int and cycle > 0:
+            # Export BEFORE post's active battery/firmware queries.
+            early = early_wake_call("post", state, event_dir, pre, cycle)
+        else:
+            early = {"state": "error", "error": "pre did not confirm an armed cycle", "pre_result": armed}
     if early_wake_enabled(args, state) and early is None:
         early = {"state": "error", "error": "no reserved pre event; sealed buffer not assumed captured"}
     post = collect("post")
@@ -915,6 +1009,13 @@ def do_post(args):
     write_atomic(event_dir / "report.json",
                  json.dumps(report, ensure_ascii=False, indent=1))
     write_atomic(event_dir / "report.txt", render(report))
+    failures_before = stat_number((pre or {}).get("suspend_stats", {}), "fail")
+    failures_after = stat_number(post.get("suspend_stats", {}), "fail")
+    if (pre is None or report["clocks"]["cross_boot"]
+            or (early is not None and early.get("state") == "error")
+            or (failures_before is not None and failures_after is not None
+                and failures_after > failures_before)):
+        protect_event(event_dir, "missing/cross-boot pre, failed suspend, or early-wake capture error")
     try:
         pending_path.unlink()
     except OSError:
@@ -926,42 +1027,45 @@ def do_post(args):
 
 
 def event_dirs(state):
-    events = Path(state) / "events"
-    try:
-        items = [item for item in events.iterdir()
-                 if item.is_dir() and not item.is_symlink()]
-    except OSError:
-        return []
-
-    def key(item):
-        try:
-            data = json.loads((item / "report.json").read_text())
-            realtime = data.get("post", {}).get("collected_realtime_ns")
-            if isinstance(realtime, int) and realtime > 0:
-                return realtime
-        except (OSError, ValueError):
-            pass
-        try:
-            return item.stat().st_mtime_ns
-        except OSError:
-            return 0
-
-    return sorted(items, key=key)
+    items, sequences, _ = retention_index(state)
+    # Legacy names only provide a deterministic display order, never deletion order.
+    return sorted(items, key=lambda p: (sequences[p.name] or 0, p.name))
 
 
 def prune(state, keep):
-    dirs = event_dirs(state)
+    if keep <= 0:
+        return {"deleted": [], "automatic_deletion": False}
+    try:
+        items, sequences, _ = retention_index(state)
+    except (OSError, ValueError) as exc:
+        print(f"retention stopped; all evidence preserved: {exc}", file=sys.stderr)
+        return {"deleted": [], "error": str(exc)}
+    def disposable(path):
+        if (sequences[path.name] is None or (path / "orphan-pre.json").exists()
+                or (path / "protected.json").exists() or (path / "protected.json").is_symlink()
+                or (path / "report.json").is_symlink()):
+            return False
+        try:
+            report = json.loads((path / "report.json").read_text())
+            return isinstance(report, dict) and isinstance(report.get("post"), dict)
+        except (OSError, ValueError):
+            return False
+    dirs = sorted((p for p in items if disposable(p)), key=lambda p: sequences[p.name])
+    deleted = []
     for old in dirs[:-keep] if keep > 0 else []:
         try:
             shutil.rmtree(old)
+            deleted.append(old.name)
         except OSError:
-            pass
+            break
+    return {"deleted": deleted, "protected_or_incomplete": len(items) - len(dirs)}
 
 
 def do_latest(args):
-    dirs = event_dirs(state_path(args))
+    dirs = [p for p in event_dirs(state_path(args))
+            if (p / "report.txt").is_file() and (p / "sequence.json").is_file()]
     if not dirs:
-        print("no suspend events recorded")
+        print("no sequenced completed event; legacy order is unknown (use list/show)")
         return 1
     report = dirs[-1] / "report.txt"
     if not report.exists():
@@ -1003,7 +1107,10 @@ def do_list(args):
             )
         except (OSError, ValueError):
             pass
-        print(f"{item.name}  {summary}")
+        meta = item / "sequence.json"
+        sequence = json.loads(meta.read_text())["sequence"] if meta.exists() else "legacy-order-unknown"
+        protected = (item / "protected.json").exists() or not meta.exists()
+        print(f"{item.name}  seq={sequence} protected={protected}  {summary}")
     return 0
 
 
@@ -1206,37 +1313,45 @@ def do_screen_latest(args):
 
 def do_prune(args):
     state = state_path(args)
-    prune(state, args.keep)
-    print(f"kept newest {args.keep} events in {state}")
+    result = prune(state, args.keep)
+    print(json.dumps(result))
+    return 1 if "error" in result else 0
+
+
+def do_protect(args):
+    state = state_path(args)
+    if args.action == "protect-existing":
+        paths = event_dirs(state)
+    else:
+        event_id = args.event_id or args.sleep_op
+        if not ID_RE.fullmatch(event_id):
+            raise ValueError("pin requires an event ID from list")
+        paths = [state / "events" / event_id]
+    for path in paths:
+        protect_event(path, args.reason)
+    print(json.dumps({"protected": [p.name for p in paths]}))
     return 0
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("pre", "post", "latest", "list",
-                                           "show", "prune", "screen-latest"))
+                                           "show", "prune", "screen-latest", "pin", "protect-existing"))
     parser.add_argument("sleep_op", nargs="?", default="")
     parser.add_argument("event_id", nargs="?", default="")
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE)
     parser.add_argument("--keep", type=int, default=DEFAULT_KEEP)
+    parser.add_argument("--reason", default="manually protected important evidence")
     args = parser.parse_args()
+    handlers = {"pre": do_pre, "post": do_post, "prune": do_prune,
+                "pin": do_protect, "protect-existing": do_protect,
+                "latest": do_latest, "list": do_list, "show": do_show,
+                "screen-latest": do_screen_latest}
     try:
-        if args.action == "pre":
-            do_pre(args)
-            return 0
-        if args.action == "post":
-            do_post(args)
-            return 0
-        if args.action == "latest":
-            return do_latest(args)
-        if args.action == "list":
-            return do_list(args)
-        if args.action == "show":
-            return do_show(args)
-        if args.action == "screen-latest":
-            return do_screen_latest(args)
-        if args.action == "prune":
-            return do_prune(args)
+        if args.action in ("pre", "post", "prune", "pin", "protect-existing"):
+            with mutation_lock(state_path(args)):
+                return handlers[args.action](args) or 0
+        return handlers[args.action](args) or 0
     except Exception as exc:  # keep systemd-sleep hooks from failing the sleep
         print(f"liuqin-suspend-log: {exc.__class__.__name__}: {exc}",
               file=sys.stderr)

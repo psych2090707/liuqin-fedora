@@ -942,6 +942,25 @@ apply_rootfs_overlays() {
 		# keyboard extension and appearance bridge are copied from the
 		# maintenance tree, never from frozen task snapshots.
 		apply_static_overlay "$project_root/overlays/gnome" gnome
+		if [ -x "$rootfs_stage/usr/bin/snapshot" ]; then
+			# Keep RPM-owned launchers intact. The local XDG entries take priority
+			# for both direct launch and D-Bus activation.
+			camera_wrapper=/usr/libexec/liuqin/liuqin-camera
+			sudo install -D -m 0755 "$project_root/packaging/device/helpers/liuqin-camera" \
+				"$rootfs_stage$camera_wrapper"
+			for launcher in applications/org.gnome.Snapshot.desktop dbus-1/services/org.gnome.Snapshot.service; do
+				sudo sed -E "s|^Exec=(/usr/bin/)?snapshot([[:space:]].*)?$|Exec=$camera_wrapper\\2|" \
+					"$rootfs_stage/usr/share/$launcher" >"$work/snapshot-launcher"
+				grep -q "^Exec=$camera_wrapper" "$work/snapshot-launcher" ||
+					die "unrecognized Snapshot launcher: $launcher"
+				sudo install -D -m 0644 "$work/snapshot-launcher" "$rootfs_stage/usr/local/share/$launcher"
+			done
+			printf '[org.gnome.Snapshot]\nenable-hardware-encoding=false\n' |
+				sudo tee "$rootfs_stage/usr/share/glib-2.0/schemas/99_liuqin_snapshot.gschema.override" >/dev/null
+			sudo chroot "$rootfs_stage" /usr/bin/glib-compile-schemas --strict /usr/share/glib-2.0/schemas ||
+				die "cannot compile the Snapshot software encoding default"
+			printf '%s\t%s\n' "snapshot" "local launchers and software encoding default" >>"$work/overlays-applied.txt"
+		fi
 		gnome_ext="$rootfs_stage/usr/share/gnome-shell/extensions/liuqin-tablet-keyboard@liuqin"
 		sudo install -d -m 0755 "$gnome_ext"
 		sudo cp -a "$project_root/overlays/gnome-local/keyboard/extension/." "$gnome_ext/"

@@ -15,7 +15,9 @@ work, out = (Path(p).resolve() for p in sys.argv[1:])
 build = work / "build"
 release = (build / "include/config/kernel.release").read_text().strip()
 profile = Path(os.environ["LIUQIN_731_PROFILE"]).resolve() if os.environ.get("LIUQIN_731_PROFILE") else None
-expected_release = (profile / "release").read_text().strip() if profile else "7.3.1-liuqin-exp1"
+addon = Path(os.environ["LIUQIN_731_ADDON"]).resolve() if os.environ.get("LIUQIN_731_ADDON") else None
+release_profile = addon or profile
+expected_release = (release_profile / "release").read_text().strip() if release_profile else "7.3.1-liuqin-exp1"
 if release != expected_release:
     raise SystemExit(f"Unexpected release: {release}")
 
@@ -50,11 +52,15 @@ for path in sorted(modules.rglob("*")):
 notes = subprocess.check_output(["aarch64-linux-gnu-readelf", "-n", str(build / "vmlinux")], text=True)
 build_id = re.search(r"Build ID: ([0-9a-f]+)", notes).group(1)
 shutil.copytree(work / "logs", out / "logs", dirs_exist_ok=True)
-spec = json.loads((here / "source.json").read_text())
+source = here / "source.json"
+if profile and (profile / "source.json").is_file():
+    source = profile / "source.json"
+spec = json.loads(source.read_text())
 patches = []
-for name in (here / "patches/series").read_text().splitlines():
-    if name and not name.startswith("#"):
-        patches.append({"path": name, "sha256": sha(here / "patches" / name)})
+if source.parent == here:
+    for name in (here / "patches/series").read_text().splitlines():
+        if name and not name.startswith("#"):
+            patches.append({"path": name, "sha256": sha(here / "patches" / name)})
 info = {
     "status": "verified-offline", "hardware_verified": False,
     "kernel_release": release, "gnu_build_id": build_id,
@@ -68,13 +74,19 @@ info = {
     "work_root": str(work),
     "device_actions": [],
 }
-if profile:
-    info["profile"] = {
-        "path": str(profile.relative_to(here)),
-        "fragment_sha256": sha(profile / "experiment.config"),
-        "patches": [{"path": name, "sha256": sha(profile / "patches" / name)}
-                    for name in (profile / "patches/series").read_text().splitlines()
-                    if name and not name.startswith("#")],
+for name, directory in (("profile", profile), ("addon", addon)):
+    if directory is None:
+        continue
+    try:
+        profile_path = str(directory.relative_to(here))
+    except ValueError:
+        profile_path = str(directory)
+    info[name] = {
+        "path": profile_path,
+        "fragment_sha256": sha(directory / "experiment.config"),
+        "patches": [{"path": patch, "sha256": sha(directory / "patches" / patch)}
+                    for patch in (directory / "patches/series").read_text().splitlines()
+                    if patch and not patch.startswith("#")],
     }
 (out / "build-info.json").write_text(json.dumps(info, indent=2) + "\n")
 checksums = []

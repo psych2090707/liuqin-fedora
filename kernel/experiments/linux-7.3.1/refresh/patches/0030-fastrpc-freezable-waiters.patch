@@ -1,0 +1,26 @@
+From: liuqin Fedora maintainers <liuqin@localhost>
+Subject: [PATCH] misc: fastrpc: freeze userspace invocation waiters in place
+
+Source: liuqin v0.7.0 9c741c403a4b07357d4ad2848fa0b1bc2f99927a
+Adaptation: place the change in the local fastrpc_wait_for_completion()
+helper instead of the call site; 7.3.1 already routes both paths there.
+Rationale: the sensor daemon waits for an inbound DSP listener call. The
+process freezer currently interrupts that wait, and the retried ioctl
+sends a new context. TASK_FREEZABLE lets the waiter stop and resume
+without resending the RPC; ordinary signals still interrupt.
+Validation and rollback: tasks/upstream-refresh/RESULT.md.
+
+---
+--- a/drivers/misc/fastrpc.c
++++ b/drivers/misc/fastrpc.c
+@@ -1326,7 +1326,9 @@
+ 		if (!wait_for_completion_timeout(&ctx->work, 10 * HZ))
+ 			err = -ETIMEDOUT;
+ 	} else {
+-		err = wait_for_completion_interruptible(&ctx->work);
++		/* Retain the in-flight DSP context across system sleep. */
++		err = wait_for_completion_state(&ctx->work,
++					TASK_INTERRUPTIBLE | TASK_FREEZABLE);
+ 	}
+ 
+ 	return err;

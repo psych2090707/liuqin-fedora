@@ -1,0 +1,27 @@
+From: liuqin Fedora maintainers <liuqin@localhost>
+Subject: [PATCH] arm64: dts: qcom: liuqin: disable the unused QCE consumer
+
+Source: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/f18bbcc84540750d948b17776687fe2e491b81a1
+7.3.1 already has QCE runtime PM code, but the driver is gated by BROKEN.
+The deployed kernel therefore has an enabled, unbound consumer rather than
+an active QCE instance with the old fixed 393600 bandwidth request.
+Disable the unused node so it cannot hold its interconnect suppliers'
+sync_state pending. Keep cryptobam, SCM, UFS ICE and all crypto config gates.
+An isolated RAM comparison must verify both Build ID and this DT status;
+the kernel Image does not change when only the DT is changed.
+No battery-life claim follows from a bandwidth-vote observation alone.
+Validation and rollback: tasks/upstream-refresh/RESULT.md.
+
+---
+diff --git a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+--- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
++++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+@@ -2239,3 +2239,8 @@
+ &cs35l41_tr { cirrus,subsystem-id = "10251826"; };
+ &cs35l41_br { cirrus,subsystem-id = "10251826"; };
+ &cs35l41_bl { cirrus,subsystem-id = "10251826"; };
++
++/* No driver is available with the upstream BROKEN gate retained. */
++&crypto {
++	status = "disabled";
++};

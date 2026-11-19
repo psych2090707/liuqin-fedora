@@ -1,0 +1,76 @@
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Subject: [PATCH] power: supply: qcom_battmgr: report QC chargers as a DCP on liuqin
+
+The SM8475 usb_type is USB_ADAP_TYPE, which extends power_supply_usb_type
+with the QTI dedicated-charger types from 0x80. The class cannot name
+them: with a QC charger, reading usb_type fails with -EINVAL, every read
+and every change uevent logs "driver reporting unavailable enum value",
+and the uevent goes out without POWER_SUPPLY_USB_TYPE.
+
+Report them the way stock battery_chg_update_usb_type_work() supplies them:
+HVDCP, HVDCP_3 and HVDCP_3P5 as a DCP, and HVDCP_3 class B of the same
+family too. A floating charger and any other value the class cannot name
+read as unknown, as in stock's default case. The raw type still drives the
+charging wakeup source and the input current limit.
+
+KUnit reads usb_type through a registered power supply's sysfs attribute
+and its uevent for each type; without the mapping both fail for 0x80-0x84.
+The test uses the power supply class internals, so it is built-in only.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Liuqin-upstream: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/c25f056e0c20e7a9fd0632598909568005fdfc56
+
+Liuqin Fedora port: adopt reporting independently of the upstream 500 mA input policy, with no added write interface.
+---
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -95,6 +95,11 @@
+ #define USB_CURR_MAX			4
+ #define USB_INPUT_CURR_LIMIT		5
+ #define USB_TYPE			6
++#define SM8475_USB_ADAP_HVDCP		0x80
++#define SM8475_USB_ADAP_HVDCP_3		0x81
++#define SM8475_USB_ADAP_HVDCP_3P5	0x82
++#define SM8475_USB_ADAP_HVDCP_3_CLASSB	0x84
++
+ #define USB_ADAP_TYPE			7
+ #define USB_MOISTURE_DET_EN		8
+ #define USB_MOISTURE_DET_STS		9
+@@ -1813,6 +1818,28 @@
+ 	return ret;
+ }
+ 
++/*
++ * The class only knows the power_supply_usb_type values, and SM8475 also
++ * reports the QTI dedicated-charger types from 0x80. Stock
++ * battery_chg_update_usb_type_work() supplies HVDCP, HVDCP_3 and HVDCP_3P5
++ * as a DCP; HVDCP_3 class B is the same QC charger family. Any other value is
++ * unknown, as in stock's default case, so reading usb_type never fails.
++ */
++static int qcom_battmgr_sm8475_usb_type(u32 type)
++{
++	switch (type) {
++	case SM8475_USB_ADAP_HVDCP:
++	case SM8475_USB_ADAP_HVDCP_3:
++	case SM8475_USB_ADAP_HVDCP_3P5:
++	case SM8475_USB_ADAP_HVDCP_3_CLASSB:
++		return POWER_SUPPLY_USB_TYPE_DCP;
++	}
++
++	/* Up to the Apple brick ID the firmware uses the class numbering. */
++	return type <= POWER_SUPPLY_USB_TYPE_APPLE_BRICK_ID ? type :
++	       POWER_SUPPLY_USB_TYPE_UNKNOWN;
++}
++
+ static int qcom_battmgr_usb_get_property(struct power_supply *psy,
+ 					 enum power_supply_property psp,
+ 					 union power_supply_propval *val)
+@@ -1852,6 +1879,8 @@
+ 		break;
+ 	case POWER_SUPPLY_PROP_USB_TYPE:
+ 		val->intval = battmgr->usb.usb_type;
++		if (battmgr->variant == QCOM_BATTMGR_SM8475)
++			val->intval = qcom_battmgr_sm8475_usb_type(val->intval);
+ 		break;
+ 	default:
+ 		return -EINVAL;

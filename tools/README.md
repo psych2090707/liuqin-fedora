@@ -4,6 +4,7 @@
 |---|---|---|
 | 通过 USB SSH 读取平板 | [AFK](afk/README.md) | 先用现有连接；up/dhcp/覆盖层安装可能改配置 |
 | 查最近睡醒/亮屏记录 | [suspend-log](suspend-log/README.md) | 按需读取；日志不能单独证明睡眠足够省电 |
+| 查充电、充电口温度与 Type-C 状态 | [charging](charging/README.md) | 只读快照，不执行认证或切角色；驱动遥测不等于外置电气测量 |
 | 查日常/跨启动快照 | [低频日志](afk/daily-log/README.md)、[GPU watcher](afk/gpu-hang/README.md) | 保留已有取证，不用空 pstore 排除故障 |
 | 基础诊断或日志包 | `diagnose.sh`、`collect-logs.sh` | 先查副作用；基础检查不等于功能验收，采集会写报告 |
 | 复用现有 boot 的内核做 RAM 候选 | [repack-kernel-boot.py](repack-kernel-boot.py) `--help` | 钉住基线 boot SHA256，要求 release/config/模块/原始 DTB 配套；验证其他载荷和头不变；只离线组装，不操作设备 |

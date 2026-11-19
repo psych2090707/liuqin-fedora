@@ -376,7 +376,7 @@ verify_rootfs() {
                   powerdevil plasma-nm plasma-pa bluedevil upower
                   xdg-desktop-portal-kde pipewire wireplumber iio-sensor-proxy
                   fprintd libfprint firefox kscreenlocker snapshot libcamera libcamera-ipa
-                  libcamera-tools libcamera-gstreamer v4l-utils ffmpeg-free
+                  libcamera-tools libcamera-gstreamer pipewire-plugin-libcamera v4l-utils ffmpeg-free
                   gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-plugin-openh264)
     else
         required=(dnf5 dnf5-plugins NetworkManager gnome-shell gnome-session
@@ -384,7 +384,7 @@ verify_rootfs() {
                   gnome-keyring gnome-keyring-pam gdm nautilus gnome-software
                   xdg-desktop-portal-gnome pipewire wireplumber iio-sensor-proxy
                   fprintd libfprint firefox libcamera libcamera-ipa
-                  libcamera-tools libcamera-gstreamer v4l-utils ffmpeg-free
+                  libcamera-tools libcamera-gstreamer pipewire-plugin-libcamera v4l-utils ffmpeg-free
                   gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-plugin-openh264)
     fi
     local missing_req=()

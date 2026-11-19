@@ -4,9 +4,9 @@
 
 ## 构建内核
 
-本版采用 kernel.org 的 Linux 7.3.1，加上 `kernel/experiments/linux-7.3.1/patches/series` 中的设备补丁。之后追加 `refresh/patches/series` 的 15 组定向上游修复，使用 `refresh/build.sh`、`refresh/bootargs.txt` 和 `7.3.1-liuqin-upstream1`。完整镜像与内核 RPM 均传 `--bootargs kernel/experiments/linux-7.3.1/refresh/bootargs.txt`，避免回到 deep 默认。准确来源和原始归档摘要在该目录的 `source.json`，最终配置及 GNU Build ID 记录随版本提供。
+本版采用 kernel.org 的 Linux 7.3.5。使用 `kernel/experiments/linux-7.3.5/build.sh` 按两份 `patches/series` 重放设备适配和 Ubuntu liuqin v0.8.0 增量，输出 `7.3.5-liuqin-upstream2`。完整镜像与内核 RPM 均传 `--bootargs kernel/experiments/linux-7.3.5/bootargs.txt`。源码归档摘要在该目录的 `source.json`，最终配置及 GNU Build ID 随版本提供。
 
-把 Release 附件 `linux-7.3.1.tar.xz` 放到 `out/kernel-7.3.1/downloads/`。在装有 aarch64 交叉 GCC/binutils、make、dtc、kmod 和 Python 的 Linux 电脑上，按目录 README 构建。工作目录需要无空格，且独立于只读上游克隆。
+把 Release 附件 `linux-7.3.5.tar.xz` 放到 `out/kernel-stable-upgrade/downloads/`。交叉编译器、配置种子和输入路径见内核目录及对应源码附件。内核编译使用无空格的独立工作目录。
 
 ## 构建用户空间
 

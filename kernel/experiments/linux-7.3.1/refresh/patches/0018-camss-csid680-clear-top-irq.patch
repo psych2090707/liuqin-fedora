@@ -1,0 +1,39 @@
+From: liuqin Fedora adaptation <liuqin@localhost>
+Subject: [PATCH] liuqin 7.3.1: camss: clear stale CSID TOP status before reset
+
+The front-end keeps its CSID block powered across camera sessions on this
+board (the Titan top and IFE GDSCs are deliberately kept on to avoid the
+SM8475 power-collapse hang).  When a session stops, a TOP interrupt status
+bit can remain asserted while the IRQ is disabled; the GIC line is
+edge-triggered, so enabling it again produces no new edge and the next
+CSID reset waits out CSID_RESET_TIMEOUT_MS and fails with -EIO.  This
+shows up as "CSID reset timeout" / "Failed to power up pipeline: -5" on
+the second capture or on switching from stills to video.
+
+Clear the TOP status (and re-enable the TOP IRQs) before issuing the reset
+command, matching what the gen2/gen3 CSID implementations already do.
+The reset IRQ is then guaranteed to produce a fresh edge.
+
+Linux-derived code retains the original GPL notices. Offline port; no
+hardware claim beyond the RAM test recorded in tasks/camera-support.
+---
+--- a/drivers/media/platform/qcom/camss/camss-csid-680.c
++++ b/drivers/media/platform/qcom/camss/camss-csid-680.c
+@@ -326,7 +326,17 @@
+ 
+ 	reinit_completion(&csid->reset_complete);
+ 
++	/*
++	 * Clear any TOP status left behind by the previous session and make
++	 * sure the TOP IRQs are enabled.  The interrupt line is edge
++	 * triggered, so a status bit that is still asserted while the IRQ
++	 * was disabled will not generate a new edge and the reset below
++	 * would time out.
++	 */
++	val = readl(csid->base + CSID_TOP_IRQ_STATUS);
++	writel(val, csid->base + CSID_TOP_IRQ_CLEAR);
+ 	writel(CSID_IRQ_CMD_CLEAR, csid->base + CSID_IRQ_CMD);
++	writel(~0u, csid->base + CSID_TOP_IRQ_MASK);
+ 
+ 	/* preserve registers */
+ 	val = CSID_RESET_CFG_MODE_IMMEDIATE | CSID_RESET_CFG_LOCATION_COMPLETE;

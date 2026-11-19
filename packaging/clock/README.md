@@ -4,6 +4,16 @@
 保留 chronyd、GPG 校验、USB/网络/电源策略；不写 RTC、boot 或任何设备分区。
 只保存时间，**不自行设置系统时钟**；恢复由 systemd PID1 原生实现。
 
+2026-11-13 现机发现 F45 包已安装但 timer/关机 guard 均未启用，已按当轮授权修复日志保留并
+补充授时来源；激活与实际验收状态集中见结果。
+`chrony-public-sources.conf` 是单独部署的配置输入，**不在此 RPM payload 内**；目标为
+`/etc/chrony.d/10-liuqin-public.conf`，由已有 aggregate 显式 include。按用户要求适应慢/丢包网络：
+三个公共来源允许最多 10 秒往返，最大 root distance 6 秒、jitter 2 秒；至少两个可用来源相互
+一致，至少保留四个样本继续估算频率，不把单包当完成。三个慢链路来源用 64～256 秒常规轮询，
+不启用快速 burst：新请求可能使仍在路上的旧回复失效。Fedora 原 pool 保留作快速网络的补充。
+不使用外部忙循环，不唤醒睡眠设备，不修改系统 DNS/路由/代理。
+日期可用性优先于亚秒精度；无回包仍无法凭空获得新时间，需依赖已保存的下限与同 boot 锚点。
+
 ## 复用与边界
 
 - [systemd v259 `clock_apply_epoch()`](https://github.com/systemd/systemd/blob/v259/src/core/clock-warp.c)
@@ -11,9 +21,11 @@
   `/usr` 在根分区、由自定义 init 直接交给根上的 systemd；不新增 initramfs。
 - [社区同型配置](https://terinstock.com/post/2021/12/Systemds-clock-epoch-for-RTC-less-systems/)
   已有 epoch service/timer 做法。这里增加可信检查、关机保存和离线测试，避免无条件 touch 错误日期。
-- [chronyc waitsync](https://chrony-project.org/doc/4.9/chronyc.html#waitsync) 做一次本地检查，
-  要求已同步且剩余校正不超过 0.5 秒；走明确的 Unix socket，不发 DNS/UDP/NTP 请求。
-- 同步时保存当前时间减 1 秒，并在 `/run/liuqin-clock/anchor.json` 保存本次 boot 的
+- 1.0-5 使用 [chronyc tracking](https://chrony-project.org/doc/4.9/chronyc.html#tracking) 的 CSV 做
+  一次本地检查，要求外部同步、剩余校正不超过 0.5 秒且估计误差有限；走明确 Unix socket，
+  不发 DNS/UDP/NTP 请求。按官方公式 `|system offset| + root dispersion + root delay/2`
+  估计误差，超过 8 秒或输出无效时不接受新锚点。
+- 同步时从当前时间扣除向上取整的误差、再多扣 1 秒，并在 `/run/liuqin-clock/anchor.json` 保存本次 boot 的
   CLOCK_BOOTTIME 锚点；断网后最多 7 天按该单调时钟外推，不信任手工改动的墙上时间。
   BOOTTIME 包含 suspend 时间；锚点不跨启动使用，不假装提供了新的网络同步。
 - 每约 60 秒保存一次，不唤醒睡眠设备；正常关机在 chronyd 停止前再保存。
@@ -35,7 +47,7 @@ helper 会 fsync 并读回 mtime；I/O/fsync 失败会报告 error，不能把�
 chronyc 4.9 的 Unix 查询会在服务端 socket 所在目录创建临时回信 socket，再自行清理；
 该 runtime 放行不改 chronyd 配置，也不发送校时命令。显式 `chronyc -u root` 防止 Fedora
 客户端再次降权触发被 sandbox 禁止的 setgroups/setuid；不授予 CAP_SETUID/GID 或 CAP_SYS_TIME。
-实机验收必须在 chronyd 已同步时看到 service 的 `source=chrony`，不能仅看退出成功或 `source=holdover`。
+实机验收必须在 chronyd 已同步时看到 service 的 `source=chrony` 与 `margin_ns`，不能仅看退出成功或 `source=holdover`。
 
 ## 离线构建与检查
 

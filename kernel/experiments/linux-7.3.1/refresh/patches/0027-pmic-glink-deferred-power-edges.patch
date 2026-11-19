@@ -1,0 +1,135 @@
+From: liuqin Fedora maintainers <liuqin@localhost>
+Subject: [PATCH] soc: qcom: preserve battery edge detection across deferred notifications
+
+
+Source: liuqin 44c72b96 plus local sleep-deferral RFC integration (0016).
+Upstream liuqin v0.7.0 has no notification deferral. Its non-freezable
+online worker would otherwise never see the power edge until after resume.
+Retain the queued full callback, adding an opt-in atomic callback that only
+queues the existing online query worker. Only a confirmed edge triggers
+the existing hard wake event. Orientation and peripheral work stay deferred.
+Client-list locking and the existing stop-workers action protect lifetime.
+Validation and rollback: tasks/upstream-refresh/RESULT.md.
+
+---
+diff --git a/include/linux/soc/qcom/pmic_glink.h b/include/linux/soc/qcom/pmic_glink.h
+--- a/include/linux/soc/qcom/pmic_glink.h
++++ b/include/linux/soc/qcom/pmic_glink.h
+@@ -35,4 +35,11 @@
+ void pmic_glink_set_port_source(struct pmic_glink_client *client, unsigned int port, bool source);
+ void pmic_glink_client_register(struct pmic_glink_client *client);
+ 
++/* Optional atomic callback for notifications held over suspend. Queue only
++ * wake-detection work; normal hardware-facing callbacks remain deferred.
++ * Install before pmic_glink_client_register().
++ */
++void pmic_glink_client_watch_wakeup(struct pmic_glink_client *client,
++				  void (*notify)(const void *, size_t, void *));
++
+ #endif
+diff --git a/drivers/soc/qcom/pmic_glink.c b/drivers/soc/qcom/pmic_glink.c
+--- a/drivers/soc/qcom/pmic_glink.c
++++ b/drivers/soc/qcom/pmic_glink.c
+@@ -76,6 +76,7 @@
+ 	void (*cb)(const void *data, size_t len, void *priv);
+ 	void (*pdr_notify)(void *priv, int state);
+ 	void (*source_changed)(void *priv, unsigned long ports);
++	void (*wakeup_notify)(const void *data, size_t len, void *priv);
+ 	void *priv;
+ };
+ 
+@@ -149,6 +150,13 @@
+ }
+ EXPORT_SYMBOL_GPL(pmic_glink_set_port_source);
+ 
++void pmic_glink_client_watch_wakeup(struct pmic_glink_client *client,
++				  void (*notify)(const void *, size_t, void *))
++{
++	client->wakeup_notify = notify;
++}
++EXPORT_SYMBOL_GPL(pmic_glink_client_watch_wakeup);
++
+ void pmic_glink_client_register(struct pmic_glink_client *client)
+ {
+ 	struct pmic_glink *pg = client->pg;
+@@ -214,6 +222,23 @@
+ 	spin_unlock_irqrestore(&pg->client_lock, flags);
+ }
+ 
++/* Keep the full notification queued. The opt-in callback may only enqueue
++ * firmware queries needed to distinguish a power edge from periodic updates.
++ */
++static void pmic_glink_dispatch_wakeup(struct pmic_glink *pg, const void *data, size_t len)
++{
++	const struct pmic_glink_hdr *hdr = data;
++	struct pmic_glink_client *client;
++	unsigned long flags;
++
++	spin_lock_irqsave(&pg->client_lock, flags);
++	list_for_each_entry(client, &pg->clients, node) {
++		if (client->id == le32_to_cpu(hdr->owner) && client->wakeup_notify)
++			client->wakeup_notify(data, len, client->priv);
++	}
++	spin_unlock_irqrestore(&pg->client_lock, flags);
++}
++
+ static bool pmic_glink_defer(struct pmic_glink *pg, const void *data, size_t len)
+ {
+ 	struct pmic_glink_deferred_msg *msg;
+@@ -282,8 +307,10 @@
+ 
+ 	/* The sender of a request is waiting for the response */
+ 	if (le32_to_cpu(hdr->type) != PMIC_GLINK_REQ_RESP &&
+-	    pmic_glink_defer(pg, data, len))
++	    pmic_glink_defer(pg, data, len)) {
++		pmic_glink_dispatch_wakeup(pg, data, len);
+ 		return 0;
++	}
+ 
+ 	pmic_glink_dispatch(pg, data, len);
+ 
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -2072,6 +2072,33 @@
+ 	schedule_work(&b->online_work);
+ }
+ 
++/* Minimal atomic path while normal notifications are held over suspend.
++ * Never schedule orientation, pen work or power_supply_changed() here.
++ */
++static void qcom_battmgr_wakeup_notify(const void *data, size_t len, void *priv)
++{
++	const struct qcom_battmgr_message *msg = data;
++	struct qcom_battmgr *b = priv;
++	unsigned int notification;
++
++	if (len != sizeof(struct pmic_glink_hdr) + sizeof(msg->notification))
++		return;
++	notification = le32_to_cpu(msg->notification) & 0xff;
++	switch (notification) {
++	case NOTIF_USB_PROPERTY:
++		qcom_battmgr_queue_online(b, ONLINE_USB);
++		break;
++	case NOTIF_WLS_PROPERTY:
++		qcom_battmgr_queue_online(b, ONLINE_WIRELESS);
++		break;
++	case NOTIF_BAT_STATUS:
++		if (b->variant == QCOM_BATTMGR_SC8280XP ||
++		    b->variant == QCOM_BATTMGR_X1E80100)
++			qcom_battmgr_queue_online(b, ONLINE_AC);
++		break;
++	}
++}
++
+ /* Called by GLINK with client_lock held, including the initial role replay. */
+ static void qcom_battmgr_connector_gate(struct qcom_battmgr *b)
+ {
+@@ -3088,6 +3115,7 @@
+ 
+ 	if (battmgr->connector_enabled)
+ 		pmic_glink_client_watch_source_ports(battmgr->client, qcom_battmgr_source_changed);
++	pmic_glink_client_watch_wakeup(battmgr->client, qcom_battmgr_wakeup_notify);
+ 	pmic_glink_client_register(battmgr->client);
+ 
+ 	if (battmgr->variant == QCOM_BATTMGR_SM8475) {

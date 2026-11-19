@@ -145,6 +145,8 @@ cat >"$stage/SOURCES/device-support-README.md" <<EOF
 Source: yzddmr6/xiaomipad-6pro-mainline @ ${upstream_commit}
 License: MIT (project) unless a file states otherwise; liuqin-mipps-auth is
 GPL-2.0-only and is derived from xiaomi-mipps-auth (see NOTICE).
+The Fedora overlay's liuqin-mipps-auth helper is from
+yzddmr6/xiaomipad-6pro-mainline @ 24d5ccd89d46240e385611d8b81b07d96e849477.
 
 Path relocation to Fedora FHS is done at package time by
 relocate-device-support.sh; the upstream checkout is never modified.
@@ -161,42 +163,55 @@ tar "${TAR_OPTS[@]}" -C "$upstream/device/firmware" -cf "$stage/SOURCES/firmware
 cp "$upstream/device/firmware/firmware.manifest" "$stage/SOURCES/firmware.manifest"
 
 # --- sources: audio ----------------------------------------------------------
-log 'packing audio topology and UCM2 sources'
-cp "$upstream/device/audio-topology/liuqin-speakers.m4" "$stage/SOURCES/"
-cp "$upstream/tools/build-liuqin-audio-topology.sh" "$stage/SOURCES/"
-tar "${TAR_OPTS[@]}" -C "$upstream/device/gnome-overlay/usr/share" -cf "$stage/SOURCES/ucm2.tar" alsa
+if [[ ,$only, == *,audio,* ]]; then
+	log 'packing audio topology and UCM2 sources'
+	cp "$upstream/device/audio-topology/liuqin-speakers.m4" "$stage/SOURCES/"
+	cp "$project_root/packaging/device/pipewire/50-quad-upmix.conf" "$stage/SOURCES/"
+	cp "$upstream/tools/build-liuqin-audio-topology.sh" "$stage/SOURCES/"
+	# Overlay the project's UCM2 files on the read-only upstream tree.  The
+	# upstream checkout stays untouched; the overlay adds the second card profile
+	# and the slot controls for four-channel playback.
+	ucm_tree=$stage/ucm2-tree
+	rm -rf "$ucm_tree"
+	mkdir -p "$ucm_tree"
+	tar "${TAR_OPTS[@]}" -C "$upstream/device/gnome-overlay/usr/share" -cf - alsa |
+		tar "${TAR_OPTS[@]}" -C "$ucm_tree" -xf -
+	cp -a "$project_root/packaging/device/ucm2/." "$ucm_tree/alsa/ucm2/"
+	tar "${TAR_OPTS[@]}" -C "$ucm_tree" -cf "$stage/SOURCES/ucm2.tar" alsa
+	rm -rf "$ucm_tree"
 
-topology_commit=2af1f1ebb8d4fd03b5f53891467ddde2e208a8a0
-topology_repo=https://github.com/linux-msm/audioreach-topology.git
-topology_cache=$cache/audioreach-topology-$topology_commit
-topology_tar=$cache/audioreach-topology-$topology_commit.tar
-# A cache entry from an older staging format (entries at "./") is rebuilt.
-if [ -f "$topology_tar" ] &&
-	! tar -tf "$topology_tar" 2>/dev/null | head -1 | grep -q '^audioreach-topology/$'; then
-	rm -f "$topology_tar"
+	topology_commit=2af1f1ebb8d4fd03b5f53891467ddde2e208a8a0
+	topology_repo=https://github.com/linux-msm/audioreach-topology.git
+	topology_cache=$cache/audioreach-topology-$topology_commit
+	topology_tar=$cache/audioreach-topology-$topology_commit.tar
+	# A cache entry from an older staging format (entries at "./") is rebuilt.
+	if [ -f "$topology_tar" ] &&
+		! tar -tf "$topology_tar" 2>/dev/null | sed -n '1p' | grep -q '^audioreach-topology/$'; then
+		rm -f "$topology_tar"
+	fi
+	if [ ! -f "$topology_tar" ]; then
+		log "fetching audioreach-topology @ $topology_commit (cached under $cache)"
+		rm -rf "$topology_cache"
+		git init -q "$topology_cache"
+		git -C "$topology_cache" remote add origin "$topology_repo"
+		git -C "$topology_cache" fetch -q --depth 1 origin "$topology_commit"
+		git -C "$topology_cache" checkout -q FETCH_HEAD
+		[ "$(git -C "$topology_cache" rev-parse HEAD)" = "$topology_commit" ] ||
+			die 'audioreach-topology commit verification failed'
+		[ -z "$(git -C "$topology_cache" status --porcelain --untracked-files=no)" ] ||
+			die 'audioreach-topology checkout is not clean'
+		tar "${TAR_OPTS[@]}" --transform 's,^[^/]*,audioreach-topology,' \
+		-C "$cache" -cf "$topology_tar" "$(basename "$topology_cache")"
+	fi
+	cp "$topology_tar" "$stage/SOURCES/audioreach-topology.tar"
 fi
-if [ ! -f "$topology_tar" ]; then
-	log "fetching audioreach-topology @ $topology_commit (cached under $cache)"
-	rm -rf "$topology_cache"
-	git init -q "$topology_cache"
-	git -C "$topology_cache" remote add origin "$topology_repo"
-	git -C "$topology_cache" fetch -q --depth 1 origin "$topology_commit"
-	git -C "$topology_cache" checkout -q FETCH_HEAD
-	[ "$(git -C "$topology_cache" rev-parse HEAD)" = "$topology_commit" ] ||
-		die 'audioreach-topology commit verification failed'
-	[ -z "$(git -C "$topology_cache" status --porcelain --untracked-files=no)" ] ||
-		die 'audioreach-topology checkout is not clean'
-	tar "${TAR_OPTS[@]}" --transform 's,^[^/]*,audioreach-topology,' \
-	-C "$cache" -cf "$topology_tar" "$(basename "$topology_cache")"
-fi
-cp "$topology_tar" "$stage/SOURCES/audioreach-topology.tar"
 
 # --- sources: device-support -------------------------------------------------
 log 'packing device-support sources and cross-building helpers'
 tar "${TAR_OPTS[@]}" -C "$upstream" -cf "$stage/SOURCES/device-support-tree.tar" \
 	device/gnome-overlay device/power-key device/charger-mode
-# Keep the locked clone read-only; layer the reviewed v0.6.1 fastcharge files
-# into the source archive as a separately identified Fedora overlay.
+# Keep the Fedora fast-charge units and the reviewed upstream helper as an
+# overlay on the locked device-support source archive.
 tar "${TAR_OPTS[@]}" --transform='s,^upstream-v061,device/fedora-fastcharge,' \
 	-C "$packaging" -rf "$stage/SOURCES/device-support-tree.tar" upstream-v061
 
@@ -233,9 +248,11 @@ write_sums() { # <outfile> <files...>
 }
 write_sums "$stage/SOURCES/source-sha256-firmware.txt" \
 	firmware-tree.tar firmware.manifest NOTICE LICENSE firmware-README.md
-write_sums "$stage/SOURCES/source-sha256-audio.txt" \
-	audioreach-topology.tar liuqin-speakers.m4 build-liuqin-audio-topology.sh \
-	ucm2.tar NOTICE LICENSE audio-topology-README.md
+if [[ ,$only, == *,audio,* ]]; then
+	write_sums "$stage/SOURCES/source-sha256-audio.txt" \
+		audioreach-topology.tar liuqin-speakers.m4 build-liuqin-audio-topology.sh \
+		ucm2.tar 50-quad-upmix.conf NOTICE LICENSE audio-topology-README.md
+fi
 write_sums "$stage/SOURCES/source-sha256-device-support.txt" \
 	device-support-tree.tar relocate-device-support.sh liuqin-power-key-action \
 	liuqin-power-keyd liuqin-reboot elf-check.py \

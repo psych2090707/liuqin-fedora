@@ -1,0 +1,111 @@
+From: liuqin Fedora maintainers <liuqin@localhost>
+Subject: [PATCH] power: supply: serialize notifications and drain GLINK users
+
+Source: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/01a5324ac9cdea422469e4b11243b0b8819aebdc
+7.3.1 already has devm_work_autocancel, registered before the GLINK client.
+Keep managed fallback cleanup, but add a post-client disable action so work
+cannot requeue against the released client. Cover the mainline Type-C
+orientation worker and local pen delayed worker as well as enable_work.
+Initialize pen work before client registration, with its unregister action
+below the client in the devres stack. Keep pen polling, wake filtering,
+existing firmware messages, topology and charge policy unchanged.
+Validation and rollback: tasks/upstream-refresh/RESULT.md.
+
+---
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -2055,7 +2055,7 @@
+ 		break;
+ 	case NOTIF_XM_PROPERTY:
+ 		qcom_battmgr_schedule_cc_orientation(battmgr);
+-		if (battmgr->pen_work_ready)
++		if (READ_ONCE(battmgr->pen_work_ready))
+ 			mod_delayed_work(system_wq, &battmgr->pen_work, 0);
+ 		break;
+ 	default:
+@@ -2531,6 +2531,21 @@
+ 		qcom_battmgr_sm8350_callback(battmgr, data, len);
+ }
+ 
++/* Stop every GLINK consumer before the managed client is released. */
++static void qcom_battmgr_stop_workers(void *data)
++{
++	struct qcom_battmgr *battmgr = data;
++
++	disable_work_sync(&battmgr->enable_work);
++#if IS_ENABLED(CONFIG_TYPEC)
++	disable_work_sync(&battmgr->cc_orientation_work);
++#endif
++	if (battmgr->variant == QCOM_BATTMGR_SM8475) {
++		WRITE_ONCE(battmgr->pen_work_ready, false);
++		disable_delayed_work_sync(&battmgr->pen_work);
++	}
++}
++
+ static void qcom_battmgr_enable_worker(struct work_struct *work)
+ {
+ 	struct qcom_battmgr *battmgr = container_of(work, struct qcom_battmgr, enable_work);
+@@ -2541,7 +2556,9 @@
+ 	};
+ 	int ret;
+ 
++	mutex_lock(&battmgr->lock);
+ 	ret = qcom_battmgr_request(battmgr, &req, sizeof(req));
++	mutex_unlock(&battmgr->lock);
+ 	if (ret)
+ 		dev_err(battmgr->dev, "failed to request power notifications\n");
+ }
+@@ -2554,7 +2571,7 @@
+ 		battmgr->service_up = true;
+ 		schedule_work(&battmgr->enable_work);
+ 		qcom_battmgr_schedule_cc_orientation(battmgr);
+-		if (battmgr->pen_work_ready)
++		if (READ_ONCE(battmgr->pen_work_ready))
+ 			mod_delayed_work(system_wq, &battmgr->pen_work, 0);
+ 	} else {
+ 		battmgr->service_up = false;
+@@ -2876,6 +2893,19 @@
+ 		qcom_battmgr_cc_switch_get(battmgr);
+ #endif
+ 
++	/* Initialize the pen worker before registering any GLINK callbacks. */
++	if (battmgr->variant == QCOM_BATTMGR_SM8475) {
++		ret = devm_add_action_or_reset(dev, qcom_battmgr_pen_unregister, battmgr);
++		if (ret)
++			return ret;
++
++		ret = devm_delayed_work_autocancel(dev, &battmgr->pen_work,
++						   qcom_battmgr_pen_work);
++		if (ret)
++			return ret;
++		battmgr->pen_work_ready = true;
++	}
++
+ 	battmgr->client = devm_pmic_glink_client_alloc(dev, PMIC_GLINK_OWNER_BATTMGR,
+ 						       qcom_battmgr_callback,
+ 						       qcom_battmgr_pdr_notify,
+@@ -2883,18 +2913,14 @@
+ 	if (IS_ERR(battmgr->client))
+ 		return PTR_ERR(battmgr->client);
+ 
++	/* Registered after the client: drains workers first on every unwind. */
++	ret = devm_add_action_or_reset(dev, qcom_battmgr_stop_workers, battmgr);
++	if (ret)
++		return ret;
++
+ 	pmic_glink_client_register(battmgr->client);
+ 
+ 	if (battmgr->variant == QCOM_BATTMGR_SM8475) {
+-		ret = devm_add_action_or_reset(dev, qcom_battmgr_pen_unregister, battmgr);
+-		if (ret)
+-			return ret;
+-
+-		ret = devm_delayed_work_autocancel(dev, &battmgr->pen_work,
+-						   qcom_battmgr_pen_work);
+-		if (ret)
+-			return ret;
+-		battmgr->pen_work_ready = true;
+ 		mod_delayed_work(system_wq, &battmgr->pen_work, 0);
+ 
+ 		ret = devm_device_add_group(dev, &qcom_battmgr_raw_group);

@@ -42,7 +42,7 @@ class ClockSaveTests(unittest.TestCase):
     def save(self, *, synced=True, wall=NOW, boot=BOOT, require_sync=False, samples=None):
         ticks = iter(samples) if samples else None
         return clock_save.save(self.paths, require_sync=require_sync,
-                               sync_check=lambda: synced,
+                               sync_check=lambda: S if synced else None,
                                clock=(lambda: next(ticks)) if ticks else lambda: (wall, boot))
 
     def anchor(self):
@@ -192,10 +192,11 @@ class ClockSaveTests(unittest.TestCase):
     def test_chrony_check_uses_one_local_readonly_probe(self):
         with patch.object(clock_save.subprocess, 'run') as run:
             run.return_value.returncode = 0
-            self.assertTrue(clock_save.chrony_synced())
+            run.return_value.stdout = '771CB7B8,119.28.183.184,3,1794534308,0.004,-0.001,0.01,54,14,6,0.1,0.02,64,Normal\n'
+            self.assertEqual(clock_save.chrony_margin(), 2*S)
             args, kwargs = run.call_args
-            self.assertEqual(args[0], ['/usr/bin/chronyc', '-u', 'root', '-n', '-h',
-                '/run/chrony/chronyd.sock', 'waitsync', '1', '0.5', '0', '0'])
+            self.assertEqual(args[0], ['/usr/bin/chronyc', '-u', 'root', '-n', '-c', '-h',
+                '/run/chrony/chronyd.sock', 'tracking'])
             self.assertEqual(kwargs['timeout'], 3)
             self.assertNotIn('shell', kwargs)
 
@@ -203,10 +204,41 @@ class ClockSaveTests(unittest.TestCase):
         for error in (FileNotFoundError(), subprocess.TimeoutExpired('chronyc', 3)):
             with self.subTest(error=error), patch.object(
                     clock_save.subprocess, 'run', side_effect=error):
-                self.assertFalse(clock_save.chrony_synced())
+                self.assertIsNone(clock_save.chrony_margin())
         with patch.object(clock_save.subprocess, 'run') as run:
             run.return_value.returncode = 1
-            self.assertFalse(clock_save.chrony_synced())
+            self.assertIsNone(clock_save.chrony_margin())
+
+    def test_slow_network_error_is_subtracted_before_persisting(self):
+        with patch.object(clock_save.subprocess, 'run') as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = '771CB7B8,119.28.183.184,3,1794534308,0.1,0,0,54,0,6,6,0.2,64,Normal\n'
+            margin = clock_save.chrony_margin()
+        self.assertEqual(margin, 5*S)
+        clock_save.save(self.paths, sync_check=lambda: margin, clock=lambda: (NOW, BOOT))
+        self.assertEqual(self.epoch.stat().st_mtime_ns, NOW-5*S)
+
+    def test_uncertainty_unsynchronised_or_bad_tracking_is_not_trusted(self):
+        normal = '771CB7B8,119.28.183.184,3,1794534308,0.1,0,0,54,0,6,6,0.2,64,Normal'
+        cases = [normal.replace(',6,0.2,64,', ',20,0.2,64,'),
+                 normal.replace(',Normal', ',Not synchronised'),
+                 normal.replace(',0.1,0,0,', ',0.6,0,0,'),
+                 normal.replace(',6,0.2,64,', ',nan,0.2,64,'),
+                 normal.replace(',6,0.2,64,', ',-1,0.2,64,'),
+                 normal.replace('771CB7B8', '7F7F0101'),
+                 normal.replace('771CB7B8', '00000000'), 'bad data', normal+'\n'+normal]
+        for text in cases:
+            with self.subTest(text=text), patch.object(clock_save.subprocess, 'run') as run:
+                run.return_value.returncode = 0
+                run.return_value.stdout = text
+                self.assertIsNone(clock_save.chrony_margin())
+
+    def test_larger_safety_margin_does_not_misclassify_existing_floor_as_future(self):
+        self.save()
+        result = clock_save.save(self.paths, sync_check=lambda: 8*S,
+                                 clock=lambda: (NOW+S, BOOT+S))
+        self.assertEqual(result['source'], 'chrony')
+        self.assertEqual(self.epoch.stat().st_mtime_ns, NOW-S)
 
     def test_units_do_not_wake_or_set_clocks_or_change_chrony(self):
         base = ROOT / 'packaging/clock'

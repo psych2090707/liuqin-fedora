@@ -1,0 +1,54 @@
+From: Sam Day <me@samcday.com>
+Subject: [PATCH] drm/msm: allow virtual allocation for submit bookkeeping
+
+Source: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/03b536ad4e2cc8caf9f37e0135e607c373804ab1
+7.3.1 adaptation: retain size_add/array_size overflow saturation and impose
+KMALLOC_MAX_SIZE before kvzalloc; pair every submit free with kvfree.
+Retains copyright and original license.
+Assisted-by: LLM
+Signed-off-by: Sam Day <me@samcday.com>
+Validation and rollback: tasks/upstream-refresh/RESULT.md.
+
+---
+diff --git a/drivers/gpu/drm/msm/msm_gem_submit.c b/drivers/gpu/drm/msm/msm_gem_submit.c
+--- a/drivers/gpu/drm/msm/msm_gem_submit.c
++++ b/drivers/gpu/drm/msm/msm_gem_submit.c
+@@ -42,14 +42,18 @@
+ 	sz = size_add(struct_size(submit, bos, nr_bos),
+ 		      array_size(sizeof(submit->cmd[0]), nr_cmds));
+ 
+-	submit = kzalloc(sz, GFP_KERNEL | __GFP_NOWARN);
++	/* Preserve kmalloc limits while allowing a virtually contiguous fallback. */
++	if (sz > KMALLOC_MAX_SIZE)
++		return ERR_PTR(-ENOMEM);
++
++	submit = kvzalloc(sz, GFP_KERNEL | __GFP_NOWARN);
+ 	if (!submit)
+ 		return ERR_PTR(-ENOMEM);
+ 
+ 	submit->hw_fence = msm_fence_alloc();
+ 	if (IS_ERR(submit->hw_fence)) {
+ 		ret = PTR_ERR(submit->hw_fence);
+-		kfree(submit);
++		kvfree(submit);
+ 		return ERR_PTR(ret);
+ 	}
+ 
+@@ -57,7 +61,7 @@
+ 				 drm_client_id);
+ 	if (ret) {
+ 		kfree(submit->hw_fence);
+-		kfree(submit);
++		kvfree(submit);
+ 		return ERR_PTR(ret);
+ 	}
+ 
+@@ -121,7 +125,7 @@
+ 	for (i = 0; i < submit->nr_cmds; i++)
+ 		kfree(submit->cmd[i].relocs);
+ 
+-	kfree(submit);
++	kvfree(submit);
+ }
+ 
+ static int submit_lookup_objects(struct msm_gem_submit *submit,

@@ -130,6 +130,199 @@
         "drivers/input/touchscreen/nt36523/nt36xxx.c",
         "drivers/input/touchscreen/nt36523/nt36xxx.h"
       ]
+    },
+    {
+      "path": "0016-pmic-glink-sleep-defer.patch",
+      "sha256": "3b894c992070a0e73840988cc4152564c54ee5f52a3a10b71093c73b4c69e498",
+      "source": "RFC 2026-10-22 patch 1/4 (Vladyslav Tymoshchuk); queue non-response PMIC GLINK notifications from ->prepare() to ->complete(); adapted to 7.3.1 + liuqin pdr/early-wake hooks; RFC 2-4 not included.",
+      "files": [
+        "drivers/soc/qcom/pmic_glink.c"
+      ]
+    },
+    {
+      "path": "0017-camcc-park-rcgs.patch",
+      "sha256": "fac90076fde968a06968fbbbc90cdff03bbcc047842d7c3a7effe7c5680555f3",
+      "source": "704930b1a253 (2026-11-08); park camera RCGs on XO so a second session can power up after the PLL/GDSC collapse.",
+      "files": [
+        "drivers/clk/qcom/camcc-sm8450.c"
+      ]
+    },
+    {
+      "path": "0018-camss-csid680-clear-top-irq.patch",
+      "sha256": "c1b303440afa5b9626e88eb2819f24ef53ae516f7f9e66b96b81e02d34a49464",
+      "source": "Local: clear stale CSID TOP IRQ status before reset, matching gen2/gen3; fixes second-session/video -EIO with the board's always-on camera GDSCs.",
+      "files": [
+        "drivers/media/platform/qcom/camss/camss-csid-680.c"
+      ]
+    },
+    {
+      "path": "0019-liuqin-quad-slot-map.patch",
+      "sha256": "314bb741eccc9a8b7400457919107eeb334ff411cf1aadda954af9c69ecb64ba",
+      "source": "Local experiment: expose CS35L41 ASPRX1/2 slot-position mixer controls so UCM can switch between all-amps 0/1 stereo and TL/TR/BL/BR quad layouts; ignore -ENOTSUPP from codec set_tdm_slot(). Not deployed.",
+      "files": [
+        "sound/soc/codecs/cs35l41.c",
+        "sound/soc/qcom/common.c"
+      ]
+    },
+    {
+      "path": "0020-audio-clock-probe-order.patch",
+      "sha256": "10a3528681501def344efaa4fbef49bc5ceef3ade33580513ef0b343b295af37",
+      "source": "https://github.com/yzddmr6/linux-sm8450-liuqin/commit/b8fd29b1f39a0cb0d8e8b23c106f5070a9197c1c; original ordering fix retained.",
+      "files": [
+        "sound/soc/qcom/qdsp6/q6dsp-lpass-clocks.c"
+      ]
+    },
+    {
+      "path": "0021-gpu-submit-kvalloc.patch",
+      "sha256": "683d7d5a32cff52c8059a63c10f470416ab17e4160b4255d4a9644ab53b3e221",
+      "source": "https://github.com/yzddmr6/linux-sm8450-liuqin/commit/03b536ad4e2cc8caf9f37e0135e607c373804ab1; preserve 7.3 size_add/array_size saturation and cap size.",
+      "files": [
+        "drivers/gpu/drm/msm/msm_gem_submit.c"
+      ]
+    },
+    {
+      "path": "0022-gpu-close-terminal.patch",
+      "sha256": "48bc9204fd3048915bdc43e46cc52a0a20867968b96e07d2de6b98eaf5edc949",
+      "source": "https://github.com/yzddmr6/linux-sm8450-liuqin/commit/fdf3c8b8b912022ef6f01538cc5e4c943459c93b; retain DMA safety and VM_BIND path.",
+      "files": [
+        "drivers/gpu/drm/msm/msm_gem.c"
+      ]
+    },
+    {
+      "path": "0023-battmgr-request-lifetime.patch",
+      "sha256": "a394fc9f6d620c7236cc002440d0651f34568a4f679210906d7ceb72e1d36ab2",
+      "source": "https://github.com/yzddmr6/linux-sm8450-liuqin/commit/01a5324ac9cdea422469e4b11243b0b8819aebdc; disable before client release; include local pen and 7.3 orientation work.",
+      "files": [
+        "drivers/power/supply/qcom_battmgr.c"
+      ]
+    },
+    {
+      "path": "0025-pmic-glink-source-ports.patch",
+      "sha256": "cdc0e95f3c54fa008b0d12f08870d1f502613df0403f19d43b532b78684168bc",
+      "source": "v0.7.0 79ad9ad2; retain local suspend deferral and newer UCSI.",
+      "files": [
+        "drivers/soc/qcom/pmic_glink.c",
+        "include/linux/soc/qcom/pmic_glink.h",
+        "drivers/usb/typec/ucsi/ucsi_glink.c"
+      ]
+    },
+    {
+      "path": "0026-liuqin-connector-temperature.patch",
+      "sha256": "08a89bdd4a57a7caa2742ad4eba6682a9dba08f559233c2033831704a3f0c7be",
+      "source": "v0.7.0 8511ab11, 79ad9ad2, ac3d75c0 and final ADC fixes; real-only sampling, all local pen/orientation/lifetime paths retained.",
+      "files": [
+        "drivers/power/supply/qcom_battmgr.c",
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts"
+      ]
+    },
+    {
+      "path": "0027-pmic-glink-deferred-power-edges.patch",
+      "sha256": "e9325bdc6075ca37a2acc7013c3c6338eb1cf70ab5a6d01313ea3ed2219e1ab1",
+      "source": "Local bridge for upstream 44c72b96 + sleep-deferral RFC; early callback only queues online queries.",
+      "files": [
+        "include/linux/soc/qcom/pmic_glink.h",
+        "drivers/soc/qcom/pmic_glink.c",
+        "drivers/power/supply/qcom_battmgr.c"
+      ]
+    },
+    {
+      "path": "0028-pmic-glink-late-rpmsg-registration.patch",
+      "sha256": "638a96e755a2b27b858820b4552c1eeacf7693934f0dcc6f10d708658b3b30fc",
+      "source": "Linaro arm64-laptops 46a6b15977c0 and radxa-kernel 627df3982991 workaround; register the rpmsg driver after a successful pmic_glink platform probe because rpmsg_dev_probe tears the endpoint down on -ENODEV.",
+      "files": [
+        "drivers/soc/qcom/pmic_glink.c"
+      ],
+      "status": "local race workaround; drop once rpmsg core retries deferred probes"
+    },
+    {
+      "path": "0029-nt36523-scanout-calibration.patch",
+      "sha256": "514e0e89a4921d4ce5b11632798d7dddad2b2a07fc848e0c432fee09c7f391ba",
+      "source": "cb82c745e46ddc2ebd110144037289a85df69545",
+      "files": [
+        "include/drm/drm_panel.h",
+        "drivers/gpu/drm/bridge/panel.c",
+        "drivers/input/touchscreen/nt36523/nt36xxx.c"
+      ],
+      "status": "7.3.1 already has the follower callbacks; add active_crtc plumbing, bridge assignment and nt36523 lifecycle changes.",
+      "group": "touch-first-frame"
+    },
+    {
+      "path": "0030-fastrpc-freezable-waiters.patch",
+      "sha256": "4e5b98ee3c3fc4ae77ef84bddc9aabc15819e162fe2272bf89c0716388c03e48",
+      "source": "9c741c403a4b07357d4ad2848fa0b1bc2f99927a",
+      "files": [
+        "drivers/misc/fastrpc.c"
+      ],
+      "status": "Freezable completion wait inside the local fastrpc_wait_for_completion() helper.",
+      "group": "sensor-lifecycle"
+    },
+    {
+      "path": "0031-dpu-restore-core-clk-vote.patch",
+      "sha256": "1cc71a1b5909451613fc797cc6932ddfcb2dfd6334358d7f4a46fae9f7fbaba5",
+      "source": "3a56ea9421bb21d00a3247ed12b74c2f1fd74b10; liuqin 8ec7416f90",
+      "files": [
+        "drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c"
+      ],
+      "status": "Restore the core clock OPP vote before enabling clocks on DPU resume; companion 8c24799522 is not needed on 7.3.1.",
+      "group": "display-power"
+    },
+    {
+      "path": "0032-gpu-cx-corner.patch",
+      "sha256": "7e90e086da8fcaae71880bd89f1bec80a2cac67ab1abade010f2e1a4a1670050",
+      "source": "d54edba9153c829741bfd82b25aecdf5cdff96c5",
+      "files": [
+        "Documentation/devicetree/bindings/opp/opp-v2-qcom-adreno.yaml",
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts",
+        "drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+        "drivers/gpu/drm/msm/adreno/a6xx_gmu.h",
+        "drivers/gpu/drm/msm/adreno/a6xx_hfi.c"
+      ],
+      "status": "Keep the twelve existing GPU OPPs; add qcom,opp-cx-level and the GMU CX dependency votes.",
+      "group": "gpu-power"
+    },
+    {
+      "path": "0033-board-operating-votes.patch",
+      "sha256": "5245d6db1a9cdf0e029d1e307d14c0ead64d686714ecbf007333a984e60df6cd",
+      "source": "40d6ee58b96ec499b1c3f1eea3e88d26141063a1",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts",
+        "drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c",
+        "drivers/i2c/busses/i2c-qcom-geni.c"
+      ],
+      "status": "i2c15/17, mdss_mdp and mdp_opp_table dual-rail votes; dpu_kms and i2c-geni attach required OPP domains.",
+      "group": "board-power"
+    },
+    {
+      "path": "0034-cpu-llcc-bwmon.patch",
+      "sha256": "6c7f4f8c541f21a1ed1c7f8e6b2660ea2b90dade2db50bf174737189bce861e5",
+      "source": "309060c799a73da6b090ef1084dc8c41357e46a0",
+      "files": [
+        "Documentation/devicetree/bindings/interconnect/qcom,msm8998-bwmon.yaml",
+        "arch/arm64/boot/dts/qcom/sm8475.dtsi"
+      ],
+      "status": "Add the missing llcc compatible; both Cape BWMON nodes. 7.3.1 already lists the CPU compatible.",
+      "group": "bandwidth"
+    },
+    {
+      "path": "0035-cpu-capacities-power.patch",
+      "sha256": "f79d8f7a5cab02dbf6ede234ffc8b4874d037334d66129cb70fbeaf6e8ebd4c6",
+      "source": "1cd8848c87",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8475.dtsi"
+      ],
+      "status": "CPU capacity and dynamic power coefficients only.",
+      "group": "scheduler-power"
+    }
+  ],
+  "optional_patches": [
+    {
+      "path": "0024-liuqin-disable-unused-qce.patch",
+      "sha256": "20219b9e33d43b993f413d09e8344db3de3a3c072ffa49d2cca0090864173d1f",
+      "source": "https://github.com/yzddmr6/linux-sm8450-liuqin/commit/f18bbcc84540750d948b17776687fe2e491b81a1; keep 7.3 BROKEN gate, disable unbound consumer; isolate DT-only hardware test.",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts"
+      ],
+      "status": "optional; DT-only RAM comparison passed, no awake ICC vote reduction"
     }
   ]
 }

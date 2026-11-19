@@ -41,7 +41,7 @@ python3 liuqin-install.py install --bundle prepared --layout linux-only \
 这个解包目录应包含 `liuqin-install.py`、`install.py`、`prepare-image.py`、`liuqin_layout.py`、`liuqin-rom-images.json`、`install-liuqin.ps1` 和 `install-liuqin.cmd`。缺少任何一个时应重新下载 Release，不要从别处补文件。
 
 
-本次 alpha.2 还需要从 liuqin 原厂 HyperOS OS2.0.6.0.VMYCNXM 的 vendor 分区提取五份扬声器调音文件，放进 `stock-audio/`。文件名与摘要见 [STOCK-AUDIO.md](STOCK-AUDIO.md)；缺少时安装入口停止，不会静默使用错误的笔记本调音。此要求不改变 alpha.1 的旧包。
+本版需要从 liuqin 原厂 HyperOS OS2.0.6.0.VMYCNXM 的 vendor 分区提取五份扬声器调音文件，放进 `stock-audio/`。文件名与摘要见 [STOCK-AUDIO.md](STOCK-AUDIO.md)。缺少这些文件时安装入口会停止。
 
 `prepare` 会让你为平板用户 **`user`** 设置密码。`prepared/` 含本机固件和密码散列，只留作自用，不要上传。
 

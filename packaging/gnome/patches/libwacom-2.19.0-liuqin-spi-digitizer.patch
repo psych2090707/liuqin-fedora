@@ -1,0 +1,172 @@
+Subject: [PATCH] Recognize the Xiaomi Pad 6 Pro SPI digitizer
+
+diff --git a/data/xiaomi-pad-6-pro.tablet b/data/xiaomi-pad-6-pro.tablet
+new file mode 100644
+index 0000000..e70febb
+--- /dev/null
++++ b/data/xiaomi-pad-6-pro.tablet
+@@ -0,0 +1,13 @@
++# Novatek NT36532 integrated digitizer (liuqin, native panel axes).
++# SPI devices have no USB-style identifiers. Match the kernel name as well.
++
++[Device]
++Name=Xiaomi Pad 6 Pro
++DeviceMatch=spi|0000|0000|NVTCapacitivePen
++Width=148
++Height=237
++IntegratedIn=Display;System
++
++[Features]
++Stylus=true
++Touch=false
+diff --git a/libwacom/libwacom-database.c b/libwacom/libwacom-database.c
+index 439601a..64a382f 100644
+--- a/libwacom/libwacom-database.c
++++ b/libwacom/libwacom-database.c
+@@ -175,6 +175,8 @@ bus_from_str(const char *str)
+ 		return WBUSTYPE_BLUETOOTH;
+ 	if (g_str_equal(str, "i2c"))
+ 		return WBUSTYPE_I2C;
++	if (g_str_equal(str, "spi"))
++		return WBUSTYPE_SPI;
+ 	return WBUSTYPE_UNKNOWN;
+ }
+ 
+@@ -193,6 +195,8 @@ bus_to_str(WacomBusType bus)
+ 		return "bluetooth";
+ 	case WBUSTYPE_I2C:
+ 		return "i2c";
++	case WBUSTYPE_SPI:
++		return "spi";
+ 	}
+ 	g_assert_not_reached();
+ }
+diff --git a/libwacom/libwacom.c b/libwacom/libwacom.c
+index 3655713..691dd59 100644
+--- a/libwacom/libwacom.c
++++ b/libwacom/libwacom.c
+@@ -165,6 +165,10 @@ get_bus_vid_pid(GUdevDevice *device,
+ 		*bus = WBUSTYPE_I2C;
+ 		retval = TRUE;
+ 		break;
++	case BUS_SPI:
++		*bus = WBUSTYPE_SPI;
++		retval = TRUE;
++		break;
+ 	}
+ 
+ out:
+@@ -761,6 +765,7 @@ libwacom_new_from_builder(const WacomDeviceDatabase *db,
+ 			WBUSTYPE_USB,
+ 			WBUSTYPE_I2C,
+ 			WBUSTYPE_BLUETOOTH,
++			WBUSTYPE_SPI,
+ 			WBUSTYPE_UNKNOWN,
+ 		};
+ 		WacomBusType fixed_bus[] = {
+@@ -1144,6 +1149,9 @@ print_match(int fd,
+ 	case WBUSTYPE_I2C:
+ 		bus_name = "i2c";
+ 		break;
++	case WBUSTYPE_SPI:
++		bus_name = "spi";
++		break;
+ 	case WBUSTYPE_UNKNOWN:
+ 		bus_name = "unknown";
+ 		break;
+diff --git a/libwacom/libwacom.h b/libwacom/libwacom.h
+index 06777da..252688a 100644
+--- a/libwacom/libwacom.h
++++ b/libwacom/libwacom.h
+@@ -153,6 +153,7 @@ typedef enum {
+ 	WBUSTYPE_SERIAL,    /**< Serial tablet */
+ 	WBUSTYPE_BLUETOOTH, /**< Bluetooth tablet */
+ 	WBUSTYPE_I2C,       /**< I2C tablet */
++	WBUSTYPE_SPI,       /**< SPI tablet */
+ } WacomBusType;
+ 
+ /**
+diff --git a/test/__init__.py b/test/__init__.py
+index 7ddf197..52d797f 100644
+--- a/test/__init__.py
++++ b/test/__init__.py
+@@ -342,6 +342,7 @@ class LibWacom:
+         _Enum(name="WBUSTYPE_SERIAL", value=2),
+         _Enum(name="WBUSTYPE_BLUETOOTH", value=3),
+         _Enum(name="WBUSTYPE_I2C", value=4),
++        _Enum(name="WBUSTYPE_SPI", value=5),
+         _Enum(name="WACOM_DEVICE_INTEGRATED_NONE", value=0),
+         _Enum(name="WACOM_DEVICE_INTEGRATED_DISPLAY", value=1),
+         _Enum(name="WACOM_DEVICE_INTEGRATED_SYSTEM", value=2),
+diff --git a/test/test_libwacom.py b/test/test_libwacom.py
+index 37171c8..f9de8e5 100644
+--- a/test/test_libwacom.py
++++ b/test/test_libwacom.py
+@@ -608,6 +608,7 @@ def test_new_from_path_unknown_device(db, fallback, bustype):
+         WacomBustype.USB: 0x3,
+         WacomBustype.BLUETOOTH: 0x5,
+         WacomBustype.I2C: 0x18,
++        WacomBustype.SPI: 0x1C,
+     }[bustype]
+ 
+     name = "Unknown device"
+diff --git a/tools/debug-device.c b/tools/debug-device.c
+index 9497d3c..bf34a73 100644
+--- a/tools/debug-device.c
++++ b/tools/debug-device.c
+@@ -117,6 +117,8 @@ device_from_device_match(WacomDeviceDatabase *db,
+ 		bustype = WBUSTYPE_BLUETOOTH;
+ 	else if (g_str_equal(parts[0], "i2c"))
+ 		bustype = WBUSTYPE_I2C;
++	else if (g_str_equal(parts[0], "spi"))
++		bustype = WBUSTYPE_SPI;
+ 	else {
+ 		fprintf(stderr, "Unknown bus type %s\n", parts[0]);
+ 		return NULL;
+@@ -189,6 +191,9 @@ handle_device(WacomDeviceDatabase *db,
+ 		case WBUSTYPE_I2C:
+ 			busstr = "I2C";
+ 			break;
++		case WBUSTYPE_SPI:
++			busstr = "SPI";
++			break;
+ 		}
+ 		func(libwacom_get_bustype, "%s", busstr);
+ 	}
+diff --git a/tools/list-devices.c b/tools/list-devices.c
+index aeee4d5..36f4f61 100644
+--- a/tools/list-devices.c
++++ b/tools/list-devices.c
+@@ -80,6 +80,9 @@ print_device_info(WacomDevice *device,
+ 			case WBUSTYPE_I2C:
+ 				bus = "i2c";
+ 				break;
++			case WBUSTYPE_SPI:
++				bus = "spi";
++				break;
+ 			default:
+ 				break;
+ 			}
+@@ -164,6 +167,8 @@ main(int argc,
+ 
+ 	for (p = list; *p; p++)
+ 		print_device_info((WacomDevice *)*p, WBUSTYPE_SERIAL, output_format);
++	for (p = list; *p; p++)
++		print_device_info((WacomDevice *)*p, WBUSTYPE_SPI, output_format);
+ 
+ 	for (p = list; *p; p++)
+ 		print_device_info((WacomDevice *)*p, WBUSTYPE_UNKNOWN, output_format);
+diff --git a/tools/list-local-devices.c b/tools/list-local-devices.c
+index 154c3a9..084678b 100644
+--- a/tools/list-local-devices.c
++++ b/tools/list-local-devices.c
+@@ -141,6 +141,9 @@ tablet_print_yaml(gpointer data,
+ 	case WBUSTYPE_I2C:
+ 		bus = "i2c";
+ 		break;
++	case WBUSTYPE_SPI:
++		bus = "spi";
++		break;
+ 	default:
+ 		break;
+ 	}

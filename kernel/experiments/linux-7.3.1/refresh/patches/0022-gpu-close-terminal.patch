@@ -1,0 +1,72 @@
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Subject: [PATCH] drm/msm: let legacy GEM close exit after terminal GPU failure
+
+Source: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/fdf3c8b8b912022ef6f01538cc5e4c943459c93b
+Applies after liuqin 7.3.1 refresh/0019; upstream logic retained.
+Validation and rollback: tasks/upstream-refresh/RESULT.md.
+
+msm_gem_close waits uninterruptibly for BOOKKEEP fences with no deadline.
+When failed recovery cannot confirm that DMA has stopped, its fences
+must remain pending for memory safety. Closing a handle or exiting the
+client then blocks forever, even with SIGKILL pending.
+
+Wait interruptibly and recheck the terminal GPU state once per second.
+On termination or a signal, retain the mapping for final GEM object
+cleanup rather than releasing memory that hardware may still access.
+Pending submits retain the BO, vm_bo and context references. This does
+not impose a deadline on DMA, pretend that a fence completed, or signal
+any fence belonging to another producer. Normal completed work retains
+the existing immediate mapping teardown.
+
+This extends the safe-quiescence policy of 018982b5e1ac from
+linux-sm8450-liuqin. The legacy close path is shared by Xiaomi Pad 8 Pro,
+OnePlus Pad 2 Pro and Xiaomi Pad 6 Pro. VM_BIND uses a different teardown
+path and is not changed by this patch.
+
+Fixes: cefb919cfa53 ("drm/msm: Use DMA_RESV_USAGE_BOOKKEEP/KERNEL")
+Link: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/018982b5e1ac830617c6aed9cacb6cc68f4eae1a
+Co-Authored-By: gpt-6-astra <noreply@openai.com>
+
+---
+diff --git a/drivers/gpu/drm/msm/msm_gem.c b/drivers/gpu/drm/msm/msm_gem.c
+--- a/drivers/gpu/drm/msm/msm_gem.c
++++ b/drivers/gpu/drm/msm/msm_gem.c
+@@ -49,8 +49,10 @@ static void put_iova_spaces(struct drm_gem_object *obj, struct drm_gpuvm *vm,
+ 
+ static void msm_gem_close(struct drm_gem_object *obj, struct drm_file *file)
+ {
++	struct msm_drm_private *priv = obj->dev->dev_private;
+ 	struct msm_context *ctx = file->driver_priv;
+ 	struct drm_exec exec;
++	long ret;
+ 
+ 	update_ctx_mem(file, -obj->size);
+ 	msm_gem_vma_put(obj);
+@@ -72,11 +74,23 @@ static void msm_gem_close(struct drm_gem_object *obj, struct drm_file *file)
+ 		return;
+ 
+ 	/*
+-	 * TODO we might need to kick this to a queue to avoid blocking
+-	 * in CLOSE ioctl
++	 * Recovery may be unable to stop DMA. In that case it must retain
++	 * pending fences and BO references, but close must still let the
++	 * process exit. Leave the mappings to msm_gem_free_object() instead
++	 * of unmapping memory that the GPU might still access. The same is
++	 * safe if a signal interrupts the wait: submits hold the BO and VM.
++	 *
++	 * Recheck the terminal state once a second; this is not a deadline
++	 * for releasing buffers or for completing externally owned fences.
+ 	 */
+-	dma_resv_wait_timeout(obj->resv, DMA_RESV_USAGE_BOOKKEEP, false,
+-			      MAX_SCHEDULE_TIMEOUT);
++	while (!dma_resv_test_signaled(obj->resv, DMA_RESV_USAGE_BOOKKEEP)) {
++		if (READ_ONCE(priv->gpu->wedged))
++			return;
++		ret = dma_resv_wait_timeout(obj->resv, DMA_RESV_USAGE_BOOKKEEP,
++					    true, HZ);
++		if (ret < 0)
++			return;
++	}
+ 
+ 	msm_gem_lock_vm_and_obj(&exec, obj, ctx->vm);
+ 	put_iova_spaces(obj, ctx->vm, true, "close");

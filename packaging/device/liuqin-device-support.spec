@@ -23,7 +23,7 @@
 
 Name:           liuqin-device-support
 Version:        0.6.0
-Release:        3%{?dist}
+Release:        5%{?dist}
 Summary:        Xiaomi Pad 6 Pro (liuqin) system services and helpers
 License:        MIT AND GPL-2.0-only
 URL:            https://github.com/yzddmr6/xiaomipad-6pro-mainline

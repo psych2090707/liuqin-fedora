@@ -1,0 +1,17 @@
+Subject: [PATCH] arm64: dts: qcom: carry forward the guarded liuqin SLPI node
+
+Carry forward the device-tree change from the tested 2026-11-17 boot.
+Boot arguments must keep qcom_q6v5_pas.slpi_auto_boot=0. The persistent
+firmware hash guard and matching old firmware are separate prerequisites.
+---
+--- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
++++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+@@ -1477,7 +1477,7 @@
+ 
+ &remoteproc_slpi {
+ 	firmware-name = "qcom/sm8475/liuqin/slpi.mbn";
+-	status = "disabled";
++	status = "okay";
+ };
+ 
+ /*

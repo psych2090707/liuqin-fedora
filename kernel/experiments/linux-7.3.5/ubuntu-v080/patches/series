@@ -1,0 +1,6 @@
+0001-dispcc-preserve-mdp-clock.patch
+0002-pll-preserve-boot-clock.patch
+0003-m81-refresh-fuel-gauge.patch
+0004-m81-charger-properties-and-events.patch
+0005-sm8475-battery-units.patch
+0006-sm8475-qc-usb-type.patch

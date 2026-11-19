@@ -30,6 +30,7 @@ import * as IBusManager from 'resource:///org/gnome/shell/misc/ibusManager.js';
 import * as KeyboardUI from 'resource:///org/gnome/shell/ui/keyboard.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {INPUT_SOURCE_TYPE_IBUS} from 'resource:///org/gnome/shell/ui/status/keyboard.js';
 import {shouldAllowOpen} from './popup-policy.js';
 import {sendShortcut} from './shortcuts.js';
 
@@ -167,23 +168,35 @@ export default class LiuqinOskLayoutExtension extends Extension {
                     let deleting = false;
                     button.connect('released', () => {
                         if (deleting) {
-                            this._keyboardController.toggleDelete(false);
+                            extension._stopDelete(this);
                             deleting = false;
                             this._updateLevelFromHints(true);
                         } else if (this._modifiers.size > 0)
                             extension._sendRaw(this, Clutter.KEY_BackSpace);
                         else {
-                            this._keyboardController.toggleDelete(true);
-                            this._keyboardController.toggleDelete(false);
+                            extension._startDelete(this);
+                            extension._stopDelete(this);
                             this._updateLevelFromHints(true);
                         }
                     });
                     button.connect('long-press', () => {
                         if (this._modifiers.size === 0) {
                             deleting = true;
-                            this._keyboardController.toggleDelete(true);
+                            extension._startDelete(this);
                         }
                     });
+                    button.keyButton.connect('notify::pressed', keyButton => {
+                        if (keyButton.pressed)
+                            deleting = false;
+                    });
+                    const gesture = button.keyButton.get_actions().find(
+                        action => action instanceof Clutter.LongPressGesture);
+                    const endDelete = () => {
+                        if (deleting)
+                            extension._stopDelete(this);
+                    };
+                    gesture?.connect('end', endDelete);
+                    gesture?.connect('cancel', endDelete);
                 }
                 if (key.liuqinShift) {
                     const label = new St.Widget({layout_manager: new Clutter.BinLayout(),
@@ -203,6 +216,7 @@ export default class LiuqinOskLayoutExtension extends Extension {
             });
         });
         patch('_setActiveLevel', original => function (level) {
+            extension._stopDelete(this);
             const preserve = this._currentPage?._liuqinLayout && this._layers[level]?._liuqinLayout;
             const modifiers = preserve ? [...this._modifiers] : [];
             original.call(this, level);
@@ -242,12 +256,35 @@ export default class LiuqinOskLayoutExtension extends Extension {
             }
         });
         patch('close', original => function (...args) {
+            extension._stopDelete(this);
             if (this._liuqinLevel) {
                 this._disableAllModifiers();
                 this._keyboardController.toggleDelete(false);
             }
             return original.apply(this, args);
         });
+    }
+
+    _startDelete(actor) {
+        if (actor._liuqinStopDelete)
+            return;
+
+        const controller = actor._keyboardController;
+        // libpinyin compatibility mode puts composition in the IBus panel.
+        // GNOME's delete_surrounding path only sees client preedit.
+        if (controller._currentSource?.type === INPUT_SOURCE_TYPE_IBUS) {
+            controller.keyvalPress(Clutter.KEY_BackSpace);
+            actor._liuqinStopDelete = () => controller.keyvalRelease(Clutter.KEY_BackSpace);
+        } else {
+            controller.toggleDelete(true);
+            actor._liuqinStopDelete = () => controller.toggleDelete(false);
+        }
+    }
+
+    _stopDelete(actor) {
+        const stop = actor._liuqinStopDelete;
+        delete actor._liuqinStopDelete;
+        stop?.();
     }
 
     _takeModifiers(actor) {
@@ -354,6 +391,7 @@ export default class LiuqinOskLayoutExtension extends Extension {
     }
 
     _restoreActors(actor) {
+        this._stopDelete(actor);
         const record = this._actors.get(actor);
         if (!record)
             return;

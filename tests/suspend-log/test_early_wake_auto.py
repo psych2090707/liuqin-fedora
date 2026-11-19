@@ -234,6 +234,7 @@ class CollectorIntegrationTests(unittest.TestCase):
                 (event / "early-wake").mkdir(parents=True)
                 (event / "early-wake/events.jsonl").write_text("sealed")
                 (event / "report.json").write_text(json.dumps({"post": {"collected_realtime_ns": i+1}}))
+                collector.sequence_event(state, event)
             collector.prune(state, 30)
             self.assertEqual(len(list((state / "events").iterdir())), 30)
             self.assertEqual(len(list((state / "events").glob("*/early-wake/events.jsonl"))), 30)

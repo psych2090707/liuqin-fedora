@@ -6,6 +6,7 @@
 |---|---|
 | `config/` | Fedora/ZRAM 配置片段和审计输入 |
 | [experiments/linux-7.3.1](experiments/linux-7.3.1/README.md) | 当前发布的 7.3.1 适配：补丁、配置与离线构建脚本 |
+| [experiments/linux-7.3.5](experiments/linux-7.3.5/README.md) | 7.3.5 稳定版与 Ubuntu v0.8.0 移植候选 |
 | [project-patches](project-patches/README.md) | 默认构建自动应用的显示、蓝牙、rpmh 修复 |
 | [device-extras](device-extras/README.md) | 额外的诊断/USB/音频输入；不自动加入默认构建 |
 | [patches](patches/README.md) | 从锁定上游导出的队列，不手改 |

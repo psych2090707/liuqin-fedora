@@ -2,6 +2,10 @@
 
 本页记录源码、设备端接口和维护要点。安装/关闭步骤由使用者按目标系统自行确认。
 
+**v3（2026-11-13）改用持久事件序号轮转，日期回退不再决定删除顺序。** 旧的无序号记录
+默认保留且顺序标作未知；不能凭文件名重猜先后。现机部署、备份与验证见
+时钟与日志保护结果。
+
 **v2（2026-10-29）已修正 v1 观测缺陷，19 项离线测试通过，并已在维护设备上完成
 部署与读回验证（四个文件哈希一致、记录服务显式重启、单条通知即时落盘、事件快照到位）。**
 v1 的问题：Notify 最后一条要等下一条才落盘、只覆盖 FDO；IRQ 只看 post wake 名单；
@@ -30,6 +34,8 @@ sudo liuqin-suspend-log screen-latest  # panel on/off 与挂起区间、通知�
 sudo liuqin-suspend-log list           # 事件 id + 总窗口/驻留估计/运行窗口
 sudo liuqin-suspend-log show <id>      # 指定事件
 sudo liuqin-suspend-log prune          # 只保留 --keep（默认 30）
+sudo liuqin-suspend-log pin <id> --reason '重要故障，等待导出复核'
+sudo liuqin-suspend-log protect-existing --reason '保留当前证据'
 ```
 
 状态目录默认 `/var/lib/liuqin-suspend-log`（0700）。测试或自测可用：
@@ -39,7 +45,22 @@ LIUQIN_SUSPEND_LOG_STATE=/tmp/liuqin-suspend-log-selftest \
   tools/suspend-log/liuqin-suspend-log pre suspend
 ```
 
-## v2 行为
+## 保留规则（v3）
+
+- `event-sequence.json` 与每个事件的 `sequence.json` 决定顺序；先持久化计数器再分配事件，
+  中断可以留下缺号，不能回退复用。写入、保护和清理命令共用非阻塞文件锁。
+- 普通完整事件保留最近 30 个；无序号、未完成、坏报告、`orphan-pre.json` 或有
+  `protected.json` 的记录不参加自动淘汰。序号重复、计数器丢失/损坏/倒退时暂停删除并报错。
+- 没有 post 的上一次 pre、跨启动配对、明确的挂起失败、early-wake 采集错误自动保护；
+  `pin` 可手动保护其他重要事件，连同目录内的 dmesg、原始快照与 early-wake 一起保留。
+  不宣称程序能自动识别所有重要故障；系统 journal 和应用独立日志不由这个 marker 控制。
+- `--keep 0` 为紧急停止自动淘汰。旧事件无可靠顺序时，`latest` 提示用 `list/show`，
+  不把任意一个旧文件名当作最新；出现首个带序号的完整事件后恢复正常 latest。
+- 状态目录达到 256 MiB、或所在文件系统可用小于 512 MiB 时，停止新一轮采集并报错，
+  不删除受保护记录腾空间。已有 pending 的 post 仍尝试完成保存，故容量上限允许一轮收尾余量。
+  重要记录需先导出并核对备份，再由维护者明确决定清理；没有自动解除保护或上传。
+
+## 采集行为（沿用 v2）
 
 ### liuqin-notify-log（用户服务）
 
@@ -80,7 +101,7 @@ LIUQIN_SUSPEND_LOG_STATE=/tmp/liuqin-suspend-log-selftest \
 
 - 不直接写电源配置/启动分区，只写状态目录；电池 sysfs 读取仍可能向固件发请求，
   所以放在被动快照之后并记录时间窗，不能称为零扰动采样。
-- **明确opt-in例外**：`/etc/liuqin/early-wake-auto=1` + 默认state + ordinary suspend + root 时，collector调用桥接写内核debugfs `arm`，不是电源策略。自测/自定义state永不触碰真实接口；旧sealed未保存时先补救，否则拒绝重新arm。post在主动采集前保存重复读一致的status/events，fsync后写capture manifest和已保存指针；失败不阻止睡眠。各event内的early-wake子目录随最近30轮清理。
+- **明确opt-in例外**：`/etc/liuqin/early-wake-auto=1` + 默认state + ordinary suspend + root 时，collector调用桥接写内核debugfs `arm`，不是电源策略。自测/自定义state永不触碰真实接口；旧sealed未保存时先补救，否则拒绝重新arm。post在主动采集前保存重复读一致的status/events，fsync后写capture manifest和已保存指针；失败不阻止睡眠。各event内的early-wake子目录随本事件保留/保护。
 - `cmdline` 中的 `androidboot.serialno`、`androidboot.cpuid`、`hwid.*`、
   `androidboot.oled_wp`、`msm_drm.oled_wp` 在落盘前替换为 `<redacted>`。
 - 状态目录 root-only；通知/屏幕事件日志为用户 0600；都不自动上传、不提交仓库。

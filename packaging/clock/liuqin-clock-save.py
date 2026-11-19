@@ -7,9 +7,11 @@ bounded holdover on shutdown without trusting a manually changed wall clock.
 Paths cannot be changed through CLI/environment; tests inject private fixtures.
 """
 import argparse
+import csv
 from dataclasses import dataclass
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import stat
@@ -20,6 +22,7 @@ import time
 SECOND = 1_000_000_000
 MIN_EPOCH = 1_577_836_800 * SECOND  # 2020-01-01, sanity only, not a clock source.
 MAX_HOLDOVER = 7 * 24 * 3600 * SECOND
+MAX_SAVE_UNCERTAINTY = 8.0  # seconds; slow links may be coarse, never unbounded.
 OWNER = 0
 GROUP = 0
 
@@ -52,19 +55,42 @@ def sample():
     return time.time_ns(), time.clock_gettime_ns(time.CLOCK_BOOTTIME)
 
 
-def chrony_synced():
-    # Explicit Unix socket: no DNS, UDP fallback, NTP traffic, or chrony changes.
+def chrony_margin():
+    """Return a conservative time-floor margin, or None without bounded sync.
+
+    chrony documents |system offset| + root dispersion + root delay/2 as the
+    clock error bound. Saving wall minus this bound and an extra second keeps
+    slow asymmetric responses from being persisted as an overly future floor.
+    This is one local read-only query, not a request for new NTP packets.
+    """
     try:
         result = subprocess.run(
-            ['/usr/bin/chronyc', '-u', 'root', '-n', '-h', '/run/chrony/chronyd.sock',
-             'waitsync', '1', '0.5', '0', '0'],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            ['/usr/bin/chronyc', '-u', 'root', '-n', '-c', '-h', '/run/chrony/chronyd.sock',
+             'tracking'],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True,
             stderr=subprocess.DEVNULL, timeout=3, check=False,
             env={'LC_ALL': 'C', 'PATH': '/usr/sbin:/usr/bin'},
         )
-        return result.returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+        if result.returncode != 0 or len(result.stdout) > 4096:
+            return None
+        rows = list(csv.reader(result.stdout.splitlines()))
+        if len(rows) != 1 or len(rows[0]) != 14:
+            return None
+        row = rows[0]
+        if (not 0 < int(row[0], 16) < 2**32 or int(row[0], 16) == 0x7f7f0101
+                or not 1 <= int(row[2]) <= 15
+                or row[13] not in ('Normal', 'Insert second', 'Delete second')):
+            return None
+        correction, delay, dispersion = (float(row[i]) for i in (4, 10, 11))
+        if (not all(math.isfinite(x) for x in (correction, delay, dispersion))
+                or abs(correction) > 0.5 or delay < 0 or dispersion < 0):
+            return None
+        error = abs(correction) + dispersion + delay / 2
+        if error > MAX_SAVE_UNCERTAINTY:
+            return None
+        return (math.ceil(error) + 1) * SECOND
+    except (OSError, ValueError, csv.Error, subprocess.TimeoutExpired):
+        return None
 
 
 def load_anchor(path):
@@ -102,7 +128,7 @@ def store_anchor(path, anchor):
             os.unlink(name)
 
 
-def save(paths=Paths(), *, require_sync=False, sync_check=chrony_synced, clock=sample):
+def save(paths=Paths(), *, require_sync=False, sync_check=chrony_margin, clock=sample):
     check_stat(paths.runtime.lstat(), directory=True)
     lock_fd = open_safe(paths.runtime / 'lock', os.O_CREAT | os.O_RDWR)
     try:
@@ -110,16 +136,15 @@ def save(paths=Paths(), *, require_sync=False, sync_check=chrony_synced, clock=s
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         boot_id = paths.boot_id.read_text().strip()
         wall_before, boot_before = clock()
-        synced = sync_check()
+        margin = sync_check()
         wall, boot = clock()
         stable = abs((wall - wall_before) - (boot - boot_before)) <= SECOND
         anchor_path = paths.runtime / 'anchor.json'
         anchor = None
-        if synced and stable and wall >= MIN_EPOCH:
-            # waitsync requires <=0.5 s remaining correction; subtract 1 s.
-            candidate = wall - SECOND
+        if type(margin) is int and margin > 0 and stable and wall >= MIN_EPOCH:
+            candidate = wall - margin
             anchor = {'version': 1, 'boot_id': boot_id,
-                      'epoch_ns': candidate, 'boottime_ns': boot}
+                      'epoch_ns': candidate, 'boottime_ns': boot, 'margin_ns': margin}
             source = 'chrony'
         else:
             if require_sync:
@@ -138,7 +163,8 @@ def save(paths=Paths(), *, require_sync=False, sync_check=chrony_synced, clock=s
             info = os.fstat(fd)
             if info.st_size != 0:
                 raise ValueError('clock-epoch is not empty; refusing an unknown file')
-            if info.st_mtime_ns > candidate + 5 * SECOND:
+            trusted_ceiling = wall if source == 'chrony' else candidate
+            if info.st_mtime_ns > trusted_ceiling + 5 * SECOND:
                 raise ValueError('clock-epoch is ahead of trusted time; manual review required')
             target = max(candidate, info.st_mtime_ns)
             os.utime(fd, ns=(info.st_atime_ns, target))
@@ -149,7 +175,10 @@ def save(paths=Paths(), *, require_sync=False, sync_check=chrony_synced, clock=s
             os.close(fd)
         if anchor is not None:
             store_anchor(anchor_path, anchor)
-        return {'status': 'saved', 'source': source, 'epoch_ns': target}
+        result = {'status': 'saved', 'source': source, 'epoch_ns': target}
+        if source == 'chrony':
+            result['margin_ns'] = margin
+        return result
     finally:
         os.close(lock_fd)
 

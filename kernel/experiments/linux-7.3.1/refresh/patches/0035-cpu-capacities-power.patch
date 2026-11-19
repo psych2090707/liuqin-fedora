@@ -1,0 +1,60 @@
+From: liuqin Fedora maintainers <liuqin@localhost>
+Subject: [PATCH] arm64: dts: qcom: sm8475: describe asymmetric CPU capacities and power
+
+Source: liuqin v0.7.0 1cd8848c87 (5.18 vendor values from the stock DT)
+Rationale: the four little, three big and one prime core differ in
+capacity and dynamic power. Without these properties EAS and the thermal
+governor treat them as equal and can place work on the wrong cluster.
+No clocks, regulators or OPPs change.
+Validation and rollback: tasks/upstream-refresh/RESULT.md.
+
+---
+--- a/arch/arm64/boot/dts/qcom/sm8475.dtsi
++++ b/arch/arm64/boot/dts/qcom/sm8475.dtsi
+@@ -131,6 +131,46 @@
+ 	compatible = "qcom,sm8475-camcc";
+ };
+ 
++&cpu0 {
++	capacity-dmips-mhz = <1024>;
++	dynamic-power-coefficient = <100>;
++};
++
++&cpu1 {
++	capacity-dmips-mhz = <1024>;
++	dynamic-power-coefficient = <100>;
++};
++
++&cpu2 {
++	capacity-dmips-mhz = <1024>;
++	dynamic-power-coefficient = <100>;
++};
++
++&cpu3 {
++	capacity-dmips-mhz = <1024>;
++	dynamic-power-coefficient = <100>;
++};
++
++&cpu4 {
++	capacity-dmips-mhz = <2253>;
++	dynamic-power-coefficient = <257>;
++};
++
++&cpu5 {
++	capacity-dmips-mhz = <2253>;
++	dynamic-power-coefficient = <257>;
++};
++
++&cpu6 {
++	capacity-dmips-mhz = <2253>;
++	dynamic-power-coefficient = <257>;
++};
++
++&cpu7 {
++	capacity-dmips-mhz = <2386>;
++	dynamic-power-coefficient = <509>;
++};
++
+ &dispcc {
+ 	compatible = "qcom,sm8475-dispcc";
+ };

@@ -1,0 +1,11 @@
+{
+  "target_version": "7.3.5",
+  "target_url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.5.tar.xz",
+  "target_sha256": "8f293f83d54f0b7b9be56863ebc5e4ea79d73e530b4ae55c572be97ef39f0990",
+  "stable_commit": "988117cc1bb17338c586a4e21ade88b5397eac33",
+  "signature_url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.5.tar.sign",
+  "signature_fingerprint": "647F28654894E3BD457199BE38DBBDC86092693E",
+  "local_baseline_revision": "e278526",
+  "local_baseline_gnu_build_id": "6894e8a60ffeaa5329a75b4ffe5005e1c6eea2c4",
+  "default_build_changed": false
+}

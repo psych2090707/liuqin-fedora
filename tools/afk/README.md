@@ -18,6 +18,7 @@ tools/afk/afk.sh doctor
 | `daily-log/` | 低频只读采样，按其 README 读取/汇总 |
 | `gpu-hang/` | GPU 取证常驻服务，只记录不修复 |
 | `capture-crash.py`、`crash-forensics/` | 跨启动采集与早期归档 |
+| `capture-devcoredump.py`、`crash-forensics/devcoredump.py` | 启动前监听 SLPI devcoredump，流式取回并校验摘要；不自动释放转储 |
 | `build-repo.sh`、`serve-repo.sh` | 必要时离线 RPM 传输；旧默认包表是 KDE 初次部署输入 |
 
 ## 保留但不用于当前日常续接
@@ -29,5 +30,5 @@ tools/afk/afk.sh doctor
 - `tests/device-acceptance.sh`、`tests/chroot-install-check.sh` 检查旧开发覆盖层，不是现机全自动验收。
 - `tests/offline-check.sh` 只离线检查；不得重载宿主 NetworkManager 来“验证配置”。
 
-快照/取证的针对性回归见 `tests/test-snapshot-retention.py`、`tests/test-crash-forensics.py`、`tests/test-daily-log.py`。
+快照/取证的针对性回归见 `tests/test-snapshot-retention.py`、`tests/test-crash-forensics.py`、`tests/test-devcoredump.py`、`tests/test-daily-log.py`。
 文档整理不需要运行覆盖层安装、chroot、整机模拟或硬件测试。

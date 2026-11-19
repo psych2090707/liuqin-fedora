@@ -13,7 +13,10 @@ extract_to = Path(sys.argv[2]) if len(sys.argv) > 2 else None
 
 
 def run(*args):
-    p = subprocess.run(args, text=True, capture_output=True, check=True)
+    p = subprocess.run(args, text=True, capture_output=True)
+    if p.returncode:
+        print(p.stderr, file=sys.stderr)
+        p.check_returncode()
     return p.stdout.strip()
 
 
@@ -31,7 +34,10 @@ with tempfile.TemporaryDirectory(prefix='liuqin-clock-rpm-') as temp:
     os.utime(epoch, ns=(stamp_ns, stamp_ns))
     run('rpm', '--root', str(root), '--initdb')
     # No dependency solving, network, scriptlets, or host RPM database writes.
-    run('rpm', '--root', str(root), '--nodeps', '-i', str(rpm_path))
+    # Our locally built test RPM is unsigned. This one disposable transaction
+    # verifies digests; it does not change Fedora's host/global signature policy.
+    run('rpm', '--root', str(root), '--define', '_pkgverify_level digest',
+        '--nodeps', '-i', str(rpm_path))
     assert epoch.stat().st_mtime_ns == stamp_ns
     assert not run('rpm', '--root', str(root), '--nodeps', '-V', 'liuqin-clock-support')
     helper = root / 'usr/libexec/liuqin/liuqin-clock-save'

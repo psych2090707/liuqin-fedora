@@ -1,0 +1,124 @@
+From: wk <58632380+wkai343@users.noreply.github.com>
+Subject: [PATCH] Refresh the M81 fuel gauge through its firmware trigger
+
+The stock qti_battery_charger_main_m81 module reads XM_THERMAL_TEMP (86)
+every 10/20 seconds. Ordinary battery reads alone can leave charge_counter
+and temperature stale during discharge. Restore the vendor refresh request
+so firmware can publish updated snapshots through notification 0x80 and
+the normal battery uevent path.
+
+Issue that same serialized read every ten seconds while running. Freeze
+the work during system sleep, refresh immediately on resume, retry after
+transport failures, and cancel it before releasing the GLINK client. The
+firmware notification publishes the completed snapshot asynchronously.
+
+Link: https://github.com/wkai343/liuqin-linux-kit/blob/e5b0e8204c8d410d5aadf959ab0aea27b8143d99/build/kernel/patches/linux-7.3/0037-liuqin-refresh-fuel-gauge.patch
+[ported to the 6.17 driver: the work is initialised with the other
+ workers and disabled in qcom_battmgr_stop_workers(), which already runs
+ before devres releases the GLINK client]
+Liuqin-upstream: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/f4d672bbdaff9df591ab438feef7be87d0626094
+
+Liuqin Fedora port: reuse the serialized XM read, start on PDR service up, and use the existing stop-workers action.
+---
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -12,6 +12,7 @@
+ #include <linux/nvmem-consumer.h>
+ #include <linux/of_device.h>
+ #include <linux/workqueue.h>
++#include <linux/pm.h>
+ #include <linux/power_supply.h>
+ #include <linux/property.h>
+ #include <linux/soc/qcom/pdr.h>
+@@ -122,6 +123,8 @@
+ #define XM_PD_VERIFIED			19
+ #define XM_PDO2			20
+ #define XM_FASTCHG_MODE			38
++#define XM_THERMAL_TEMP		86
++#define SM8475_REFRESH_INTERVAL		(10 * HZ)
+ #define XM_QUICK_CHARGE_TYPE		42
+ #define XM_APDO_MAX			43
+ #define XM_POWER_MAX			44
+@@ -470,6 +473,7 @@
+ 	bool connector_source;
+ 
+ 	struct work_struct enable_work;
++	struct delayed_work refresh_work;
+ 	struct delayed_work pen_work;
+ 	bool pen_work_ready;
+ 
+@@ -2720,6 +2724,41 @@
+ 	}
+ }
+ 
++/*
++ * M81 updates its fuel-gauge snapshot when XM_THERMAL_TEMP is read,
++ * then reports the new snapshot through the normal battery notification.
++ */
++static void qcom_battmgr_sm8475_refresh_worker(struct work_struct *work)
++{
++	struct qcom_battmgr *battmgr = container_of(to_delayed_work(work),
++						  struct qcom_battmgr, refresh_work);
++	unsigned int temperature;
++	int ret;
++
++	if (!READ_ONCE(battmgr->service_up))
++		return;
++
++	ret = qcom_battmgr_class_value(battmgr, XM_THERMAL_TEMP, &temperature);
++	if (ret)
++		dev_dbg(battmgr->dev, "fuel-gauge refresh failed: %d\n", ret);
++
++	queue_delayed_work(system_freezable_wq, &battmgr->refresh_work,
++			   SM8475_REFRESH_INTERVAL);
++}
++
++static int qcom_battmgr_resume(struct device *dev)
++{
++	struct qcom_battmgr *battmgr = dev_get_drvdata(dev);
++
++	if (battmgr->variant == QCOM_BATTMGR_SM8475 &&
++	    READ_ONCE(battmgr->service_up))
++		mod_delayed_work(system_freezable_wq, &battmgr->refresh_work, 0);
++
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(qcom_battmgr_pm_ops, NULL, qcom_battmgr_resume);
++
+ /* Stop every GLINK consumer before the managed client is released. */
+ static void qcom_battmgr_stop_workers(void *data)
+ {
+@@ -2736,6 +2775,7 @@
+ 	if (battmgr->variant == QCOM_BATTMGR_SM8475) {
+ 		WRITE_ONCE(battmgr->pen_work_ready, false);
+ 		disable_delayed_work_sync(&battmgr->pen_work);
++		disable_delayed_work_sync(&battmgr->refresh_work);
+ 	}
+ }
+ 
+@@ -2765,6 +2805,8 @@
+ 	if (state == SERVREG_SERVICE_STATE_UP) {
+ 		WRITE_ONCE(battmgr->service_up, true);
+ 		schedule_work(&battmgr->enable_work);
++		if (battmgr->variant == QCOM_BATTMGR_SM8475)
++			mod_delayed_work(system_freezable_wq, &battmgr->refresh_work, 0);
+ 		qcom_battmgr_schedule_cc_orientation(battmgr);
+ 		if (READ_ONCE(battmgr->pen_work_ready))
+ 			mod_delayed_work(system_wq, &battmgr->pen_work, 0);
+@@ -3119,6 +3161,7 @@
+ 		if (ret)
+ 			return ret;
+ 		battmgr->pen_work_ready = true;
++		INIT_DELAYED_WORK(&battmgr->refresh_work, qcom_battmgr_sm8475_refresh_worker);
+ 	}
+ 
+ 	battmgr->client = devm_pmic_glink_client_alloc(dev, PMIC_GLINK_OWNER_BATTMGR,
+@@ -3173,6 +3216,7 @@
+ 	.name = "pmic_glink_power_supply",
+ 	.probe = qcom_battmgr_probe,
+ 	.id_table = qcom_battmgr_id_table,
++	.driver.pm = pm_sleep_ptr(&qcom_battmgr_pm_ops),
+ };
+ 
+ module_auxiliary_driver(qcom_battmgr_driver);

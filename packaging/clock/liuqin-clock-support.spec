@@ -1,6 +1,6 @@
 Name:           liuqin-clock-support
 Version:        1.0
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        Preserve trusted early-boot time for liuqin offline updates
 License:        MIT
 BuildArch:      noarch
@@ -37,6 +37,8 @@ done
 # The administrator's runtime stamp must survive package upgrades/removal.
 
 %changelog
+* Fri Nov 13 2026 liuqin project <liuqin@localhost> - 1.0-5
+- Save a conservative floor using chrony's reported uncertainty on slow links.
 * Fri Oct 30 2026 liuqin project <liuqin@localhost> - 1.0-4
 - Keep the already-confined chronyc client identity stable without CAP_SETUID/GID.
 * Fri Oct 30 2026 liuqin project <liuqin@localhost> - 1.0-3

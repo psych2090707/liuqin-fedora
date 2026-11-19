@@ -1,0 +1,209 @@
+From: liuqin Fedora maintainers <liuqin@localhost>
+Subject: [PATCH] drm/msm: send the GPU-dependent CX corner for liuqin OPPs
+
+Source: liuqin v0.7.0 d54edba9153c829741bfd82b25aecdf5cdff96c5
+Adaptation: 7.3.1 keeps its own ACD/dependency votes and the existing
+twelve liuqin GPU OPPs in sm8450.dtsi, so the board override only adds
+qcom,opp-cx-level and the adreno OPP compatible. The GMU perf-table hunk
+is applied to the current a6xx_hfi_send_perf_table() (the local tree has
+a8xx handling there); the v1 table is left alone.
+Rationale: the Adreno 730 GMU needs the paired CX corner for every GX
+operating point; without it the higher OPPs can run while MMCX stays low.
+Validation and rollback: tasks/upstream-refresh/RESULT.md.
+
+---
+--- a/Documentation/devicetree/bindings/opp/opp-v2-qcom-adreno.yaml
++++ b/Documentation/devicetree/bindings/opp/opp-v2-qcom-adreno.yaml
+@@ -36,6 +36,13 @@
+ 
+       opp-supported-hw: true
+ 
++      qcom,opp-cx-level:
++        $ref: /schemas/types.yaml#/definitions/uint32
++        description:
++          Minimum CX RPMh voltage corner requested by the GMU at this GPU
++          frequency. On Adreno 730 platforms requiring GX to CX votes, define
++          this property on every available GPU operating point.
++
+       qcom,opp-acd-level:
+         description: |
+           A positive value representing the ACD (Adaptive Clock Distribution,
+--- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
++++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+@@ -715,6 +715,61 @@
+ 	status = "okay";
+ };
+ 
++/* The stock Adreno730v3 HFI table carries a CX dependency at every GX OPP.
++ * Each retained frequency uses the corner of the covering factory OPP.
++ */
++&gpu_opp_table {
++	compatible = "operating-points-v2-adreno", "operating-points-v2";
++
++	opp-220000000 {
++		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_LOW_SVS>;
++	};
++
++	opp-285000000 {
++		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_LOW_SVS>;
++	};
++
++	opp-317000000 {
++		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_LOW_SVS>;
++	};
++
++	opp-350000000 {
++		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_SVS>;
++	};
++
++	opp-421000000 {
++		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_SVS>;
++	};
++
++	opp-492000000 {
++		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_SVS>;
++	};
++
++	opp-545000000 {
++		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_SVS_L1>;
++	};
++
++	opp-599000000 {
++		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_SVS_L1>;
++	};
++
++	opp-640000000 {
++		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_SVS_L1>;
++	};
++
++	opp-734000000 {
++		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_NOM>;
++	};
++
++	opp-791000000 {
++		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_NOM_L1>;
++	};
++
++	opp-818000000 {
++		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_TURBO>;
++	};
++};
++
+ &gpu {
+ 	status = "okay";
+ 
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+@@ -1843,6 +1843,56 @@
+ 	return 0;
+ }
+ 
++/* On Gen7 the second GX perf-table word can carry a dependent CX HLVL. */
++static int a6xx_gmu_gx_cx_votes_init(struct device *dev, struct a6xx_gmu *gmu)
++{
++	const __le16 *levels = NULL;
++	size_t bytes;
++	int i, j, count = 0;
++
++	for (i = 1; i < gmu->nr_gpu_freqs; i++) {
++		struct dev_pm_opp *opp;
++		struct device_node *np;
++		u32 corner;
++		int ret;
++
++		opp = dev_pm_opp_find_freq_exact(dev, gmu->gpu_freqs[i], true);
++		if (IS_ERR(opp))
++			return PTR_ERR(opp);
++		np = dev_pm_opp_get_of_node(opp);
++		dev_pm_opp_put(opp);
++		if (!of_property_present(np, "qcom,opp-cx-level")) {
++			of_node_put(np);
++			continue;
++		}
++		ret = of_property_read_u32(np, "qcom,opp-cx-level", &corner);
++		of_node_put(np);
++		if (ret)
++			return ret;
++		if (!levels) {
++			levels = cmd_db_read_aux_data("cx.lvl", &bytes);
++			if (IS_ERR(levels))
++				return PTR_ERR(levels);
++			if (!levels || !bytes || !IS_ALIGNED(bytes, sizeof(*levels)))
++				return -EINVAL;
++		}
++		for (j = 0; j < bytes / sizeof(*levels); j++)
++			if (le16_to_cpu(levels[j]) >= corner)
++				break;
++		if (j == bytes / sizeof(*levels))
++			return dev_err_probe(dev, -EINVAL, "unsupported GPU CX corner %u\n", corner);
++		gmu->gx_cx_votes[i] = j;
++		count++;
++	}
++
++	if (count && count != gmu->nr_gpu_freqs - 1)
++		return dev_err_probe(dev, -EINVAL, "incomplete GPU CX dependency table\n");
++
++	/* Entry zero is the power-off vote and is zero-initialized. */
++	gmu->has_gx_cx_votes = count != 0;
++	return 0;
++}
++
+ /*
+  * The GMU votes with the RPMh for itself and on behalf of the GPU but we need
+  * to construct the list of votes on the CPU and send it over. Query the RPMh
+@@ -1876,6 +1926,9 @@
+ 	ret |= a6xx_gmu_rpmh_arc_votes_init(gmu->dev, gmu->cx_arc_votes,
+ 		gmu->gmu_freqs, gmu->nr_gmu_freqs, "cx.lvl", "mx.lvl");
+ 
++	if (!ret && adreno_is_a730(adreno_gpu))
++		ret = a6xx_gmu_gx_cx_votes_init(&gpu->pdev->dev, gmu);
++
+ 	ret |= a6xx_gmu_rpmh_dep_votes_init(gmu->dev, gmu->dep_arc_votes,
+ 		gmu->gpu_freqs, gmu->nr_gpu_freqs);
+ 
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gmu.h
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gmu.h
+@@ -98,6 +98,8 @@
+ 	int nr_gpu_freqs;
+ 	unsigned long gpu_freqs[GMU_MAX_GX_FREQS];
+ 	u32 gx_arc_votes[GMU_MAX_GX_FREQS];
++	u32 gx_cx_votes[GMU_MAX_GX_FREQS];
++	bool has_gx_cx_votes;
+ 	u32 dep_arc_votes[GMU_MAX_GX_FREQS];
+ 	struct a6xx_hfi_acd_table acd_table;
+ 
+--- a/drivers/gpu/drm/msm/adreno/a6xx_hfi.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_hfi.c
+@@ -334,7 +334,7 @@
+ 	struct a6xx_gpu *a6xx_gpu = container_of(gmu, struct a6xx_gpu, gmu);
+ 	struct adreno_gpu *adreno_gpu = &a6xx_gpu->base;
+ 	struct a6xx_hfi_msg_perf_table msg = { 0 };
+-	int i;
++	int i, ret;
+ 
+ 	if (adreno_is_a8xx(adreno_gpu))
+ 		return a8xx_hfi_send_perf_table(gmu);
+@@ -344,7 +344,8 @@
+ 
+ 	for (i = 0; i < gmu->nr_gpu_freqs; i++) {
+ 		msg.gx_votes[i].vote = gmu->gx_arc_votes[i];
+-		msg.gx_votes[i].acd = 0xffffffff;
++		msg.gx_votes[i].acd = gmu->has_gx_cx_votes ?
++			gmu->gx_cx_votes[i] : U32_MAX;
+ 		msg.gx_votes[i].freq = gmu->gpu_freqs[i] / 1000;
+ 	}
+ 
+@@ -353,8 +354,11 @@
+ 		msg.cx_votes[i].freq = gmu->gmu_freqs[i] / 1000;
+ 	}
+ 
+-	return a6xx_hfi_send_msg(gmu, HFI_H2F_MSG_PERF_TABLE, &msg, sizeof(msg),
+-		NULL, 0);
++	ret = a6xx_hfi_send_msg(gmu, HFI_H2F_MSG_PERF_TABLE, &msg, sizeof(msg), NULL, 0);
++	if (!ret && gmu->has_gx_cx_votes)
++		dev_info_once(gmu->dev, "GMU acknowledged CX dependencies for %d GPU OPPs\n",
++			      gmu->nr_gpu_freqs - 1);
++	return ret;
+ }
+ 
+ static void a6xx_generate_bw_table(const struct a6xx_info *info, struct a6xx_gmu *gmu,

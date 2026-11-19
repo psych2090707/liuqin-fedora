@@ -1,0 +1,153 @@
+From: liuqin Fedora maintainers <liuqin@localhost>
+Subject: [PATCH] arm64: qcom: carry Cape display, serial engine and GPU operating votes
+
+Source: liuqin v0.7.0 40d6ee58b96ec499b1c3f1eea3e88d26141063a1
+Adaptation: the twelve liuqin GPU OPPs live in sm8450.dtsi, so the board
+override keeps only the upstream opp-level values; the i2c15/i2c17 power
+domains, mdss_mdp dual-rail power domain and mdp_opp_table required OPPs
+apply as-is. dpu_kms attaches the required OPP domains only when the
+node describes more than one power domain; i2c-geni does the same.
+Rationale: MDP and SE clocks are sourced from fixed PLLs and need the
+paired vdd_mm/vdd_mxa (or vdd_cx/vdd_mx) votes; without them the rails
+can sit below what the enabled clock requires.
+Validation and rollback: tasks/upstream-refresh/RESULT.md.
+
+---
+--- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
++++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
+@@ -722,6 +722,7 @@
+ 	compatible = "operating-points-v2-adreno", "operating-points-v2";
+ 
+ 	opp-220000000 {
++		opp-level = <RPMH_REGULATOR_LEVEL_MIN_SVS>;
+ 		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_LOW_SVS>;
+ 	};
+ 
+@@ -734,10 +735,12 @@
+ 	};
+ 
+ 	opp-350000000 {
++		opp-level = <RPMH_REGULATOR_LEVEL_LOW_SVS_L1>;
+ 		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_SVS>;
+ 	};
+ 
+ 	opp-421000000 {
++		opp-level = <RPMH_REGULATOR_LEVEL_LOW_SVS_L2>;
+ 		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_SVS>;
+ 	};
+ 
+@@ -754,6 +757,7 @@
+ 	};
+ 
+ 	opp-640000000 {
++		opp-level = <RPMH_REGULATOR_LEVEL_SVS_L1>;
+ 		qcom,opp-cx-level = <RPMH_REGULATOR_LEVEL_SVS_L1>;
+ 	};
+ 
+@@ -944,6 +948,9 @@
+  * protection firmware block exceeds mainline's one-second timeout at 100 kHz.
+  */
+ &i2c15 {
++	/* Fixed 19.2 MHz source used by the 400 kHz I2C timing table. */
++	power-domains = <&rpmhpd RPMHPD_CX>, <&rpmhpd RPMHPD_MX>;
++	required-opps = <&rpmhpd_opp_low_svs>, <&rpmhpd_opp_low_svs>;
+ 	clock-frequency = <400000>;
+ 	status = "okay";
+ 
+@@ -995,6 +1002,9 @@
+ };
+ 
+ &i2c17 {
++	/* Fixed 19.2 MHz source used by the 400 kHz I2C timing table. */
++	power-domains = <&rpmhpd RPMHPD_CX>, <&rpmhpd RPMHPD_MX>;
++	required-opps = <&rpmhpd_opp_low_svs>, <&rpmhpd_opp_low_svs>;
+ 	clock-frequency = <400000>;
+ 	status = "okay";
+ 
+@@ -1222,6 +1232,29 @@
+ 	status = "okay";
+ };
+ 
++/* Cape DISP_CC_MDP_CLK_SRC votes both vdd_mm and vdd_mxa. */
++&mdss_mdp {
++	power-domains = <&rpmhpd RPMHPD_MMCX>, <&rpmhpd RPMHPD_MX>;
++};
++
++&mdp_opp_table {
++	opp-172000000 {
++		required-opps = <&rpmhpd_opp_low_svs_d1>, <&rpmhpd_opp_low_svs_d1>;
++	};
++	opp-200000000 {
++		required-opps = <&rpmhpd_opp_low_svs>, <&rpmhpd_opp_low_svs>;
++	};
++	opp-325000000 {
++		required-opps = <&rpmhpd_opp_svs>, <&rpmhpd_opp_svs>;
++	};
++	opp-375000000 {
++		required-opps = <&rpmhpd_opp_svs_l1>, <&rpmhpd_opp_svs_l1>;
++	};
++	opp-500000000 {
++		required-opps = <&rpmhpd_opp_nom>, <&rpmhpd_opp_nom>;
++	};
++};
++
+ &mdss_dsi0 {
+ 	vdda-supply = <&pm8350c_l10>;
+ 
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+@@ -12,6 +12,7 @@
+ #include <linux/debugfs.h>
+ #include <linux/dma-buf.h>
+ #include <linux/of_irq.h>
++#include <linux/pm_domain.h>
+ #include <linux/pm_opp.h>
+ 
+ #include <drm/drm_crtc.h>
+@@ -1392,6 +1393,19 @@
+ 
+ 	dpu_kms->pdev = pdev;
+ 
++	/* Some display clocks require performance votes on two independent rails. */
++	if (of_count_phandle_with_args(dev->of_node, "power-domains",
++				       "#power-domain-cells") > 1) {
++		struct dev_pm_domain_attach_data data = {
++			.pd_flags = PD_FLAG_REQUIRED_OPP,
++		};
++		struct dev_pm_domain_list *domains;
++
++		ret = devm_pm_domain_attach_list(dev, &data, &domains);
++		if (ret < 0)
++			return dev_err_probe(dev, ret, "failed to attach OPP domains\n");
++	}
++
+ 	ret = devm_pm_opp_set_clkname(dev, "core");
+ 	if (ret)
+ 		return ret;
+--- a/drivers/i2c/busses/i2c-qcom-geni.c
++++ b/drivers/i2c/busses/i2c-qcom-geni.c
+@@ -16,6 +16,7 @@
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_domain.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/soc/qcom/geni-se.h>
+ #include <linux/spinlock.h>
+@@ -1160,6 +1161,16 @@
+ 	if (!gi2c)
+ 		return -ENOMEM;
+ 
++	/* Attach both SE clock supplies when the platform describes them. */
++	if (of_count_phandle_with_args(dev->of_node, "power-domains",
++				       "#power-domain-cells") > 1) {
++		struct dev_pm_domain_list *domains;
++
++		ret = devm_pm_domain_attach_list(dev, NULL, &domains);
++		if (ret < 0)
++			return dev_err_probe(dev, ret, "failed to attach SE domains\n");
++	}
++
+ 	gi2c->se.dev = dev;
+ 	gi2c->se.wrapper = dev_get_drvdata(dev->parent);
+ 	gi2c->se.base = devm_platform_ioremap_resource(pdev, 0);

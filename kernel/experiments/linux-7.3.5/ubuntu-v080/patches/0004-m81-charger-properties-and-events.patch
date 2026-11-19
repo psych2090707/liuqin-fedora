@@ -1,0 +1,86 @@
+From: wk <58632380+wkai343@users.noreply.github.com>
+Subject: [PATCH] Align M81 charger capabilities and vendor change events
+
+The shipping qti_battery_charger_main_m81.ko in OS2.0.6.0.VMYCNXM
+inserts blank_status and screen_cctog before SOC_DECIMAL. Its apdo_max_show
+requests property 45 (0x899c) and power_max_show requests 46 (0xd068).
+The older public enum instead reads unrelated properties 43 and 44.
+Module SHA256: b13b976e8a0d5ce2256df4f96368a6de0999aecf4dd311a9ded0f993e2cedf6b.
+
+Also restore the OEM's deferred KOBJ_CHANGE for notification 0x50 so
+userspace can observe charger capabilities arriving after USB attach.
+Keep standard battery/USB notifications separate. Cancel the worker after
+client teardown so no late RX can requeue it.
+
+Link: https://github.com/wkai343/liuqin-linux-kit/blob/e5b0e8204c8d410d5aadf959ab0aea27b8143d99/build/kernel/patches/linux-7.3/0038-liuqin-m81-charger-properties-and-events.patch
+[ported to the 6.17 driver: the notification work is disabled in
+ qcom_battmgr_stop_workers(); a disabled work cannot be requeued by an
+ RX that arrives before devres releases the GLINK client]
+Liuqin-upstream: https://github.com/yzddmr6/linux-sm8450-liuqin/commit/ea7c0a1abd52056c4e25f78d5232cd508582d191
+
+Liuqin Fedora port: retain the pen and orientation paths and defer the added vendor event on a freezable queue.
+---
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -125,9 +125,10 @@
+ #define XM_FASTCHG_MODE			38
+ #define XM_THERMAL_TEMP		86
+ #define SM8475_REFRESH_INTERVAL		(10 * HZ)
+-#define XM_QUICK_CHARGE_TYPE		42
+-#define XM_APDO_MAX			43
+-#define XM_POWER_MAX			44
++/* M81 inserts BLANK_STATUS and SCREEN_CCTOG before SOC_DECIMAL. */
++#define XM_QUICK_CHARGE_TYPE		44
++#define XM_APDO_MAX			45
++#define XM_POWER_MAX			46
+ #define XM_CC_ORIENTATION		36
+ 
+ /* Xiaomi liuqin wireless stylus properties (vendor qti_battery_charger). */
+@@ -473,6 +474,7 @@
+ 	bool connector_source;
+ 
+ 	struct work_struct enable_work;
++	struct work_struct xm_notify_work;
+ 	struct delayed_work refresh_work;
+ 	struct delayed_work pen_work;
+ 	bool pen_work_ready;
+@@ -2141,6 +2143,14 @@
+ 	qcom_battmgr_connector_gate(b);
+ }
+ 
++static void qcom_battmgr_xm_notify_worker(struct work_struct *work)
++{
++	struct qcom_battmgr *battmgr = container_of(work, struct qcom_battmgr,
++						 xm_notify_work);
++
++	kobject_uevent(&battmgr->dev->kobj, KOBJ_CHANGE);
++}
++
+ static void qcom_battmgr_notification(struct qcom_battmgr *battmgr,
+ 				      const struct qcom_battmgr_message *msg,
+ 				      int len)
+@@ -2178,6 +2188,8 @@
+ 		power_supply_changed(battmgr->wls_psy);
+ 		break;
+ 	case NOTIF_XM_PROPERTY:
++		if (battmgr->variant == QCOM_BATTMGR_SM8475)
++			queue_work(system_freezable_wq, &battmgr->xm_notify_work);
+ 		qcom_battmgr_schedule_cc_orientation(battmgr);
+ 		if (READ_ONCE(battmgr->pen_work_ready))
+ 			mod_delayed_work(system_wq, &battmgr->pen_work, 0);
+@@ -2776,6 +2788,7 @@
+ 		WRITE_ONCE(battmgr->pen_work_ready, false);
+ 		disable_delayed_work_sync(&battmgr->pen_work);
+ 		disable_delayed_work_sync(&battmgr->refresh_work);
++		disable_work_sync(&battmgr->xm_notify_work);
+ 	}
+ }
+ 
+@@ -3162,6 +3175,7 @@
+ 			return ret;
+ 		battmgr->pen_work_ready = true;
+ 		INIT_DELAYED_WORK(&battmgr->refresh_work, qcom_battmgr_sm8475_refresh_worker);
++		INIT_WORK(&battmgr->xm_notify_work, qcom_battmgr_xm_notify_worker);
+ 	}
+ 
+ 	battmgr->client = devm_pmic_glink_client_alloc(dev, PMIC_GLINK_OWNER_BATTMGR,

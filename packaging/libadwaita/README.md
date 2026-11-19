@@ -1,13 +1,36 @@
 # libadwaita 列表控件马赛克补丁
 
-2026-11-05 在 **F44 / libadwaita 1.9.4** 部署并验证过的范围规避，针对背景色马赛克，不是 Mesa/Freedreno 根因修复。**当前已为 F45，镜像使用官方 libadwaita 1.10.0-2，色块仍会重新出现；不能写成本补丁仍安装或已失效。**
+2026-11-05 在 **F44 / libadwaita 1.9.4** 部署并验证过的范围规避，针对背景色马赛克，不是 Mesa/Freedreno 根因修复。
+**2026-11-19 已在现机 F45 / libadwaita 1.10.0 上重编并重新部署**（同 NEVRA，`rpm -Uvh --replacepkgs --nosignature`）；
+用户复验设置搜索与商店滚动正常，见渲染结果。
+F45 镜像本身仍是官方包，未预打本补丁。
 
-## Fedora 45：未预打旧补丁，现已确认仍有色块
+## Fedora 45：2026-11-19 重新部署
 
-Fedora 45 / GNOME 51 镜像使用**官方** libadwaita 1.10.0 + GTK 4.24.1，刻意不预打本补丁：
-GTK 4.24 的列表项/渲染器/图集/缓存重构没有自动使该现象消失。后续若重新评估原生修复，
-先核对具体提交、Fedora 是否回补及触发条件，再决定有界对照。本补丁保留为局部回退候选，
-当前没有重编或部署。下面的构建/回退命令是 F44 历史示例，F45 使用时必须重新核对源包和上下文，不能仅替换版本字符串就假定有效。
+- 源包：Fedora 45 `libadwaita-1.10.0-2.fc45.src.rpm`（Koji，SHA256 `adf5945815…`）。
+- spec 增加 `Patch0: adw-fd-flush.patch`。**`%autosetup -p1` 会自动应用 Patch0，
+  不要额外写 `%patch -P0`**，否则同一补丁套两次、hunk 失败（本次踩过）。
+- 构建：aarch64 Fedora 45 容器（qemu-user）。为资源受控用
+  `rpmbuild -bb --define '_smp_mflags -j12' --define '_lto_cflags %{nil}'`；LTO 关闭只是为了
+  限制并行内存，构建边界见构建环境。
+  产物与官方包文件清单一致，只有 build-id 不同。
+- 产物 SHA256：补丁包 `bec6ce55…`，官方包 `2269d08b…`；平板备份目录
+  `/var/tmp/liuqin-libadwaita-backup/`。安装后的库摘要 `68316c28…`。
+- 安装：`rpm -Uvh --replacepkgs --nosignature <patched.rpm>`。F45 的 rpm 对本地无签名包会直接
+  报 `does not verify: no signature` 并中止，必须加 `--nosignature`。
+- 验证：
+  - `rpm -q --dump libadwaita` 的库摘要与补丁包一致；
+  - `strings /usr/lib64/libadwaita-1.so.0 | grep -c FD_MESA_DEBUG` = 1（官方包为 0）；
+  - `python3` 用 `ctypes.CDLL("libadwaita-1.so.0")` 加载后 `getenv("FD_MESA_DEBUG")` 返回 `flush`，
+    说明构造器实际生效。
+- 为什么在 F45 仍可能有效：GTK 4.24 在 Wayland 虽默认优先 Vulkan，但本机
+  `/etc/environment.d/50-liuqin-gnome-render.conf` 仍设 `GDK_DISABLE=dmabuf`，GTK 因无
+  dmabuf 跳过 Vulkan、回落到 Freedreno GL；`FD_MESA_DEBUG=flush` 正作用于这条路径。
+  以后若撤掉 `GDK_DISABLE=dmabuf`，本补丁可能失效，需要重新评估。
+- 部署后只重启了 `gnome-software --gapplication-service`；其他已打开的 libadwaita 应用要重开才会载入新库。
+- 2026-11-19 用户复验：设置搜索、应用商店滚动正常；Tweaks/文本编辑器首选项未逐页长测。
+- 回退：`sudo rpm -Uvh --replacepkgs --nosignature /var/tmp/liuqin-libadwaita-backup/libadwaita-1.10.0-2.fc45.official.aarch64.rpm`，
+  然后重开设置/商店；色块回来是预期。
 
 ## 现象和范围
 
@@ -32,7 +55,7 @@ liuqin_fd_flush_init (void)
 
 `FD_MESA_DEBUG=flush` 是 Mesa/Freedreno 的调试开关，强制每次绘制后刷新。它掩盖了当前驱动的 GPU 写入可见性/同步问题；构造器只影响链接 libadwaita 的进程，Mutter 和非 libadwaita 应用不被设置。
 
-## 来源、构建和安装
+## F44 历史：来源、构建和安装
 
 - 源包：Fedora 44 `libadwaita-1.9.4-1.fc44.src.rpm`（`dnf download --source libadwaita`）。
 - 在 spec 的 `%autosetup` 后应用：
@@ -80,7 +103,7 @@ liuqin_fd_flush_init (void)
 
 ## 维护注意
 
-- **升级 libadwaita 会覆盖本补丁**；升级后需重新打补丁或等上游修复。不要只检查包版本，必须确认 `/usr/lib64/libadwaita-1.so.0` 含该构造器，并重跑设置/商店滚动。
+- **升级 libadwaita 会覆盖本补丁**（同 NEVRA 时 `dnf reinstall libadwaita` 也会换回官方包）；升级后需重新打补丁或等上游修复。不要只检查包版本，必须确认 `/usr/lib64/libadwaita-1.so.0` 含该构造器，并重跑设置/商店滚动。
 - `FD_MESA_DEBUG=flush` 是调试开关，不是长期稳定接口。关注重负载应用帧数、电耗和发热；如出现明显退化，优先寻找更窄的 Mesa 修复，而不是扩大 `flush` 范围。
 - 根因仍未确认：测试中 Mesa 26.2.6、Mutter 不发送 UBWC modifier、libadwaita 1.9.3、GTK 圆角描边回移、syncobj fd 探针都没有修好；只有 `FD_MESA_DEBUG=flush` 有效。后续上游若给出同步/缓存修复，应删除本补丁并用官方包验证。
 - 补丁只作用于**宿主** libadwaita；Flatpak 应用自带运行时，不会读取本补丁。若以后在 Flatpak 中看到同一现象，应另设 Flatpak 环境覆盖并单独验证，不能把宿主补丁当成已覆盖。

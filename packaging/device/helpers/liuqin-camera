@@ -1,0 +1,12 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# Launch GNOME Snapshot with DMA-BUF texture import enabled.
+#
+# The image sets GDK_DISABLE=dmabuf globally to avoid stale GTK DMA-BUF
+# rendering on this GPU, but Snapshot's camera viewfinder needs DMA-BUF
+# import; without it the preview stays black and the shutter never
+# finishes.  Clear the variable for Snapshot only, matching upstream's
+# liuqin-camera wrapper.  Install the desktop and D-Bus service entries
+# with Exec=/usr/libexec/liuqin/liuqin-camera.
+exec env GDK_DISABLE= /usr/bin/snapshot "$@"

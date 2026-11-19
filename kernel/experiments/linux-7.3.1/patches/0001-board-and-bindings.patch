@@ -1246,7 +1246,7 @@ new file mode 100644
 index 000000000..2192416dc
 --- /dev/null
 +++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-liuqin.dts
-@@ -0,0 +1,2349 @@
+@@ -0,0 +1,2241 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/dts-v1/;
 +
@@ -3354,6 +3354,7 @@ index 000000000..2192416dc
 +	camera@10 {
 +		compatible = "samsung,s5kjn1";
 +		orientation = <1>; /* rear */
++		rotation = <180>;
 +		reg = <0x10>;
 +		clocks = <&camcc CAM_CC_MCLK2_CLK>;
 +		assigned-clocks = <&camcc CAM_CC_MCLK2_CLK>;
@@ -3371,10 +3372,7 @@ index 000000000..2192416dc
 +		vddd-supply = <&camera_wide_dvdd_ldo>;
 +		vdda-supply = <&camera_wide_avdd_ldo>;
 +		vddio-supply = <&pm8350c_l1>;
-+		/* Vendor autofocus rail (l6 on this board is not the VCM). */
-+		afvdd-supply = <&pm8350c_l7>;
 +		status = "okay";
-+		lens-focus = <&camera_vcm>;
 +
 +		port {
 +			camera_out: endpoint {
@@ -3387,52 +3385,10 @@ index 000000000..2192416dc
 +		};
 +	};
 +
-+	/*
-+	 * Rear module autofocus: GT9764, which uses the DW9768 register map
-+	 * (AAC control at 0x02, 10-bit DAC split over 0x03/0x04, AAC
-+	 * mode/prescale at 0x06 and the AAC period at 0x07).
-+	 *
-+	 * The vendor module data drives it with AAC enabled, AC[2:0] = 2 and
-+	 * AACT[5:0] = 0x2a, i.e. exactly the values below; patch 0024 records
-+	 * that evidence.  The I2C address is the family default 0x0c and has
-+	 * not been read back on this board yet - if the node fails to probe,
-+	 * check it with an i2ctransfer before suspecting anything else.
-+	 */
-+	camera_vcm: camera-lens@0c {
-+		compatible = "giantec,gt9764";
-+		/* The DW9768-family default, confirmed on the always-on
-+		 * bus: 0x0c ACKs (DAC reads 512), 0x11/0x16/0x26/0x28 NACK. */
-+		reg = <0x0c>;
-+		vin-supply = <&pm8350c_l7>;
-+		vdd-supply = <&pm8350c_l7>;
-+		dongwoon,aac-mode = <2>;
-+		dongwoon,clock-presc = <0>;
-+		dongwoon,aac-timing = <0x2a>;
-+		status = "okay";
-+	};
 +};
 +
 +&camss {
 +	ports {
-+		port@1 {
-+			reg = <1>;
-+			camss_in1: endpoint {
-+				clock-lanes = <4>;
-+				/* The SC202CS PLL rate equals its internal pixel rate: one lane. */
-+				data-lanes = <0>;
-+				remote-endpoint = <&sc202cs_out>;
-+			};
-+		};
-+
-+		port@2 {
-+			reg = <2>;
-+			camss_in2: endpoint {
-+				clock-lanes = <4>;
-+				data-lanes = <0 1 2 3>;
-+				remote-endpoint = <&imx596_out>;
-+			};
-+		};
-+
 +		port@3 {
 +			reg = <3>;
 +			camss_in3: endpoint {
@@ -3445,76 +3401,12 @@ index 000000000..2192416dc
 +};
 +
 +/*
-+ * Additional modules from the vendor runtime graph.  Both nodes are enabled:
-+ * the CCI buses, rails, Bayer order and lane wiring were checked on hardware
-+ * (the front needs its measured 678.4 MHz rate; the depth a 360 MHz
-+ * single-lane link), and both capture through csid0.
++ * The front IMX596 (cci0 i2c0) and the rear depth SC202CS (cci1 i2c0) are
++ * intentionally absent: their drivers are community work still marked "do not
++ * merge" and are not enabled in this kernel.  CAMSS waits for every sensor
++ * wired into its ports, so declaring them here keeps the rear S5KJN1 async
++ * graph from ever completing.
 + */
-+&cci0_i2c0 {
-+	camera@10 {
-+		compatible = "sony,imx596";
-+		orientation = <0>; /* front */
-+		reg = <0x10>; /* vendor 8-bit write address 0x20 */
-+		clocks = <&camcc CAM_CC_MCLK5_CLK>;
-+		clock-names = "xvclk";
-+		assigned-clocks = <&camcc CAM_CC_MCLK5_CLK>;
-+		assigned-clock-rates = <19200000>;
-+		reset-gpios = <&tlmm 127 GPIO_ACTIVE_LOW>;
-+		pinctrl-names = "default", "sleep";
-+		pinctrl-0 = <&cam_sensor_mclk5_active &cam_sensor_active_rst5>;
-+		pinctrl-1 = <&cam_sensor_mclk5_suspend &cam_sensor_suspend_rst5>;
-+		vddd-supply = <&camera_front_vdig_ldo>;
-+		vdda-supply = <&camera_front_avdd_ldo>;
-+		vddio-supply = <&pm8350c_l1>;
-+		status = "okay";
-+
-+		port {
-+			imx596_out: endpoint {
-+				clock-lanes = <0>;
-+				data-lanes = <1 2 3 4>;
-+				/* 678.4 MHz, measured on the vendor stack (CAM_START_PHYDEV). */
-+				link-frequencies = /bits/ 64 <678400000>;
-+				remote-endpoint = <&camss_in2>;
-+			};
-+		};
-+	};
-+};
-+
-+/* CCI1 carries the depth sensor; upstream keeps the whole controller off. */
-+&cci1 {
-+	status = "okay";
-+};
-+
-+&cci1_i2c0 {
-+	camera@36 {
-+		compatible = "smartsens,sc202cs";
-+		orientation = <1>; /* rear */
-+		reg = <0x36>; /* vendor 8-bit write address 0x6c */
-+		clocks = <&camcc CAM_CC_MCLK1_CLK>;
-+		clock-names = "xvclk";
-+		assigned-clocks = <&camcc CAM_CC_MCLK1_CLK>;
-+		assigned-clock-rates = <19200000>;
-+		reset-gpios = <&tlmm 24 GPIO_ACTIVE_LOW>;
-+		pinctrl-names = "default", "sleep";
-+		pinctrl-0 = <&cam_sensor_mclk1_active &cam_sensor_active_rst1>;
-+		pinctrl-1 = <&cam_sensor_mclk1_suspend &cam_sensor_suspend_rst1>;
-+		vdda-supply = <&camera_deep_avdd>;
-+		vddio-supply = <&pm8350c_l4>;
-+		status = "okay";
-+
-+		port {
-+			sc202cs_out: endpoint {
-+				clock-lanes = <0>;
-+				/* One lane: the PLL rate equals the internal pixel rate. */
-+				data-lanes = <1>;
-+				/* 720 Mbps on the vendor stack (CAM_START_PHYDEV csiphy1). */
-+				link-frequencies = /bits/ 64 <360000000>;
-+				remote-endpoint = <&camss_in1>;
-+			};
-+		};
-+	};
-+};
-+
 +/*
 + * Rear camera flash: PM8350C LED controller channel 1, which is what the
 + * vendor's qcom,camera-flash@0 drives (flash_0/torch_0/switch_0).  The
