@@ -2281,8 +2281,11 @@ else:
             fn()
         except Exception as exc:  # noqa: BLE001
             add(f"internal.{fn.__name__}", "internal", "FAIL", f"check crashed: {type(exc).__name__}: {exc}")
-    verify_sums(PROJECT / "out/boot/SHA256SUMS", PROJECT / "out/boot", "boot")
-    verify_sums(PROJECT / "out/boot/initramfs/SHA256SUMS", PROJECT / "out/boot/initramfs", "initramfs")
+    if E["VB_SKIP_BOOT"] != "1":
+        for artifact, label in ((BOOT, "boot"), (INITRAMFS, "initramfs")):
+            if artifact is not None:
+                directory = artifact.parent
+                verify_sums(directory / "SHA256SUMS", directory, label)
     for fn in (load_rootfs, load_rootfs_manifest, load_rpms, load_bundle, load_repo):
         try:
             fn()

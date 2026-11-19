@@ -6,6 +6,7 @@ out/image-build tree when X had no tree of its own (e.g. custom --work), which
 would attribute dev-v3's rootfs checks to a different bundle.  A bundle without
 its own assembled tree must SKIP rootfs checks instead.
 """
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -16,6 +17,30 @@ PROJECT = Path(__file__).resolve().parents[2]
 
 
 class BundleRootfsScope(unittest.TestCase):
+    def test_selected_boot_checksums_are_used(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp) / "repo"
+            stale = repo / "out/boot"
+            stale.mkdir(parents=True)
+            (stale / "SHA256SUMS").write_text("0" * 64 + "  missing.img\n")
+            bundle = repo / "images/selected"
+            bundle.mkdir(parents=True)
+            boot = bundle / "boot.img"
+            payload = b"fixture for the checksum check"
+            boot.write_bytes(payload)
+            digest = hashlib.sha256(payload).hexdigest()
+            (bundle / "SHA256SUMS").write_text(digest + "  boot.img\n")
+            (bundle / "bundle.json").write_text(json.dumps({"files": {"boot.img": digest}}))
+            report = Path(temp) / "report.json"
+            subprocess.run(
+                [str(PROJECT / "scripts/verify-bundle.sh"), "--repo-root", str(repo),
+                 "--bundle", str(bundle), "--json", str(report), "--quiet"],
+                capture_output=True, text=True, timeout=30, check=False)
+            data = json.loads(report.read_text())
+            checks = {check["id"]: check for check in data["checks"]}
+            self.assertEqual(checks["checksums.boot.files"]["status"], "PASS")
+            self.assertNotIn("checksums.initramfs.files", checks)
+
     def test_missing_own_tree_skips_instead_of_borrowing(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp) / "repo"
