@@ -27,6 +27,7 @@ import argparse
 from contextlib import contextmanager
 import datetime
 import fcntl
+import glob
 import json
 import os
 import re
@@ -189,6 +190,93 @@ def wake_enabled_irqs():
     return out
 
 
+PLATFORM_FILES = {
+    "regulator_summary": ("/sys/kernel/debug/regulator/regulator_summary", 128 * 1024),
+    "clk_summary": ("/sys/kernel/debug/clk/clk_summary", 384 * 1024),
+    "interconnect_summary": ("/sys/kernel/debug/interconnect/interconnect_summary", 128 * 1024),
+    "pm_genpd_summary": ("/sys/kernel/debug/pm_genpd/pm_genpd_summary", 64 * 1024),
+}
+
+
+def dt_always_on(limit=64):
+    """Node paths that carry regulator-always-on in the live device tree."""
+    root = "/proc/device-tree"
+    found = []
+    for dirpath, _dirnames, filenames in os.walk(root):
+        if "regulator-always-on" in filenames:
+            found.append(os.path.relpath(dirpath, root))
+            if len(found) >= limit:
+                break
+    return sorted(found)
+
+
+def runtime_pm(limit=200):
+    """Which devices are still runtime-active at snapshot time."""
+    active, suspended, other = [], 0, 0
+    for path in glob.glob("/sys/bus/*/devices/*/power/runtime_status"):
+        status = read_text(path, 64).strip()
+        if status == "active":
+            active.append(path.split("/devices/", 1)[-1].split("/power/", 1)[0])
+        elif status == "suspended":
+            suspended += 1
+        else:
+            other += 1
+    return {
+        "active_count": len(active),
+        "suspended_count": suspended,
+        "other_count": other,
+        "active": sorted(active)[:limit],
+        "truncated": max(0, len(active) - limit),
+    }
+
+
+def read_platform():
+    """Power ledger: rails, clocks, bus votes, genpd and runtime PM.
+
+    Read-only debugfs text.  The pre snapshot is what matters: it shows what
+    is still enabled when userspace asks the kernel to suspend.
+    """
+    ledger = {}
+    for key, (path, limit) in PLATFORM_FILES.items():
+        ledger[key] = read_text(path, limit)
+    ledger["runtime_pm"] = runtime_pm()
+    ledger["dt_always_on"] = dt_always_on()
+    return ledger
+
+
+def platform_summary(ledger):
+    """Compact counts for the report; raw text stays in the event JSON."""
+    if not ledger:
+        return []
+    enabled, no_consumer = 0, []
+    for line in ledger.get("regulator_summary", "").splitlines():
+        match = re.match(r"^ (\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s", line)
+        if not match:
+            continue
+        use, opens = int(match.group(2)), int(match.group(3))
+        if use or opens:
+            enabled += 1
+            if use == 0:
+                no_consumer.append(match.group(1))
+    clocks_total, clocks_enabled = 0, 0
+    for line in ledger.get("clk_summary", "").splitlines():
+        match = re.match(r"^ (\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s", line)
+        if not match:
+            continue
+        clocks_total += 1
+        if int(match.group(2)) or int(match.group(3)):
+            clocks_enabled += 1
+    runtime = ledger.get("runtime_pm") or {}
+    return [
+        f"regulators: {enabled} enabled, {len(no_consumer)} with no consumer"
+        + (f" ({', '.join(no_consumer[:8])})" if no_consumer else ""),
+        f"clocks: {clocks_enabled} of {clocks_total} with enable/prepare count",
+        f"runtime PM: {runtime.get('active_count', '?')} active, "
+        f"{runtime.get('suspended_count', '?')} suspended",
+        f"dt always-on rails: {len(ledger.get('dt_always_on') or [])}",
+    ]
+
+
 def collect(phase):
     """Snapshot passively first, then do the reads that talk to firmware.
 
@@ -299,6 +387,7 @@ def collect(phase):
     drm = read_drm()
     ddr_stats_read = os.environ.get("LIUQIN_SUSPEND_LOG_DDR_STATS") == "1"
     qcom_stats = window("qcom_stats", read_qcom_stats) or {}
+    platform = window("platform", read_platform) or {}
 
     dmesg_count = 250 if phase == "post" else 80
     journal_count = 120 if phase == "post" else 40
@@ -344,6 +433,7 @@ def collect(phase):
         "thermal": thermal,
         "drm": drm,
         "qcom_stats": qcom_stats,
+        "platform": platform,
         "wake_enabled_irqs": wake_enabled,
         "interrupts_text": interrupts_text,
         "interrupts": parse_interrupts(interrupts_text),
@@ -444,13 +534,7 @@ def bat_line(power):
 
 
 def charge_line(pre, post):
-    """Firmware charge-counter difference; raw driver units, no unit guess.
-
-    qcom_battmgr exposes the firmware BATT_CHG_COUNTER value without a unit
-    conversion, so the report keeps the raw numbers and only derives a rate
-    from a same-boot monotonic window.  This unit reads about 1 mAh per
-    counter step (see the forensics page); other devices may differ.
-    """
+    """Keep the charge counter in the originating driver's sysfs units."""
     before_bat = pre.get("power_supply", {}).get("qcom-battmgr-bat", {})
     after_bat = post.get("power_supply", {}).get("qcom-battmgr-bat", {})
     try:
@@ -458,7 +542,7 @@ def charge_line(pre, post):
         after = int(after_bat["charge_counter"])
     except (KeyError, TypeError, ValueError):
         return "unavailable in pre/post"
-    detail = f"{before} -> {after} ({after - before:+d} raw fw units"
+    detail = f"{before} -> {after} ({after - before:+d} sysfs units"
     if pre.get("boot_id") and pre.get("boot_id") == post.get("boot_id"):
         try:
             seconds = (post["collected_boottime_ns"] -
@@ -677,6 +761,11 @@ def render(report):
         f"fail={post.get('suspend_stats', {}).get('fail', '?')}",
         f"collection errors: {post.get('collection_errors') or 'none'}",
         f"ddr_stats read: {'yes' if post.get('ddr_stats_read') else 'no'}",
+        "",
+        "--- platform (post snapshot) ---",
+    ])
+    lines.extend(platform_summary(post.get("platform") or {}))
+    lines.extend([
         "",
         "--- IRQ deltas (wake flags from pre/post snapshots) ---",
     ])

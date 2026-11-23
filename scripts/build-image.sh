@@ -101,6 +101,7 @@ lm_unit=gdm.service
 desktop_bin=gnome-shell
 build_mode=dev
 dtb_source=auto
+standby_dt=0
 stock_rom_dir=
 bootargs_file=
 stock_audio_dir=
@@ -182,6 +183,10 @@ Inputs
                           dtb-NN.dtb (14); also accepts .../analysis/<...>
   --bootargs FILE         reviewed DT /chosen bootargs (default: upstream native)
   --stock-audio DIR       private stock speaker files; hash checked before staging
+  --standby-dt            apply the validated standby DTB fixups (sink
+                          #clock-cells, QCE/bwmom off, camcc interconnects
+                          removed, panel rails no longer always-on) to both
+                          boot.img and installer.img
 
 Output
   --out DIR               images root (default: <project>/images)
@@ -246,6 +251,7 @@ while [ $# -gt 0 ]; do
 	--extra-packages) [ $# -ge 2 ] || die_usage "--extra-packages needs a value"; extra_packages=$2; shift ;;
 	--build-mode) [ $# -ge 2 ] || die_usage "--build-mode needs a value"; build_mode=$2; shift ;;
 	--dtb-source) [ $# -ge 2 ] || die_usage "--dtb-source needs a value"; dtb_source=$2; shift ;;
+	--standby-dt) standby_dt=1 ;;
 	--stock-rom-dir) [ $# -ge 2 ] || die_usage "--stock-rom-dir needs a value"; stock_rom_dir=$2; shift ;;
 	--bootargs) [ $# -ge 2 ] || die_usage "--bootargs needs a value"; bootargs_file=$2; shift ;;
 	--stock-audio) [ $# -ge 2 ] || die_usage "--stock-audio needs a value"; stock_audio_dir=$2; shift ;;
@@ -1662,6 +1668,7 @@ stage_boot_img() {
 	rm -rf "$boot_out"
 	set -- --kernel-out "$kernel_out" --ramdisk "$ramdisk" --out "$boot_out" \
 		--strict-kernel --dtb-source "$dtb_source" --kernel-provenance "$kernel_source"
+	[ "$standby_dt" = 1 ] && set -- "$@" --standby-dt
 	[ "$dtb_source" = stock-rom ] && set -- "$@" --stock-rom-dir "$stock_rom_dir"
 	[ -z "$bootargs_file" ] || set -- "$@" --cmdline-file "$bootargs_file"
 	scripts/build-bootimg.sh "$@" || die "boot.img assembly failed"
@@ -1727,6 +1734,7 @@ stage_installer_img() {
 	set -- --kernel-out "$kernel_out" --ramdisk "$ramdisk" --out "$installer_out" \
 		--strict-kernel --dtb-source "$dtb_source" --kernel-provenance "$kernel_source" \
 		--ramdisk-mode installer
+	[ "$standby_dt" = 1 ] && set -- "$@" --standby-dt
 	[ "$dtb_source" = stock-rom ] && set -- "$@" --stock-rom-dir "$stock_rom_dir"
 	[ -z "$bootargs_file" ] || set -- "$@" --cmdline-file "$bootargs_file"
 	scripts/build-bootimg.sh "$@" || die "installer.img assembly failed"

@@ -332,7 +332,7 @@ class ChargeCounterTests(unittest.TestCase):
         pre["power_supply"] = {"qcom-battmgr-bat": {"charge_counter": "5000"}}
         post["power_supply"] = {"qcom-battmgr-bat": {"charge_counter": "4200"}}
         line = collector.charge_line(pre, post)
-        self.assertIn("5000 -> 4200 (-800 raw fw units", line)
+        self.assertIn("5000 -> 4200 (-800 sysfs units", line)
         self.assertIn("-100.0 units/h", line)
         self.assertIn("over 8.00h", line)
         report = collector.build_report(pre, post, "suspend",
@@ -351,7 +351,7 @@ class ChargeCounterTests(unittest.TestCase):
         pre["power_supply"] = {"qcom-battmgr-bat": {"charge_counter": "10"}}
         post["power_supply"] = {"qcom-battmgr-bat": {"charge_counter": "8"}}
         line = collector.charge_line(pre, post)
-        self.assertIn("-2 raw fw units", line)
+        self.assertIn("-2 sysfs units", line)
         self.assertNotIn("units/h", line)
 
 

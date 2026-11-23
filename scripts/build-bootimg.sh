@@ -73,6 +73,7 @@ kernel_out=$project_root/out/kernel
 ramdisk=$initramfs_dir/liuqin-firstboot.cpio.gz
 out_root=$project_root/out/boot
 dtb_source=auto
+standby_dt=0
 # free-form provenance label recorded in build-info (set by --kernel-provenance)
 kernel_provenance=
 stock_rom_dir=
@@ -126,6 +127,10 @@ usage: scripts/build-bootimg.sh [options]
   --no-linux-splash      keep the stock reserved-memory name splash_region
                          (diagnostic only; normal liuqin 7.3 boots need
                          linux_splash so ABL disables the live display)
+  --standby-dt           apply the validated standby DTB fixups after assembly
+                         (5 changes: ABL sink #clock-cells, QCE off, two bwmom
+                         off, camcc interconnects removed, panel rails no
+                         longer regulator-always-on). Off by default.
   --strict-kernel        fail instead of falling back to the published kernel
   -h, --help             show this help
 
@@ -213,6 +218,7 @@ while [ $# -gt 0 ]; do
 		shift
 		;;
 	--no-linux-splash) linux_splash=0 ;;
+	--standby-dt) standby_dt=1 ;;
 	--strict-kernel) allow_release_kernel_fallback=0 ;;
 	-h | --help)
 		usage
@@ -497,6 +503,10 @@ PY
 	dtb_provenance="$dtb_provenance + linux_splash reserved-memory rename"
 else
 	say "warning: --no-linux-splash: ABL may keep the live display and the 7.3 normal-slot boot can be black"
+fi
+if [ "$standby_dt" = 1 ]; then
+	python3 "$project_root/tools/liuqin-standby-dt.py" "$final_dtb" || die "standby DTB fixups failed"
+	dtb_provenance="$dtb_provenance + standby DT fixups (5 validated changes)"
 fi
 dtb_provenance="$dtb_provenance; cmdline source: $cmdline_file"
 # A valid boot header is insufficient: an upstream-artifact substitute can
@@ -891,6 +901,7 @@ Path(out).write_text(json.dumps({
             "header_cmdline_empty": header_cmdline == "",
             "canonical_stock_rom_rebuild": canonical_used == "1",
             "linux_splash": "linux_splash" in dtb_provenance,
+            "standby_dt_fixups": "standby DT fixups" in dtb_provenance,
             "raw_mdss_interconnects_match": {"true": True, "unknown": None}[raw_mdss_interconnects_match],
             "builder_compatibility_patch": ({
                 "path": "overlays/boot/abl-symbols-dtc-labels.patch",

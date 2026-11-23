@@ -4,11 +4,11 @@
 
 当前版本基于 Fedora 45、GNOME 51 和 Linux 7.3.5（`7.3.5-liuqin-upstream2`）。仓库提供设备适配补丁、系统构建配置和安装工具。
 
-**[下载 v0.1.0-alpha.3 并查看更新说明](https://github.com/psych2090707/liuqin-fedora/releases/tag/v0.1.0-alpha.3)** · 2026-11-19 · 实验性预发布
+**[下载 v0.1.0-alpha.4 并查看更新说明](https://github.com/psych2090707/liuqin-fedora/releases/tag/v0.1.0-alpha.4)** · 2026-11-23 · 实验性预发布
 
-- 后摄加入识别、重复打开和画面方向修复，录像默认使用软件编码。
-- 扬声器可在立体声和四声道之间切换，安装时在本地补齐原厂调音。
-- 修正触控笔横竖屏落点和屏幕键盘拼音退格，更新显示、触控和电源管理。
+- 待机功耗大幅下降：去掉面板供电的常开固定，并在挂起时关闭 Wi-Fi/蓝牙；同一构建纯电池 11 小时从 89% 降到 85%（约 26.7 mA），比上一版低约四倍。
+- 修复让芯片长时间无法进入深态的相机时钟常驻带宽请求，并处理两个带宽监测器与 ABL 占位节点。
+- 沿用 alpha.3 的后摄、扬声器双模式、触控笔和屏幕键盘修复。
 
 ## 键盘新视觉
 
@@ -34,7 +34,7 @@ https://github.com/psych2090707/liuqin-fedora
 ### 手动安装
 
 1. **确认设备**：仅适用于小米平板 6 Pro（`liuqin`），需要事先解锁 Bootloader。
-2. **获取文件**：从 [alpha.3 发布页](https://github.com/psych2090707/liuqin-fedora/releases/tag/v0.1.0-alpha.3) 下载两个 `*-base.tar.part-*` 分卷和 `BASE.SHA256`，按发布说明合并并校验。GitHub 自动生成的 *Source code* 压缩包不是系统镜像。
+2. **获取文件**：从 [alpha.4 发布页](https://github.com/psych2090707/liuqin-fedora/releases/tag/v0.1.0-alpha.4) 下载两个 `*-base.tar.part-*` 分卷和 `BASE.SHA256`，按发布说明合并并校验。GitHub 自动生成的 *Source code* 压缩包不是系统镜像。
 3. **运行安装工具**：在 Windows 11 或 Linux 电脑上解压安装包，进入其目录，先检查安装环境：
    - Windows：`powershell -ExecutionPolicy Bypass -File install-liuqin.ps1 doctor`
    - Linux：`python3 liuqin-install.py doctor`

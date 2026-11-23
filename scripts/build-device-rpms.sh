@@ -120,6 +120,8 @@ cp "$project_root/tools/afk/daily-log/liuqin-daily-log.service" "$stage/SOURCES/
 cp "$project_root/tools/afk/daily-log/liuqin-daily-log.timer" "$stage/SOURCES/"
 cp "$project_root/tools/afk/gpu-hang/gpu-hang-watch.py" "$stage/SOURCES/liuqin-gpu-hang-watch.py"
 cp "$project_root/tools/afk/gpu-hang/liuqin-gpu-hang-watch.service" "$stage/SOURCES/"
+cp "$packaging/liuqin-iris-order.conf" "$stage/SOURCES/"
+cp "$packaging/55-liuqin-radio-off" "$stage/SOURCES/"
 cp "$packaging/container/build-inner.sh" "$stage/scripts/"
 cp "$packaging/container/postprocess.py" "$stage/scripts/"
 cp "$packaging/container/verify-install.py" "$stage/scripts/"
@@ -258,6 +260,7 @@ write_sums "$stage/SOURCES/source-sha256-device-support.txt" \
 	liuqin-power-keyd liuqin-reboot elf-check.py \
 	liuqin-daily-log.py liuqin-daily-log.service liuqin-daily-log.timer \
 	liuqin-gpu-hang-watch.py liuqin-gpu-hang-watch.service \
+	liuqin-iris-order.conf 55-liuqin-radio-off \
 	NOTICE LICENSE device-support-README.md
 
 # --- host-side build inputs metadata ----------------------------------------

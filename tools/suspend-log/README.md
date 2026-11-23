@@ -81,11 +81,15 @@ LIUQIN_SUSPEND_LOG_STATE=/tmp/liuqin-suspend-log-selftest \
 - `collect()` 先保存 IRQ/`wakeup_sources`/pm 状态与三套时钟，再读电池属性和
   `qcom_stats`；这些主动读取记录在 `query_windows` 里。`ddr_stats` 默认不读，
   需要时设 `LIUQIN_SUSPEND_LOG_DDR_STATS=1`。
-- 电池快照包含 `charge_counter` 和 `voltage_ocv`。报告新增
-  `power delta: <pre> -> <post> (+N raw fw units, ±X units/h over T)`：
-  `qcom_battmgr` 直接暴露固件 `BATT_CHG_COUNTER`，驱动不做单位换算；本机实测约
-  1 单位 ≈ 1 mAh（50% ≈ 3465，整数百分比每 1% ≈ 69 单位）。跨 boot 时只给原始差值，
-  不推算速率。百分比是整数且醒后重算，睡眠耗电优先看这个差值。
+- `platform` 账本（11-22 起）：pre/post 各存 `regulator_summary`、`clk_summary`、
+  `interconnect_summary`、`pm_genpd_summary`、runtime PM 活跃设备列表，以及 DT 里
+  `regulator-always-on` 的节点。报告只打印计数、无消费者的常开轨和 always-on 数量，
+  原始文本留在事件 JSON 里，用来回答“睡着时还有哪些轨/时钟/投票是开着的”。
+- 电池快照包含 `charge_counter` 和 `voltage_ocv`。报告显示
+  `power delta: <pre> -> <post> (+N sysfs units, ±X units/h over T)`，保留原内核的数值。
+  本机旧 7.3.1 的计数以 mAh 为单位，11-18 的 7.3.5 `cafe98f3…` 已换成 µAh。
+  既有报告可能仍标 `raw fw units`，跨构建先按 Build ID 确认单位。跨 boot 时工具只显示原始差值，
+  不算速率。供电、端点刷新和可比较范围见取证方法。
 - `duration_s` 仍是 pre/post 采集总窗口；另存 `suspend_estimate_s`
   （ΔBOOTTIME − ΔMONOTONIC）和 `awake_window_s`，时钟缺失/跨 boot 时全部为 `null`。
 - `real_sleep` 只按 `suspend success` 是否增加判定，缺统计或跨 boot 记 `unknown`，

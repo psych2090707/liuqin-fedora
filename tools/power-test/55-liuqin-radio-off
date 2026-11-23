@@ -1,0 +1,25 @@
+#!/bin/sh
+# TEMP 2026-11-22 deep-sleep experiment: cut radios while suspended.
+# Installed as /usr/lib/systemd/system-sleep/55-liuqin-radio-off
+# Remove with: sudo rm /usr/lib/systemd/system-sleep/55-liuqin-radio-off
+# Rationale: this tablet has no WoWLAN, so keeping Wi-Fi associated during
+# suspend cannot wake it or deliver anything. Stock HyperOS "deep sleep" also
+# cuts radios. Turn them off before suspend, restore after resume.
+set -u
+
+LOG=/tmp/liuqin-radio-off.log
+note() { printf '%s %s %s\n' "$(date -Is)" "$1" "$2" >>"$LOG" 2>/dev/null; }
+
+case "$1" in
+pre)
+    rfkill block wifi 2>/dev/null || note pre "wifi block failed"
+    rfkill block bluetooth 2>/dev/null || note pre "bt block failed"
+    note pre "blocked:$(rfkill list | grep -c 'Soft blocked: yes')"
+    ;;
+post)
+    rfkill unblock wifi 2>/dev/null || note post "wifi unblock failed"
+    rfkill unblock bluetooth 2>/dev/null || note post "bt unblock failed"
+    note post "soft-blocked-now:$(rfkill list | grep -c 'Soft blocked: yes')"
+    ;;
+esac
+exit 0

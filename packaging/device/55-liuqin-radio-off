@@ -1,0 +1,44 @@
+#!/bin/sh
+# Cut Wi-Fi and Bluetooth while the system is suspended.
+#
+# liuqin has no WoWLAN: a suspended Wi-Fi association cannot wake the tablet or
+# deliver traffic, and the stock HyperOS deep-sleep mode cuts the radios too.
+# This hook blocks both before suspend and restores the exact previous
+# soft-block state after resume, so a radio the user blocked stays blocked.
+#
+# Run from systemd-sleep; systemd 259 only executes hooks in
+# /usr/lib/systemd/system-sleep (not /etc/systemd/system-sleep).
+set -u
+
+STATE=/run/liuqin-radio-off.state
+note() { logger -t liuqin-radio-off -- "$*" 2>/dev/null || true; }
+
+soft_blocked() {  # soft_blocked TYPE
+    rfkill list "$1" 2>/dev/null | grep -q 'Soft blocked: yes'
+}
+
+case "${1:-}" in
+pre)
+    : >"$STATE"
+    for type in wlan bluetooth; do
+        if soft_blocked "$type"; then
+            printf '%s=1\n' "$type" >>"$STATE"
+        else
+            printf '%s=0\n' "$type" >>"$STATE"
+            rfkill block "$type" 2>/dev/null || note "pre: block $type failed"
+        fi
+    done
+    note "pre: wlan/bluetooth blocked for suspend"
+    ;;
+post)
+    [ -f "$STATE" ] || exit 0
+    while IFS='=' read -r type was_blocked; do
+        [ -n "$type" ] || continue
+        [ "$was_blocked" = 1 ] && continue
+        rfkill unblock "$type" 2>/dev/null || note "post: unblock $type failed"
+    done <"$STATE"
+    rm -f "$STATE"
+    note "post: previous radio state restored"
+    ;;
+esac
+exit 0

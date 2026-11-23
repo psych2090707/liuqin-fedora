@@ -23,7 +23,7 @@
 
 Name:           liuqin-device-support
 Version:        0.6.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        Xiaomi Pad 6 Pro (liuqin) system services and helpers
 License:        MIT AND GPL-2.0-only
 URL:            https://github.com/yzddmr6/xiaomipad-6pro-mainline
@@ -42,6 +42,8 @@ Source11:       liuqin-daily-log.service
 Source12:       liuqin-daily-log.timer
 Source13:       liuqin-gpu-hang-watch.py
 Source14:       liuqin-gpu-hang-watch.service
+Source15:       liuqin-iris-order.conf
+Source16:       55-liuqin-radio-off
 # BuildArch is deliberately omitted: rpmbuild --target aarch64 sets the
 # package arch and an explicit BuildArch is rejected by a foreign build host.
 AutoReqProv:    no
@@ -115,6 +117,8 @@ install -D -m0644 %{SOURCE11} %{buildroot}%{_unitdir}/liuqin-daily-log.service
 install -D -m0644 %{SOURCE12} %{buildroot}%{_unitdir}/liuqin-daily-log.timer
 install -D -m0644 %{SOURCE13} %{buildroot}%{_libexecdir}/liuqin/gpu-hang-watch.py
 install -D -m0644 %{SOURCE14} %{buildroot}%{_unitdir}/liuqin-gpu-hang-watch.service
+install -D -m0644 %{SOURCE15} %{buildroot}%{_prefix}/lib/modprobe.d/90-liuqin-iris-order.conf
+install -D -m0755 %{SOURCE16} %{buildroot}%{_prefix}/lib/systemd/system-sleep/55-liuqin-radio-off
 
 %files
 %license %{_datadir}/licenses/%{name}/LICENSE
@@ -137,6 +141,8 @@ install -D -m0644 %{SOURCE14} %{buildroot}%{_unitdir}/liuqin-gpu-hang-watch.serv
 %{_udevrulesdir}/70-liuqin-touchpad-external.rules
 %{_udevrulesdir}/90-liuqin-mipps-auth.rules
 %{_prefix}/lib/modprobe.d/liuqin-camera.conf
+%{_prefix}/lib/modprobe.d/90-liuqin-iris-order.conf
+%{_prefix}/lib/systemd/system-sleep/55-liuqin-radio-off
 %{_datadir}/polkit-1/actions/io.github.liuqin.switch.policy
 %{_datadir}/applications/liuqin-reboot-to-android.desktop
 %config(noreplace) %{_sysconfdir}/chrony.d/00-liuqin-no-rtc.conf
